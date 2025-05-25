@@ -1,0 +1,13 @@
+A "hacky" set of scripts intended to prepare a set of pictures / videos for content on a digital picture frame.
+= Setup instructions
+== For Windows
+Note: Currently these scripts are written ad-hoc and without consistent consideration for Linux / Macintosh environments.  This set of scripts is written in Powershell, but should be relatively easy to convert to Python.
+
+=== Getting Ready
+
+=== Customizing for your albums / pictures / content
+. Open "BuildAlbum.ps1"
+. Scroll down to the comment "Define standard / non-test paths"
+. Customize all the attributes here as needed, add elements to the "OutputDefs" folder in order to create multiple outputs.
+
+=== Running
