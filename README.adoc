@@ -1,7 +1,10 @@
 A "hacky" set of scripts intended to prepare a set of pictures / videos for content on a digital picture frame.
-= Setup instructions
+
+= How to use
+
 == For Windows
-Note: Currently these scripts are written ad-hoc and without consistent consideration for Linux / Macintosh environments.  This set of scripts is written in Powershell, but should be relatively easy to convert to Python.
+
+NOTE: Currently these scripts are written ad-hoc and without consistent consideration for Linux / Macintosh environments.  This set of scripts is written in Powershell, but should be relatively easy to convert to Python or fix with unix path seperator delimeters.
 
 === Getting Ready
 
