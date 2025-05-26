@@ -1,7 +1,18 @@
-A "hacky" set of scripts intended to prepare a set of pictures / videos for content on a digital picture frame.
-= Setup instructions
+A "hacky" set of scripts intended to prepare a set of pictures / videos for content on a digital picture frame.  Click to see the demo below:
+
+ifdef::env-github[]
+image:https://img.youtube.com/vi/e9tY5a5I5o4/maxresdefault.jpg[link=https://youtu.be/e9tY5a5I5o4-xM,width=320]
+endif::[]
+
+ifndef::env-github[]
+video::e9tY5a5I5o4[youtube,width=320]
+endif::[]
+
+= How to use
+
 == For Windows
-Note: Currently these scripts are written ad-hoc and without consistent consideration for Linux / Macintosh environments.  This set of scripts is written in Powershell, but should be relatively easy to convert to Python.
+
+NOTE: Currently these scripts are written ad-hoc and without consistent consideration for Linux / Macintosh environments.  This set of scripts is written in Powershell, but should be relatively easy to convert to Python or fix with unix path seperator delimeters.
 
 === Getting Ready
 
