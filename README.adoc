@@ -1,4 +1,6 @@
-A "hacky" set of scripts intended to prepare a set of pictures / videos for content on a digital picture frame.  Click to see the demo below:
+Does your wife, yourself, or your significant other have thousands of pictures and videos stored away but not being enjoyed on a daily basis?  This tools hopes to put recorded media and the memories they hold into a set of videos resized and smoothly sequenced for a specific display, framerate, or quality.
+
+This is accomplished using a "hacky" set of scripts intended to prepare a set of pictures / videos for content on a digital picture frame.  Click to see the demo below:
 
 ifdef::env-github[]
 image:https://img.youtube.com/vi/e9tY5a5I5o4/maxresdefault.jpg[link=https://youtu.be/e9tY5a5I5o4-xM,width=320]
@@ -8,17 +10,51 @@ ifndef::env-github[]
 video::e9tY5a5I5o4[youtube,width=320]
 endif::[]
 
-= How to use
+This project started when I purchased a digital picture frame, and found its build in scaling and configurations very poor.  I started this "small" project to better format the collection of pictures and videos I had in the way I wanted so I could actually enjoy them.
 
-== For Windows
+While most digital picture frames do offer more settings than the frame that put me on this pilgrimage, I still believe having strict control of resizing method, transitions, display timings, and effects can help to better enjoy memories on display.
 
-NOTE: Currently these scripts are written ad-hoc and without consistent consideration for Linux / Macintosh environments.  This set of scripts is written in Powershell, but should be relatively easy to convert to Python or fix with unix path seperator delimeters.
+== How to use
 
-=== Getting Ready
+NOTE: Currently, these scripts are written ad-hoc and without consistent consideration for Linux / Macintosh environments.  This set of scripts is written in Powershell, but should be relatively easy to convert to Python or fix with unix path separator delimiters.
 
-=== Customizing for your albums / pictures / content
-. Open "BuildAlbum.ps1"
-. Scroll down to the comment "Define standard / non-test paths"
-. Customize all the attributes here as needed, add elements to the "OutputDefs" folder in order to create multiple outputs.
+=== For Windows
 
-=== Running
+==== Getting Ready
+. Fork or download a copy of this repository (I would generally recommend forking so you can make tweaks if needed, or if you fix something you can create a PR to fix any relevant bugs in this repo)
+. Install dependencies as needed.
+.. Option 1 - Run the "InstallDependencies.bat" script
+.. Option 2 - Manually download and install dependencies.
+... https://imagemagick.org/script/download.php[ImageMagick] for command line photo manipulation.
+... https://www.ffmpeg.org/download.html[FFMPEG] for command line media manipulation.
+... Ensure environmental paths include both of these products, though that should occur automatically upon install.
+. Highly encouraged - Create a RAM disk to run video creation processes through.
+.. I use https://sourceforge.net/projects/aim-toolkit/[AIM Toolkit]
+.. This can significantly improve processing speed, as -in the default configuration- ImageMagick will create individual frames when converting images to video sequences which are then stitched together with ffmpeg.  Keeping these frames on a RAM drive will significantly improve ffmpeg's processing speed.
+
+==== Customizing for your albums / pictures / content
+. Open "BuildAlbum.ps1" and customize.
+.. If desired set the $SetTmpPath variable to a RAM drive path to make processing easier, else keep this blank so that temporary files are created and deleted in the default user space.
+.. At this point I would recommend running the "BuildAlbum.ps1" file to see if the test file is able to build without issue, as that will indicate all dependencies have been properly installed and that the temporary path -if applicable- is being utilized.
+.. Update the string array variable $Names2Ig to set which names / folders should be ignored when getting media files.  For myself, I put everything into various "DNP" subfolders, so if I have originals or long videos I still want to keep, they aren't brought into a digital picture frame.
+.. Scroll down to the comment "Define standard / non-test paths and configure the properties accordingly:
+... "$InputFileRootPath": Update the folder path (which for many with a large picture / video collection hopefully is a network / NAS location.)
+... "$PrepFileRootPath": Update the folder path which defines where the input files will be copied to.  This assumes you have enough space to copy over all the media files.  Unfortunately I did not configure this script in a way that would avoid this.
+... "ConvFileRootPath": Update the folder path which defines where the input images will be converted to (and only images).  This applies additional corrections to the image (some of which I am still toying with).  And will "right" and image with jpeg rotator if installed.
+... "OutputFilePrepend": What folders will be called that actually contain the album content.  These contain the images and videos that result in the actual final video.
+... "OutputDefs": This structure is intended to contain an element for each display you want to export data to, with multiple configurations:
+... XDim: The horizontal displayed resolution of the frame.
+... YDim: The vertical displayed resolution of the frame.
+... FPS: The framerate you want the video to run at on the frame.
+... PicDispTime: How long you want pictures to be displayed for, not counting the fade times.
+... MaxSrtRot: The start maximum rotation (in degrees) you want to be applied to a picture (the tool will start pictures at an angle, and rotate smoothly towards horizontal)
+... FadeTime: The amount of time to fade between images / videos.
+... BulkVidTimeMin: Roughly how long each final output video should be.  If you want a single giant video, make this a very large number.  As my pictures are named by date, I set this to 20 minutes, so I can go through my "life" of pictures from earliest to latest date all within 20 minutes, and each video will go through a different set of pictures.  This way it doesn't keep showing pictures from the same event over and over again.
+... NameMethod: I only support my method "FldrLvl2" which names folders by their 2nd folder deep name if available.  Otherwise a default is used.  This doesn't impact the output video, just the intermediary files, as I was -at one point- thinking to add text to the videos to describe what they were showing.
+... ImgVidFldr: When images are converted to videos, they are saved in a subfolder matching this name.  There should be no need to change this.
+... Quality: This is the "quality" number (crf),  Lower values result in higher quality images, but they consume more space.  In general, I find values under 20 are overkill, but it will be a balance depending on the number of files you have, and the storage media you use to deploy those to frames.
+... ExpAud: If audio should be in the final videos.  In general, you would probably want this 0 to disable any audio inclusion.
+... CleanBuild: Generally for debugging only, as it will cause all previously converted media to get wiped out.  This is only really useful for testing, which is what I added it for.
+
+==== Running
+Run as you would any other powershell script.
