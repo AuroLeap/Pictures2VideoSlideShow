@@ -144,7 +144,12 @@ foreach($set in $OutputDefs)
     }
 }
 #Root path:
-if (Test-Path $InputFileRootPath)
+$RtFnd = Test-Path -LiteralPath $InputFileRootPath
+if($InputFileRootPath.Length -and (-not ($RtFnd )))
+{
+    Throw "Root folder defined but not found, note if this is a mapped drive, the admin workspace may need this mapped through UNC by using the command in an elevated command prompt `"net use <MappedDrv> <Network Path>`""
+}
+elseif ($InputFileRootPath.Length)
 {
     $InputFileRootPath = (Resolve-Path $InputFileRootPath).Path
     #Append file seperation character if not present for consistency.
