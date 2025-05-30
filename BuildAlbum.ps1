@@ -27,8 +27,14 @@ $UseTestPath = 1;
 $DemoPrepAndConvPaths = 0;
 if ($UseTestPath)
 {
-	$Names2Ig = @("DNP") #Any full name (file path / name) that matches any element here will not be included.
-    $ExceptionParentFldrGreaterThan = 2016
+    $Names2Ig = @(@{
+        Name = "DNP"
+        ExceptionParentFldrGreaterThan = [double]::PositiveInfinity
+    }
+    @{
+        Name = "DNP2"
+        ExceptionParentFldrGreaterThan = [double]::PositiveInfinity
+    })
     if($DemoPrepAndConvPaths)
     {
        $InputFileRootPath = ".\TestInput"
@@ -64,7 +70,15 @@ if ($UseTestPath)
 #************************************
 else
 {
-	$Names2Ig = @("DNP","JohnsonFamilySide") #Any full name (file path / name) that matches any element here will not be included.
+    $Names2Ig = @(@{
+        Name = "DNP"
+        ExceptionParentFldrGreaterThan = [double]::PositiveInfinity
+    }
+    @{
+        Name = "JohnsonFamilySide"
+        ExceptionParentFldrGreaterThan = 2015
+    }
+    )
     $ExceptionParentFldrGreaterThan = 2015
     $InputFileRootPath ="S:"
     $PrepFileRootPath  = $BuDrv+ ":\AlbumPrep"
@@ -189,13 +203,13 @@ if ($ConvFileRootPath.Length)
 }
 else
 {
-    Write-Host "Conversion path is not defined, assuming it is not intended, no conversion will be performed, files will be converted directly from the prep path."
+    Write-Host "Conversion path is not defined, assuming it is not intended, no conversion will be performed, files will be taken directly from the prep path."
     $ConvFileRootPath = ""
 }
 #Run operations.
 $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 if (($ProcLvl -eq 0) -or ($ProcLvl -eq 1) -or $CopyMedia){
-    Copy-MediaFromNetwork $InputFileRootPath $PrepFileRootPath $Names2Ig $ExceptionParentFldrGreaterThan
+    Copy-MediaFromNetwork $InputFileRootPath $PrepFileRootPath $Names2Ig
 }
 if (($ProcLvl -eq 0) -or ($ProcLvl -eq 2)){
     $PrepMediaDef = Update-ConvertedMediaImagesForDisplay $PrepFileRootPath $ConvFileRootPath

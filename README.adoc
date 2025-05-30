@@ -37,8 +37,8 @@ NOTE: Currently, these scripts are written ad-hoc and without consistent conside
 . Open "BuildAlbum.ps1" and customize.
 .. If desired set the $SetTmpPath variable to a RAM drive path to make processing easier, else keep this blank so that temporary files are created and deleted in the default user space.
 .. At this point I would recommend running the "BuildAlbum.ps1" file to see if the test file is able to build without issue, as that will indicate all dependencies have been properly installed and that the temporary path -if applicable- is being utilized.
-.. $Names2Ig: Update the string array variable to set which names / folders should be ignored when getting media files.  For myself, I put everything into various "DNP" subfolders, so if I have originals or long videos I still want to keep, they aren't brought into a digital picture frame.
-.. $ExceptionParentFldrGreaterThan: Exception designation for ignore attributes, currently this is only designed to look at numbers in the parent folder, but gives a good idea of how other exceptions could be accommodated.
+.. $Names2Ig: Structure which defines which names / folders should be ignored when getting media files, and exceptions for this rule.  For myself, I put everything into various "DNP" subfolders, so if I have originals or long videos I still want to keep, they aren't brought into a digital picture frame.
+... ExceptionParentFldrGreaterThan: Exception designation for ignore attributes, currently this is only designed to look at numbers in the parent folder, but gives a good idea of how other exceptions could be accommodated.  In this instance, if any number in the parent folder of a file matching the ignore definition is greater than this value, it is NOT ignored.
 .. Scroll down to the comment "Define standard / non-test paths and configure the properties accordingly:
 .. $ExceptionParentFldrGreaterThan: A special designation I have for the way I organize images.  Even if they are set to ignore, if their parent folder contains a year designation greater than this value, allow them through, since I label folders starting with the year, and I want to allow newer content through.
 .. Scroll down to the comment "Define standard / non-test paths and configure the properties accordingly:
@@ -61,5 +61,4 @@ NOTE: Currently, these scripts are written ad-hoc and without consistent conside
 ... CleanBuild: Generally for debugging only, as it will cause all previously converted media to get wiped out.  This is only really useful for testing, which is what I added it for.
 
 ==== Running
-Run as you would any other powershell script.  You can simply run "BuildAlbum.bat" from the root folder to also call the ps1 file, and verify (as long as you haven't changed the test flag) that all processes operator.  The output file for the current test configuration will be located at:
-
+Run as you would any other powershell script.  You can simply run "BuildAlbum.bat" from the root folder (as admin) to also call the ps1 file, and verify (as long as you haven't changed the test flag) that all processes operator.  The output file for the current test configuration will be located in the folder "AlbumOut1440x900q30-Groups"

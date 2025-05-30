@@ -3,8 +3,7 @@ function Copy-MediaFromNetwork
     param (
         [string]$inputFolder,
         [string]$outputFolder,
-        $Names2Ig = @("DNP"),
-        $ExceptionParentFldrGreaterThan = [double]::PositiveInfinity
+        $Names2Ig = @()
     )
 
     $Types2Pull = "jpg$","gif$","tif$","tiff$","jpeg$","png$","bmp$","wmv$","mov$","mp4$","avi$"
@@ -47,24 +46,29 @@ function Copy-MediaFromNetwork
             foreach ($file in $AllInputFiles)
             {
                 $IncChk = 1
-                foreach($StrChk in $Names2Ig)
+                foreach($IgDef in $Names2Ig)
                 {
-                    if($file.FullName.Contains($StrChk))
+                    if($file.FullName.Contains($IgDef.Name))
                     {
                         $IncChk = 0
                         #If it is set to ignore, is the folder in the exception range?  Then actually allow it
                         #Probably more graceful ways to do this...
                         $ParentFldrName = Split-Path (Split-Path -Parent $file.FullName) -Leaf
-                        if ($ParentFldrName -match "\d+") {
+                        if (($ParentFldrName -match "\d+") -and (-not $ParentFldrName.Contains($IgDef.Name)))
+                        {
                             # $matches[0] contains the first numeric substring found in $_
                             [int]$number = $matches[0]
-                            if($number -ge $ExceptionParentFldrGreaterThan)
+                            if($number -ge $IgDef.ExceptionParentFldrGreaterThan)
                             {
                                 $IncChk = 1
                             }
                         }
                         else {
                             #$false  # No number found, so filter out
+                        }
+                        if(-not $IncChk)
+                        {
+                            break
                         }
                     }
                 }
