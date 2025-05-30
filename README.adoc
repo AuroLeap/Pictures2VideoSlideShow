@@ -1,4 +1,4 @@
-Does your wife, yourself, or your significant other have thousands of pictures and videos stored away but not being enjoyed on a daily basis?  This tools hopes to put recorded media and the memories they hold into a set of videos resized and smoothly sequenced for a specific display, framerate, or quality.
+Does your wife, yourself, or your significant other have thousands of pictures and videos stored away but not being enjoyed on a daily basis?  This tools hopes to put recorded media and the memories they hold into a set of videos resized and smoothly sequenced for a specific display, framerate, and quality.
 
 This is accomplished using a "hacky" set of scripts intended to prepare a set of pictures / videos for content on a digital picture frame.  Click to see the demo below:
 
@@ -27,6 +27,7 @@ NOTE: Currently, these scripts are written ad-hoc and without consistent conside
 .. Option 2 - Manually download and install dependencies.
 ... https://imagemagick.org/script/download.php[ImageMagick] for command line photo manipulation.
 ... https://www.ffmpeg.org/download.html[FFMPEG] for command line media manipulation.
+... https://annystudio.com/software/jpeglosslessrotator/[JPEG Lossless Rotator] for command line picture rotation, note this tool is not required due to the current methods being used.
 ... Ensure environmental paths include both of these products, though that should occur automatically upon install.
 . Highly encouraged - Create a RAM disk to run video creation processes through.
 .. I use https://sourceforge.net/projects/aim-toolkit/[AIM Toolkit]
@@ -37,17 +38,18 @@ NOTE: Currently, these scripts are written ad-hoc and without consistent conside
 .. If desired set the $SetTmpPath variable to a RAM drive path to make processing easier, else keep this blank so that temporary files are created and deleted in the default user space.
 .. At this point I would recommend running the "BuildAlbum.ps1" file to see if the test file is able to build without issue, as that will indicate all dependencies have been properly installed and that the temporary path -if applicable- is being utilized.
 .. $Names2Ig: Update the string array variable to set which names / folders should be ignored when getting media files.  For myself, I put everything into various "DNP" subfolders, so if I have originals or long videos I still want to keep, they aren't brought into a digital picture frame.
+.. $ExceptionParentFldrGreaterThan: Exception designation for ignore attributes, currently this is only designed to look at numbers in the parent folder, but gives a good idea of how other exceptions could be accommodated.
 .. Scroll down to the comment "Define standard / non-test paths and configure the properties accordingly:
 .. $ExceptionParentFldrGreaterThan: A special designation I have for the way I organize images.  Even if they are set to ignore, if their parent folder contains a year designation greater than this value, allow them through, since I label folders starting with the year, and I want to allow newer content through.
 .. Scroll down to the comment "Define standard / non-test paths and configure the properties accordingly:
-... "$InputFileRootPath": Update the folder path (which for many with a large picture / video collection hopefully is a network / NAS location.)
-... "$PrepFileRootPath": Update the folder path which defines where the input files will be copied to.  This assumes you have enough space to copy over all the media files.  Unfortunately I did not configure this script in a way that would avoid this.
-... "ConvFileRootPath": Update the folder path which defines where the input images will be converted to (and only images).  This applies additional corrections to the image (some of which I am still toying with).  And will "right" and image with jpeg rotator if installed.
+... "$InputFileRootPath": Update the folder path (which for many with a large picture / video collection hopefully is a network / NAS location.)  If you don't want to maintain a copy of your files, set this to an empty string array "".
+... "$PrepFileRootPath": Update the folder path which defines where the input files will be copied to.  This assumes you have enough space to copy over all the media files.  If you do not want to copy your media, just set this to the actual root location where content is located.
+... "ConvFileRootPath": Update the folder path which defines where the input images will be converted to (and only images).  This is intended to apply additional corrections to the image, but nothing is currently implemented.  This can remain empty "".
 ... "OutputFilePrepend": What folders will be called that actually contain the album content.  These contain the images and videos that result in the actual final video.
 ... "OutputDefs": This structure is intended to contain an element for each display you want to export data to, with multiple configurations:
-... XDim: The horizontal displayed resolution of the frame.
-... YDim: The vertical displayed resolution of the frame.
-... FPS: The framerate you want the video to run at on the frame.
+... XDim: The horizontal displayed resolution of the output video.
+... YDim: The vertical displayed resolution of the output video.
+... FPS: The framerate you want the video to run at.
 ... PicDispTime: How long you want pictures to be displayed for, not counting the fade times.
 ... MaxSrtRot: The start maximum rotation (in degrees) you want to be applied to a picture (the tool will start pictures at an angle, and rotate smoothly towards horizontal)
 ... FadeTime: The amount of time to fade between images / videos.
@@ -59,4 +61,5 @@ NOTE: Currently, these scripts are written ad-hoc and without consistent conside
 ... CleanBuild: Generally for debugging only, as it will cause all previously converted media to get wiped out.  This is only really useful for testing, which is what I added it for.
 
 ==== Running
-Run as you would any other powershell script.
+Run as you would any other powershell script.  You can simply run "BuildAlbum.bat" from the root folder to also call the ps1 file, and verify (as long as you haven't changed the test flag) that all processes operator.  The output file for the current test configuration will be located at:
+
