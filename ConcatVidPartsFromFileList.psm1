@@ -58,9 +58,12 @@ function Join-VidPartsFromList
             foreach ($entry in $FileList)
             {
                 #Get video definition.
-                $SrtChkName = $entry+"srt"
-                $NomChkName = $entry
-                $EndChkName = $entry+"end"
+                $filename = [System.IO.Path]::GetFileNameWithoutExtension($entry)
+                $parentPath = Split-Path $entry -Parent
+                $dirpath = Join-Path $parentPath $filename
+                $SrtChkName = $dirpath+".srt.$GenFrmt"
+                $NomChkName = $dirpath+".$GenFrmt"
+                $EndChkName = $dirpath+".end.$GenFrmt"
                 $VPramsCmd = "ffprobe -v error -show_streams -select_streams v`:0 -of ini `"$NomChkName`""
                 $VSrtPramsCmd = "ffprobe -v error -show_streams -select_streams v`:0 -of ini `"$SrtChkName`""
                 $VEndPramsCmd = "ffprobe -v error -show_streams -select_streams v`:0 -of ini `"$EndChkName`""
@@ -273,8 +276,11 @@ function Join-VidPartsFromList
                 try
                 {
                     $postname = [System.IO.Path]::GetFileNameWithoutExtension($file)
-                    $VSrt = $file+"srt"
-                    $VEnd = $file+"end"
+                    $parentPath = Split-Path $file -Parent
+                    $dirpath = Join-Path $parentPath $postname
+                    $VSrt = $dirpath+".srt.$GenFrmt"
+                    $NomChkName = $dirpath+".$GenFrmt"
+                    $VEnd = $dirpath+".end.$GenFrmt"
                     if($PrevVid2TransitionFrom.Length)
                     {
                         $prename  = [System.IO.Path]::GetFileNameWithoutExtension($PrevVid2TransitionFrom)
@@ -287,7 +293,7 @@ function Join-VidPartsFromList
                         $CurrExpIdx = $CurrExpIdx+1
                         $tname = $tranprepend + "-fadein" + $postname + ".$GenFrmt"
                         $tnameNA = $tranprepend + "-fadein" + $postname + "NA.$GenFrmt"
-                        $tincmd = "ffmpeg -y -f '$GenFrmt' -i `"$VSrt`" -vf `"fade=t=in:st=0:d=$tdur`" $EncodeDef `"$tname`""
+                        $tincmd = "ffmpeg -y -i `"$VSrt`" -vf `"fade=t=in:st=0:d=$tdur`" $EncodeDef `"$tname`""
                         #write-host $tincmd
                         #Invoke-Expression $tincmd
                         #Wait-Debugger
@@ -300,7 +306,7 @@ function Join-VidPartsFromList
                             $VidPathStr[$CurrExpIdx] = "file `'$tname`'"
                             if (-not $IncAud)
                             {
-                                $ffmpegcmd = "ffmpeg -y -f '$GenFrmt' -i `"$tname`"  -c copy -an `"$tnameNA`""
+                                $ffmpegcmd = "ffmpeg -y -i `"$tname`"  -c copy -an `"$tnameNA`""
                                 (Invoke-Expression $ffmpegcmd) *> $null
                                 $VidPathStr[$CurrExpIdx] = "file `'$tnameNA`'"
                             }
@@ -319,12 +325,12 @@ function Join-VidPartsFromList
                         $tname = $tranprepend + $prename + "to" + $postname + ".$GenFrmt"
                         $tnameNA = $tranprepend + $prename + "to" + $postname + "NA.$GenFrmt"
                         $V1 = $PrevVid2TransitionFrom+"end"
-                        #$tcmd = "ffmpeg -y -f '$GenFrmt' -i `"$V1`" -f '$GenFrmt' -i `"$VSrt`" -filter_complex `"[0:v][1:v]xfade=offset=0.0:duration=$tdur[vfade];[0:a][1:a]acrossfade=duration=$tdur[afade]`" -map vfade:v -map afade:a $EncodeDef `"$tname`""
+                        #$tcmd = "ffmpeg -y -i `"$V1`" -i `"$VSrt`" -filter_complex `"[0:v][1:v]xfade=offset=0.0:duration=$tdur[vfade];[0:a][1:a]acrossfade=duration=$tdur[afade]`" -map vfade:v -map afade:a $EncodeDef `"$tname`""
 
                         $FSrt = "ffmpeg  -hide_banner -loglevel error -nostats -y -f lavfi -i"
                         $FAudIn = " anullsrc=r=$selarate`:d=$tdur"
                         $FAudOut =  " -map 0:a"
-                        $tcmd = $FSrt + $FAudIn + " -f '$GenFrmt' -i `"$V1`" -f '$GenFrmt' -i `"$VSrt`" -filter_complex `"[1:v][2:v]xfade=offset=0.0:duration=$tdur[vfout]`" -map `"[vfout]`""+$FAudOut+" $EncodeDef `"$tname`""
+                        $tcmd = $FSrt + $FAudIn + " -i `"$V1`" -f '$GenFrmt' -i `"$VSrt`" -filter_complex `"[1:v][2:v]xfade=offset=0.0:duration=$tdur[vfout]`" -map `"[vfout]`""+$FAudOut+" $EncodeDef `"$tname`""
                         if($CurrIdx -eq 13)
                         {
                             #write-host "ChkHere"
@@ -336,7 +342,7 @@ function Join-VidPartsFromList
                         {
                             if (-not $IncAud)
                             {
-                                $ffmpegcmd = "ffmpeg -y -f '$GenFrmt' -i `"$tname`"  -c copy -an `"$tnameNA`""
+                                $ffmpegcmd = "ffmpeg -y -i `"$tname`"  -c copy -an `"$tnameNA`""
                                 (Invoke-Expression $ffmpegcmd) *> $null
                                 $VidPathStr[$CurrExpIdx] = "file `'$tnameNA`'"
                             }
@@ -360,7 +366,7 @@ function Join-VidPartsFromList
                         {
                             $dirname = [System.IO.Path]::GetFileNameWithoutExtension($PrevVid2TransitionFrom)
                             $tnameNA = $tranprepend + $dirname + "NA.$GenFrmt"
-                            $ffmpegcmd = "ffmpeg -y -f '$GenFrmt' -i `"$file`"  -c copy -an `"$tnameNA`""
+                            $ffmpegcmd = "ffmpeg -y -i `"$file`"  -c copy -an `"$tnameNA`""
                             (Invoke-Expression $ffmpegcmd) *> $null
                             $VidPathStr[$CurrExpIdx] = "file `'$tnameNA`'"
                         }
@@ -381,7 +387,7 @@ function Join-VidPartsFromList
                         $CurrExpIdx = $CurrExpIdx+1
                         $tname = $tranprepend + "-fadeout" + $postname + ".$GenFrmt"
                         $tnameNA = $tranprepend + "-fadeout" + $postname + "NA.$GenFrmt"
-                        $toutcmd = "ffmpeg -y -f '$GenFrmt' -i `"$VEnd`" -vf `"fade=t=out:st=0:d=$tdur`" $EncodeDef `"$tname`""
+                        $toutcmd = "ffmpeg -y -i `"$VEnd`" -vf `"fade=t=out:st=0:d=$tdur`" $EncodeDef `"$tname`""
                         (Invoke-Expression $toutcmd) *> $null
                         $VidPathStr[$CurrExpIdx] = "file `'$tname`'"
                         $FileL = Get-ChildItem -Path "$tname" | Select-Object Length
@@ -389,7 +395,7 @@ function Join-VidPartsFromList
                         {
                             if (-not $IncAud)
                             {
-                                $ffmpegcmd = "ffmpeg -y -f '$GenFrmt' -i `"$tname`"  -c copy -an `"$tnameNA`""
+                                $ffmpegcmd = "ffmpeg -y -i `"$tname`"  -c copy -an `"$tnameNA`""
                                 (Invoke-Expression $ffmpegcmd) *> $null
                                 $VidPathStr[$CurrExpIdx] = "file `'$tnameNA`'"
                             }

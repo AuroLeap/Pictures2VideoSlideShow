@@ -998,9 +998,9 @@ function Update-MediaForDisplaySets
         {
             #If this is a transition file and the core file exists, assume all three can stay (don't tag for removal)
             $PathLen = $ContFile.FullName.Length
-            if ($ContFile.Fullname.EndsWith($GenFrmt+"srt") -or $ContFile.Fullname.EndsWith($GenFrmt+"end"))
+            if ($ContFile.Fullname.EndsWith("srt."+$GenFrmt) -or $ContFile.Fullname.EndsWith("end."+$GenFrmt))
             {
-                $CoreName = $ContFile.Fullname.Substring(0, ($PathLen - 3))
+                $CoreName = $ContFile.Fullname.Substring(0, ($PathLen - 7))+$GenFrmt
             }
             else
             {
@@ -1129,8 +1129,8 @@ function Update-MediaForDisplaySets
         }
         Write-Host ("Exporting " + ($Files2Chk | Where-Object -Property Exp2ContPath -eq 1).Count.ToString() + " files...")
         #Wait-Debugger
-        (($Files2Chk| Where-Object -Property Exp2ContPath -eq 1)) | ForEach-Object -Parallel{
-        #(($Files2Chk| Where-Object -Property Exp2ContPath -eq 1)) | ForEach-Object{
+        #(($Files2Chk| Where-Object -Property Exp2ContPath -eq 1)) | ForEach-Object -Parallel{
+        (($Files2Chk| Where-Object -Property Exp2ContPath -eq 1)) | ForEach-Object{
             if ($RunSeries) {
                 $file = $_
                 $XDim = $set.XDim
@@ -1179,6 +1179,21 @@ function Update-MediaForDisplaySets
             $frmtdef = $GenFrmt
             try
             {
+
+                if ($file.IsImg)
+                {
+                    $filename = [System.IO.Path]::GetFileNameWithoutExtension($file.ImgVidPath)
+                    $parentPath = Split-Path $file.ImgVidPath -Parent
+                }
+                else
+                {
+                    $filename = [System.IO.Path]::GetFileNameWithoutExtension($file.ContPath)
+                    $parentPath = Split-Path $file.ContPath -Parent
+                }
+                $dirpath = Join-Path $parentPath $filename
+                $srtpath = $dirpath+".srt.$GenFrmt"
+                $nompath = $dirpath+".$GenFrmt"
+                $endpath = $dirpath+".end.$GenFrmt"
                 if ($file.IsImg)
                 {
                     $ScaleWIM = 1
@@ -1259,12 +1274,12 @@ function Update-MediaForDisplaySets
                         $filtercfg2 = ":d=1:fps=$frameRate`:s=$SizeOut`" "
 
                         #Write-Host("**************************L3****************************")
-                        $ffmpegOutSrt = "-map 0:a -map 1:v -s $SizeStr2 -f '$frmtdef' `"$($file.ImgVidPath)srt`""
-                        $ffmpegOutNom = "-map 0:a -map 1:v -s $SizeStr2 -f '$frmtdef' `"$($file.ImgVidPath)`""
-                        $ffmpegOutEnd = "-map 0:a -map 1:v -s $SizeStr2 -f '$frmtdef' `"$($file.ImgVidPath)end`""
-                        $ffmpegOutSrtIM = "-map 0:a -map 1:v -frames:v $NFramesTrn -f '$frmtdef' `"$($file.ImgVidPath)srt`""
-                        $ffmpegOutNomIM = "-map 0:a -map 1:v -frames:v $NFramesStd -f '$frmtdef' `"$($file.ImgVidPath)`""
-                        $ffmpegOutEndIM = "-map 0:a -map 1:v -frames:v $NFramesTrn -f '$frmtdef' `"$($file.ImgVidPath)end`""
+                        $ffmpegOutSrt = "-map 0:a -map 1:v -s $SizeStr2 `"$srtpath`""
+                        $ffmpegOutNom = "-map 0:a -map 1:v -s $SizeStr2 `"$nompath`""
+                        $ffmpegOutEnd = "-map 0:a -map 1:v -s $SizeStr2 `"$endpath`""
+                        $ffmpegOutSrtIM = "-map 0:a -map 1:v -frames:v $NFramesTrn `"$srtpath`""
+                        $ffmpegOutNomIM = "-map 0:a -map 1:v -frames:v $NFramesStd `"$nompath`""
+                        $ffmpegOutEndIM = "-map 0:a -map 1:v -frames:v $NFramesTrn `"$endpath`""
                         #Write-Host("**************************L4****************************")
                         $ffmpegCmdSrt = $ffmpegCmd1 + $ffmpegCmdA + $ffmpegCmdV1 + $SrtffmpegCmdV2 `
                         + $Srtfiltercfg1 + $filtercfgX + $filtercfgY + $filtercfg2 `
@@ -1324,9 +1339,9 @@ function Update-MediaForDisplaySets
                         }
                         #If each file has content, set the creation time.
 
-                        [System.IO.File]::SetCreationTime( "$($file.ImgVidPath)srt", $CurrDateTime)
-                        [System.IO.File]::SetCreationTime( "$($file.ImgVidPath)end", $CurrDateTime)
-                        [System.IO.File]::SetCreationTime( "$($file.ImgVidPath)", $CurrDateTime)
+                        [System.IO.File]::SetCreationTime( $srtpath, $CurrDateTime)
+                        [System.IO.File]::SetCreationTime( $endpath, $CurrDateTime)
+                        [System.IO.File]::SetCreationTime( $nompath, $CurrDateTime)
                         #Write-Host("**************************L9****************************")
                         #Now rewrite the image again with a smaller size, to save on space.
                         $IMCmd1 = "magick `"$( $file.ConvPath )`" -auto-orient -resize $SizeOut -quality $($quality.ToString() ) -background black "
@@ -1465,12 +1480,12 @@ function Update-MediaForDisplaySets
                         $ffmpegvidfiltsub = "scale=$wint`:$hint`:force_original_aspect_ratio=decrease$PadOpt"
                         $ffmpegvidfilt = "fps=fps=$framerate[vint]`;[vint]$ffmpegvidfiltsub"
                         $ffmpegvidcmd1 = "-vf "+ $ffmpegvidfiltsub
-                        $ffmpegcmdsrt = $ffmpeginputsrt + $ffmpegvidcmd1 + " " + $ffmpegaudcmd + $ffmpegvcdctra + " -movflags faststart -f '$frmtdef' `"$( $file.ContPath)srt`""
-                        $ffmpegcmdend = $ffmpeginputend + $ffmpegvidcmd1 + " " + $ffmpegaudcmd + $ffmpegvcdctra + " -movflags faststart -f '$frmtdef' `"$( $file.ContPath)end`""
+                        $ffmpegcmdsrt = $ffmpeginputsrt + $ffmpegvidcmd1 + " " + $ffmpegaudcmd + $ffmpegvcdctra + " -movflags faststart `"$srtpath`""
+                        $ffmpegcmdend = $ffmpeginputend + $ffmpegvidcmd1 + " " + $ffmpegaudcmd + $ffmpegvcdctra + " -movflags faststart `"$endpath`""
                         if($AudioSet)
-                        {$ffmpegcmdnom = $ffmpeginputnom + "-filter_complex `"[0:v]$ffmpegvidfilt`;[0:a]afade=t=in:st=0:d=$AFd,afade=t=out:st=$AOtOf`:d=$AFd`" " + $ffmpegaudcmd + $ffmpegvcdcstd + " -f '$frmtdef' `"$( $file.ContPath)`""}
+                        {$ffmpegcmdnom = $ffmpeginputnom + "-filter_complex `"[0:v]$ffmpegvidfilt`;[0:a]afade=t=in:st=0:d=$AFd,afade=t=out:st=$AOtOf`:d=$AFd`" " + $ffmpegaudcmd + $ffmpegvcdcstd + " `"$nompath`""}
                         else
-                        {$ffmpegcmdnom = $ffmpeginputnom + " $ffmpegCmdA " + "-filter_complex `"[0:v]$ffmpegvidfilt[vout]`" " + $ffmpegaudcmd + $ffmpegvcdcstd + " -map `"[vout]`" -map 1:a -frames:v $NFramesNom -f '$frmtdef' `"$( $file.ContPath)`""}
+                        {$ffmpegcmdnom = $ffmpeginputnom + " $ffmpegCmdA " + "-filter_complex `"[0:v]$ffmpegvidfilt[vout]`" " + $ffmpegaudcmd + $ffmpegvcdcstd + " -map `"[vout]`" -map 1:a -frames:v $NFramesNom `"$nompath`""}
 
                         #Uncomment to generate files with commands for debugging
                         #$ffmpegcmdnom | Out-File -FilePath "$($file.ContPath)nomcmd"
@@ -1482,9 +1497,9 @@ function Update-MediaForDisplaySets
                         #Get file size of nominal file, if this is non-zero, update the modificatoin time so the tool knows it's up-to-date, else remove the files.
                         if(Get-ChildItem -Path $( $file.ContPath) | Select-Object Length)
                         {
-                            [System.IO.File]::SetCreationTime("$( $file.ContPath )srt", $CurrDateTime)
-                            [System.IO.File]::SetCreationTime("$( $file.ContPath )end", $CurrDateTime)
-                            [System.IO.File]::SetCreationTime("$( $file.ContPath )", $CurrDateTime)
+                            [System.IO.File]::SetCreationTime($srtpath, $CurrDateTime)
+                            [System.IO.File]::SetCreationTime($endpath, $CurrDateTime)
+                            [System.IO.File]::SetCreationTime($nompath, $CurrDateTime)
                         }
                         $file.ExpDefComplete = 1
                         $_.ExpDefComplete = 1
@@ -1532,7 +1547,7 @@ function Update-MediaForDisplaySets
                     Write-Progress @InnerLoopProg
                 }
             }
-        #}
-        } -ThrottleLimit 4
+        }
+        #} -ThrottleLimit 4
     }
 }
