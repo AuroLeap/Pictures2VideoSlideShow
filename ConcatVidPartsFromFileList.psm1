@@ -17,6 +17,7 @@ function Join-VidPartsFromList
     $grpfldr = $outputFile
     $tranprepend = $grpfldr+"\t"
     $appendlist = $grpfldr+"\buildlist.txt"
+    $buildcmd   = $grpfldr+"\buildcmd.txt"
     $finfile = $outputFile+".mp4"
     if (Test-Path -Path $grpfldr -PathType Container){}
     else {(New-Item -ItemType Directory -Path $grpfldr -Force) *> $null}
@@ -30,7 +31,7 @@ function Join-VidPartsFromList
         {
             Write-Host "Getting properties of all video files and building full command for $outputFile..."
 
-            $FileList | Add-Member -MemberType NoteProperty -Name VidDef -Value $([System.ValueTuple[int, int, int, double,string, string]])
+            $FileList | Add-Member -MemberType NoteProperty -Name VidDef -Value $([System.ValueTuple[int, int, int, decimal,string, string]])
             $FileList | Add-Member -MemberType NoteProperty -Name Dur -Value $([decimal])
             $FileList | Add-Member -MemberType NoteProperty -Name SrtDur -Value $([decimal])
             $FileList | Add-Member -MemberType NoteProperty -Name EndDur -Value $([decimal])
@@ -60,7 +61,6 @@ function Join-VidPartsFromList
                 $NomChkName = $entry
                 $EndChkName = $entry+"end"
                 $VPramsCmd = "ffprobe -v error -show_streams -select_streams v`:0 -of ini `"$NomChkName`""
-                $VPramsCmd = "ffprobe -v error -show_streams -select_streams v`:0 -of ini `"$NomChkName`""
                 $VSrtPramsCmd = "ffprobe -v error -show_streams -select_streams v`:0 -of ini `"$SrtChkName`""
                 $VEndPramsCmd = "ffprobe -v error -show_streams -select_streams v`:0 -of ini `"$EndChkName`""
                 $APramsCmd = "ffprobe -v error -show_streams -select_streams a`:0 -of ini `"$NomChkName`""
@@ -75,7 +75,14 @@ function Join-VidPartsFromList
                 $colorspace = ""
                 $pixfmt = ""
                 $vcodec = ""
+                $vcodecprofile = ""
+                $vcodeclevel = ""
+                $refcnt = ""
                 $acodec = ""
+                $achnls = ""
+                $afrmt = ""
+                $aprofile = ""
+                $alayout = ""
                 $arate = 0
                 $framerate = 0
                 $Dur = 0; $SrtDur = 0; $EndDur = 0
@@ -133,6 +140,18 @@ function Join-VidPartsFromList
                         {
                             $vcodec = $Pram.split('codec_name=')[1]
                         }
+                        if ( $Pram.StartsWith("level="))
+                        {
+                            $vcodeclevel = $Pram.split('level=')[1]
+                        }
+                        if ( $Pram.StartsWith("profile="))
+                        {
+                            $vcodecprofile = $Pram.split('profile=')[1]
+                        }
+                        if ( $Pram.StartsWith("refs="))
+                        {
+                            $refcnt = $Pram.split('refs=')[1]
+                        }
                     }
                     foreach ($Pram in $APrams)
                     {
@@ -144,6 +163,22 @@ function Join-VidPartsFromList
                         {
                             $arate = $Pram.split('sample_rate=')[1]
                         }
+                        if ( $Pram.StartsWith("channels="))
+                        {
+                            $achnls = $Pram.split('channels=')[1]
+                        }
+                        if ( $Pram.StartsWith("sample_fmt="))
+                        {
+                            $afrmt = $Pram.split('sample_fmt=')[1]
+                        }
+                        if ( $Pram.StartsWith("profile="))
+                        {
+                            $aprofile = $Pram.split('profile=')[1]
+                        }
+                        if ( $Pram.StartsWith("channel_layout="))
+                        {
+                            $alayout = $Pram.split('channel_layout=')[1]
+                        }
                         if ( $Pram.StartsWith("time_base="))
                         {
                             $atimebase = [Int] (1/([decimal] (Invoke-Expression ($Pram.split('time_base=')[1]))))
@@ -153,8 +188,8 @@ function Join-VidPartsFromList
                 }
                 $Width = $PreWidth
                 $Height = $PreHeight
-                $vdefinition = $colorspace+$pixfmt+$vcodec
-                $adefinition = $acodec
+                $vdefinition = $colorspace+$pixfmt+$vcodec+$vcodeclevel+$vcodecprofile+$refcnt
+                $adefinition = $acodec+$achnls+$afrmt+$aprofile+$alayout
                 # pixel format, colorspace, vcodec, acodec, Width, height, timebase, arate,
                 $entry.VidDef = [System.ValueTuple[int, int, int, decimal, string, string]]::new(
                         $Width, $Height, $timebase, $arate, $vdefinition, $adefinition)
@@ -221,7 +256,7 @@ function Join-VidPartsFromList
             #*********************** Perpare transitions  *************************
             #*********************************************************************
             #Only pick files with common format, since they must be concatable.
-            $EncodeDef = "-video_track_timescale $vseltimebase -vcodec $selvcodec -crf $vidqty -preset slow -pix_fmt $selpixfmt -colorspace $selcolorspace -r $SelFPS -movflags faststart "
+            $EncodeDef = "-video_track_timescale $vseltimebase -vcodec $selvcodec -crf $vidqty -preset slow -pix_fmt $selpixfmt -colorspace $selcolorspace -movflags faststart "
             $FileList = @($GrpSets |  Select-Object -ExpandProperty Group) | Where-Object -Property Need2Conv -eq 0
             $FileList | Add-Member -MemberType NoteProperty -Name ExportSuccess -Value $([int]0)
             $NFilesExported = 0
@@ -394,9 +429,11 @@ function Join-VidPartsFromList
             $VidPathExp = $VidPathStr[0..$LastExpIdx]
             $VidPathExp| Out-File -FilePath "$appendlist" -force
             #Build list of all raw files to concat.
-            $ffmpegcmd = "ffmpeg -y -safe 0 -f concat -i `"$appendlist`" -c copy `"$finfile`""
+            $ffmpegcmd = "ffmpeg -y -safe 0 -f concat -i `"$appendlist`" -c copy -movflags faststart `"$finfile`""
             #Wait-Debugger
+            $ffmpegcmd | Out-File -FilePath $buildcmd
             (Invoke-Expression $ffmpegcmd) *> $null
+
             #Concat files.
             Write-Host "$finfile complete"
         }
@@ -416,6 +453,6 @@ function Join-VidPartsFromList
     finally{
         #Wait-Debugger
         Start-Sleep -Seconds 0.2
-        (Remove-Item -Path $grpfldr -Recurse -Force -EA SilentlyContinue -Verbose)*>$null
+        #(Remove-Item -Path $grpfldr -Recurse -Force -EA SilentlyContinue -Verbose)*>$null
     }
 }
