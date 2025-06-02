@@ -59,7 +59,7 @@ NOTE: Currently, these scripts are written ad-hoc and without consistent conside
 ... NameMethod: I only support my method "FldrLvl2" which names folders by their 2nd folder deep name if available.  Otherwise a default is used.  This doesn't impact the output video, just the intermediary files, as I was -at one point- thinking to add text to the videos to describe what they were showing.
 ... ImgVidFldr: When images are converted to videos, they are saved in a subfolder matching this name.  There should be no need to change this.
 ... Quality: This is the "quality" number (crf),  Lower values result in higher quality images, but they consume more space.  In general, I find values under 20 are overkill, but it will be a balance depending on the number of files you have, and the storage media you use to deploy those to frames.
-... ExpAud: If audio should be in the final videos.  In general, you would probably want this 0 to disable any audio inclusion.
+... ExpAud: THIS CURRENTLY DOES NOT WORK AND SHOULD STAY AS 0.  Intended to be set if audio should be in the final videos.  In general, you would probably want this 0 to disable any audio inclusion anyways.
 ... CleanBuild: Generally for debugging only, as it will cause all previously converted media to get wiped out.  This is only really useful for testing, which is what I added it for.
 
 ==== Running
