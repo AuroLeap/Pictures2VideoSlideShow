@@ -5,6 +5,7 @@ Import-Module $DepPath
 function Set-VideoFromMedia
 {
     param (
+        $GenFrmt,
         $OutputSizes
     )
 
@@ -18,11 +19,11 @@ function Set-VideoFromMedia
         $ContFileRootPath = $set.Outpath
         $VidPacksRootPath = $ContFileRootPath + $set.ImgVidFldr
         $VidPacksFileDefPath = $set.OutGrp
-        $PrepAllInputFiles = @(Get-ChildItem -LiteralPath $ContFileRootPath -Filter "*.mp4")
+        $PrepAllInputFiles = @(Get-ChildItem -LiteralPath $ContFileRootPath -Filter "*.$GenFrmt")
         #Add in video packs for images if defined and intended.
         if((Test-Path -LiteralPath $VidPacksRootPath -PathType Container) -and $set.ImgVidFldr.Length -and $set.PicDispTime)
         {
-            $PrepAllInputFiles = $PrepAllInputFiles + @(Get-ChildItem -LiteralPath $VidPacksRootPath -Filter "*.mp4")
+            $PrepAllInputFiles = $PrepAllInputFiles + @(Get-ChildItem -LiteralPath $VidPacksRootPath -Filter "*.$GenFrmt")
         }
         $PrepAllInputFiles | Add-Member -MemberType NoteProperty -Name GroupN -Value $([int])
         $PrepAllInputFiles | Add-Member -MemberType NoteProperty -Name Dur -Value $([Decimal])
@@ -80,7 +81,7 @@ function Set-VideoFromMedia
             #Create file to describe what videos to append.
             #$FileSet | Export-Csv -Path $grp.FileListPath -NoTypeInformation
         }
-        if(1)
+        if(0)
         {
             $Groups | ForEach-Object -Parallel{
                 $DepPath = $using:DepPath
@@ -91,8 +92,9 @@ function Set-VideoFromMedia
                 $Quality = $locset.Quality
                 $ExpAud = $locset.ExpAud
                 $SetFPS = $locset.FPS
+                $GenFrmt = $using:GenFrmt
 
-                Join-VidPartsFromList $SelGrpDef $_.VidExpPath $Quality $ExpAud $SetFPS
+                Join-VidPartsFromList $GenFrmt $SelGrpDef $_.VidExpPath $Quality $ExpAud $SetFPS
             } -ThrottleLimit 4
         }
         else
@@ -108,7 +110,7 @@ function Set-VideoFromMedia
                 #Write-Host $SelVidExpPath
                 #Write-Host $Quality
                 #Write-Host $ExpAud
-                Join-VidPartsFromList $SelGrpDef $SelVidExpPath $Quality $ExpAud
+                Join-VidPartsFromList $GenFrmt $SelGrpDef $SelVidExpPath $Quality $ExpAud
             }
         }
         $SelGrpN = 0

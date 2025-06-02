@@ -11,6 +11,7 @@ Write-Host $PSScriptRoot
 Set-Location -Path $PSScriptRoot
 $ProcLvl = 0 #Usually 0 (Process all) unless debugging.
 $SetTmpPath = "" #"T" #If utalizing RAM drive for conversion (1 gb), set this to the letter of the drive that should be created.  Else keep blank.
+$GenFrmt = "mp4"
 
 if ((HOSTNAME) -EQ "DESKTOP-OFFICE")
 {
@@ -60,7 +61,7 @@ if ($UseTestPath)
         NameMethod = "FldrLvl2";
         ImgVidFldr = "\ImgInVid";
         Quality = 30;
-        ExpAud = 1;
+        ExpAud = 0;
         CleanBuild = 0;
     })
 
@@ -79,7 +80,6 @@ else
         ExceptionParentFldrGreaterThan = 2015
     }
     )
-    $ExceptionParentFldrGreaterThan = 2015
     $InputFileRootPath ="S:"
     $PrepFileRootPath  = $BuDrv+ ":\AlbumPrep"
     #$ConvFileRootPath  = $BuDrv+ ":\AlbumConv"
@@ -212,14 +212,14 @@ if (($ProcLvl -eq 0) -or ($ProcLvl -eq 1) -or $CopyMedia){
     Copy-MediaFromNetwork $InputFileRootPath $PrepFileRootPath $Names2Ig
 }
 if (($ProcLvl -eq 0) -or ($ProcLvl -eq 2)){
-    $PrepMediaDef = Update-ConvertedMediaImagesForDisplay $PrepFileRootPath $ConvFileRootPath
-    Update-MediaForDisplaySets $PrepMediaDef $OutputDefs $SetTmpPath
+    $PrepMediaDef = Update-ConvertedMediaImagesForDisplay $GenFrmt $PrepFileRootPath $ConvFileRootPath
+    Update-MediaForDisplaySets $GenFrmt $PrepMediaDef $OutputDefs $SetTmpPath
 }
 if (($ProcLvl -eq 0) -or ($ProcLvl -eq 3)){
     Write-Host "***************************************"
     Write-Host "**** Building final output videos *****"
     Write-Host "***************************************"
-    Set-VideoFromMedia $OutputDefs
+    Set-VideoFromMedia $GenFrmt $OutputDefs
 }
 $stopwatch.Stop()
 $elapsedTime = $stopwatch.Elapsed

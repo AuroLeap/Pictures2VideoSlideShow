@@ -554,6 +554,7 @@ function New-VideoZoomedOutFromPic
 function Update-ConvertedMediaImagesForDisplay
 {
     param (
+        [string]$GenFrmt,
         [string]$PrepFileRootPath,
         [string]$ConvFileRootPath
     )
@@ -661,7 +662,7 @@ function Update-ConvertedMediaImagesForDisplay
                 if ( $file.Name.EndsWith($type))
                 {
                     $file.IsVid = 1
-                    $file.ContExt = ".mp4"
+                    $file.ContExt = ".$GenFrmt"
                 }
             }
             #If it is an image, set the conversion source path accordingly.
@@ -775,6 +776,7 @@ function Update-ConvertedMediaImagesForDisplay
 function Update-MediaForDisplaySets
 {
     param (
+        [string]$GenFrmt,
         $AllPrepFiles,
         $OutputSizes,
         [string]$SetTmpPath = ""
@@ -931,7 +933,7 @@ function Update-MediaForDisplaySets
                 $datekey = [System.ValueTuple[string, long, datetime]]::new(
                         $SelProp.RelPath, $SelProp.Length, $DateTimeVal)
 
-                if($SelProp.RelContPath.Endswith("mp4")){
+                if($SelProp.RelContPath.Endswith($GenFrmt)){
 
                 #write-host($SelProp.RelContPath)
                 }
@@ -996,7 +998,7 @@ function Update-MediaForDisplaySets
         {
             #If this is a transition file and the core file exists, assume all three can stay (don't tag for removal)
             $PathLen = $ContFile.FullName.Length
-            if ($ContFile.Fullname.EndsWith("mp4srt") -or $ContFile.Fullname.EndsWith("mp4end"))
+            if ($ContFile.Fullname.EndsWith($GenFrmt+"srt") -or $ContFile.Fullname.EndsWith($GenFrmt+"end"))
             {
                 $CoreName = $ContFile.Fullname.Substring(0, ($PathLen - 3))
             }
@@ -1088,7 +1090,7 @@ function Update-MediaForDisplaySets
             {
                 if ($file.IsImg -and $set.ImgVidFldr.Length -and $set.PicDispTime)
                 {
-                    $file.RelImgVidPath = ($set.ImgVidFldr + "\" + $Designator + ".mp4")
+                    $file.RelImgVidPath = ($set.ImgVidFldr + "\" + $Designator + ".$GenFrmt")
                     $file.ImgVidPath = ($ContFileRootPath + $file.RelImgVidPath)
                 }
                 #It's already been exported, so set the flag.
@@ -1149,6 +1151,7 @@ function Update-MediaForDisplaySets
                 ${function:New-VideoZoomedOutFromPic} = $using:funcDef
                 $SetTmpPath                           = $using:SetTmpPath
                 $file = $_
+                $GenFrmt = $using:GenFrmt
                 $XDim = $using:set.XDim
                 $YDim = $using:set.YDim
                 $FadeTime = $using:set.FadeTime
@@ -1173,6 +1176,7 @@ function Update-MediaForDisplaySets
             $SelFadeTime = ($SelFadeFrames/$framerate)
             $SelNormFrames = [Int]($PicDispTime*$framerate)
             $SelNormTime = ($SelNormFrames/$framerate)
+            $frmtdef = $GenFrmt
             try
             {
                 if ($file.IsImg)
@@ -1255,12 +1259,12 @@ function Update-MediaForDisplaySets
                         $filtercfg2 = ":d=1:fps=$frameRate`:s=$SizeOut`" "
 
                         #Write-Host("**************************L3****************************")
-                        $ffmpegOutSrt = "-map 0:a -map 1:v -s $SizeStr2 -f 'mp4' `"$($file.ImgVidPath)srt`""
-                        $ffmpegOutNom = "-map 0:a -map 1:v -s $SizeStr2 -f 'mp4' `"$($file.ImgVidPath)`""
-                        $ffmpegOutEnd = "-map 0:a -map 1:v -s $SizeStr2 -f 'mp4' `"$($file.ImgVidPath)end`""
-                        $ffmpegOutSrtIM = "-map 0:a -map 1:v -frames:v $NFramesTrn -f 'mp4' `"$($file.ImgVidPath)srt`""
-                        $ffmpegOutNomIM = "-map 0:a -map 1:v -frames:v $NFramesStd -f 'mp4' `"$($file.ImgVidPath)`""
-                        $ffmpegOutEndIM = "-map 0:a -map 1:v -frames:v $NFramesTrn -f 'mp4' `"$($file.ImgVidPath)end`""
+                        $ffmpegOutSrt = "-map 0:a -map 1:v -s $SizeStr2 -f '$frmtdef' `"$($file.ImgVidPath)srt`""
+                        $ffmpegOutNom = "-map 0:a -map 1:v -s $SizeStr2 -f '$frmtdef' `"$($file.ImgVidPath)`""
+                        $ffmpegOutEnd = "-map 0:a -map 1:v -s $SizeStr2 -f '$frmtdef' `"$($file.ImgVidPath)end`""
+                        $ffmpegOutSrtIM = "-map 0:a -map 1:v -frames:v $NFramesTrn -f '$frmtdef' `"$($file.ImgVidPath)srt`""
+                        $ffmpegOutNomIM = "-map 0:a -map 1:v -frames:v $NFramesStd -f '$frmtdef' `"$($file.ImgVidPath)`""
+                        $ffmpegOutEndIM = "-map 0:a -map 1:v -frames:v $NFramesTrn -f '$frmtdef' `"$($file.ImgVidPath)end`""
                         #Write-Host("**************************L4****************************")
                         $ffmpegCmdSrt = $ffmpegCmd1 + $ffmpegCmdA + $ffmpegCmdV1 + $SrtffmpegCmdV2 `
                         + $Srtfiltercfg1 + $filtercfgX + $filtercfgY + $filtercfg2 `
@@ -1461,12 +1465,12 @@ function Update-MediaForDisplaySets
                         $ffmpegvidfiltsub = "scale=$wint`:$hint`:force_original_aspect_ratio=decrease$PadOpt"
                         $ffmpegvidfilt = "fps=fps=$framerate[vint]`;[vint]$ffmpegvidfiltsub"
                         $ffmpegvidcmd1 = "-vf "+ $ffmpegvidfiltsub
-                        $ffmpegcmdsrt = $ffmpeginputsrt + $ffmpegvidcmd1 + " " + $ffmpegaudcmd + $ffmpegvcdctra + " -movflags faststart -f 'mp4' `"$( $file.ContPath)srt`""
-                        $ffmpegcmdend = $ffmpeginputend + $ffmpegvidcmd1 + " " + $ffmpegaudcmd + $ffmpegvcdctra + " -movflags faststart -f 'mp4' `"$( $file.ContPath)end`""
+                        $ffmpegcmdsrt = $ffmpeginputsrt + $ffmpegvidcmd1 + " " + $ffmpegaudcmd + $ffmpegvcdctra + " -movflags faststart -f '$frmtdef' `"$( $file.ContPath)srt`""
+                        $ffmpegcmdend = $ffmpeginputend + $ffmpegvidcmd1 + " " + $ffmpegaudcmd + $ffmpegvcdctra + " -movflags faststart -f '$frmtdef' `"$( $file.ContPath)end`""
                         if($AudioSet)
-                        {$ffmpegcmdnom = $ffmpeginputnom + "-filter_complex `"[0:v]$ffmpegvidfilt`;[0:a]afade=t=in:st=0:d=$AFd,afade=t=out:st=$AOtOf`:d=$AFd`" " + $ffmpegaudcmd + $ffmpegvcdcstd + " -f 'mp4' `"$( $file.ContPath)`""}
+                        {$ffmpegcmdnom = $ffmpeginputnom + "-filter_complex `"[0:v]$ffmpegvidfilt`;[0:a]afade=t=in:st=0:d=$AFd,afade=t=out:st=$AOtOf`:d=$AFd`" " + $ffmpegaudcmd + $ffmpegvcdcstd + " -f '$frmtdef' `"$( $file.ContPath)`""}
                         else
-                        {$ffmpegcmdnom = $ffmpeginputnom + " $ffmpegCmdA " + "-filter_complex `"[0:v]$ffmpegvidfilt[vout]`" " + $ffmpegaudcmd + $ffmpegvcdcstd + " -map `"[vout]`" -map 1:a -frames:v $NFramesNom -f 'mp4' `"$( $file.ContPath)`""}
+                        {$ffmpegcmdnom = $ffmpeginputnom + " $ffmpegCmdA " + "-filter_complex `"[0:v]$ffmpegvidfilt[vout]`" " + $ffmpegaudcmd + $ffmpegvcdcstd + " -map `"[vout]`" -map 1:a -frames:v $NFramesNom -f '$frmtdef' `"$( $file.ContPath)`""}
 
                         #Uncomment to generate files with commands for debugging
                         #$ffmpegcmdnom | Out-File -FilePath "$($file.ContPath)nomcmd"
