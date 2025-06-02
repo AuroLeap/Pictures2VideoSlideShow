@@ -827,7 +827,7 @@ function Update-MediaForDisplaySets
         vq = $tqual #Is updated per set definition.
         ffmpegvcdcstd = "" #Configured below per set.
         ffmpegvcdctra = "" #Configured below per set.
-        ffmpegaudcmd = "-c:a aac -ar $arval "
+        ffmpegaudcmd = "-c:a aac -ar $arval -shortest "
     }
     $ExpFileTupleNonZeroIdx = @{ }
     $ExpFileRelPathExists = @{ }
@@ -1000,7 +1000,7 @@ function Update-MediaForDisplaySets
             $PathLen = $ContFile.FullName.Length
             if ($ContFile.Fullname.EndsWith("srt."+$GenFrmt) -or $ContFile.Fullname.EndsWith("end."+$GenFrmt))
             {
-                $CoreName = $ContFile.Fullname.Substring(0, ($PathLen - 7))+$GenFrmt
+                $CoreName = $ContFile.Fullname.Substring(0, ($PathLen - (4+$GenFrmt.Length)))+$GenFrmt
             }
             else
             {

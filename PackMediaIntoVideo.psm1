@@ -25,7 +25,7 @@ function Set-VideoFromMedia
         {
             $PrepAllInputFiles = $PrepAllInputFiles + @(Get-ChildItem -LiteralPath $VidPacksRootPath -Filter "*.$GenFrmt")
         }
-        $PrepAllInputFiles = $PrepAllInputFiles | Where-Object {!$_.Name.EndsWith("end.mp4") -and !$_.Name.EndsWith("srt.mp4")}
+        $PrepAllInputFiles = $PrepAllInputFiles | Where-Object {!$_.Name.EndsWith("end.$GenFrmt") -and !$_.Name.EndsWith("srt.$GenFrmt")}
         $PrepAllInputFiles | Add-Member -MemberType NoteProperty -Name GroupN -Value $([int])
         $PrepAllInputFiles | Add-Member -MemberType NoteProperty -Name Dur -Value $([Decimal])
         $PrepAllInputFiles | Add-Member -MemberType NoteProperty -Name FileInd -Value $([int])

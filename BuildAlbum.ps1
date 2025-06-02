@@ -11,7 +11,7 @@ Write-Host $PSScriptRoot
 Set-Location -Path $PSScriptRoot
 $ProcLvl = 0 #Usually 0 (Process all) unless debugging.
 $SetTmpPath = "" #"T" #If utalizing RAM drive for conversion (1 gb), set this to the letter of the drive that should be created.  Else keep blank.
-$GenFrmt = "mp4"
+$GenFrmt = "ts"
 
 if ((HOSTNAME) -EQ "DESKTOP-OFFICE")
 {
@@ -61,7 +61,7 @@ if ($UseTestPath)
         NameMethod = "FldrLvl2";
         ImgVidFldr = "\ImgInVid";
         Quality = 30;
-        ExpAud = 0;
+        ExpAud = 0; #Note: Keep 0 until / unless fixed; exporting audio doesn't appear to work (information becomes corrupted, video playback freezes)
         CleanBuild = 0;
     })
 
@@ -97,7 +97,7 @@ else
             NameMethod = "FldrLvl2";
             ImgVidFldr = "\ImgInVid";
             Quality = 23;
-            ExpAud = 0;
+            ExpAud = 0; #Note: Keep 0 until / unless fixed; exporting audio doesn't appear to work (information becomes corrupted, video playback freezes)
             CleanBuild = 0;
         }
         #[pscustomobject]@{
@@ -111,7 +111,7 @@ else
         #    NameMethod = "FldrLvl2";
         #    ImgVidFldr = "\ImgInVid";
         #    Quality = 22;
-        #    ExpAud = 0;
+        #    ExpAud = 0; #Note: Keep 0 until / unless fixed; exporting audio doesn't appear to work (information becomes corrupted, video playback freezes)
         #    CleanBuild = 0;
         #}
     )

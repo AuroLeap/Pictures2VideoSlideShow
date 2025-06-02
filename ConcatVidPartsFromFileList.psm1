@@ -295,7 +295,7 @@ function Join-VidPartsFromList
                         $CurrExpIdx = $CurrExpIdx+1
                         $tname = $tranprepend + "-fadein" + $postname + ".$GenFrmt"
                         $tnameNA = $tranprepend + "-fadein" + $postname + "NA.$GenFrmt"
-                        $tincmd = "ffmpeg -y -i `"$VSrt`" -vf `"fade=t=in:st=0:d=$tdur`" $EncodeDef `"$tname`""
+                        $tincmd = "ffmpeg -y -i `"$VSrt`" -vf `"fade=t=in:st=0:d=$tdur`" $EncodeDef -c:a copy `"$tname`""
                         #write-host $tincmd
                         #Invoke-Expression $tincmd
                         #Wait-Debugger
@@ -330,8 +330,8 @@ function Join-VidPartsFromList
                         #$tcmd = "ffmpeg -y -i `"$V1`" -i `"$VSrt`" -filter_complex `"[0:v][1:v]xfade=offset=0.0:duration=$tdur[vfade];[0:a][1:a]acrossfade=duration=$tdur[afade]`" -map vfade:v -map afade:a $EncodeDef `"$tname`""
 
                         $FSrt = "ffmpeg  -hide_banner -loglevel error -nostats -y -f lavfi -i"
-                        $FAudIn = " anullsrc=r=$selarate`:d=$tdur"
-                        $FAudOut =  " -map 0:a"
+                        $FAudIn = " anullsrc=r=$selarate"
+                        $FAudOut =  " -map 0:a -c:a $selacodec -ar $selarate -shortest"
                         $tcmd = $FSrt + $FAudIn + " -i `"$V1`" -i `"$VSrt`" -filter_complex `"[1:v][2:v]xfade=offset=0.0:duration=$tdur[vfout]`" -map `"[vfout]`""+$FAudOut+" $EncodeDef `"$tname`""
                         if($CurrIdx -eq 13)
                         {
