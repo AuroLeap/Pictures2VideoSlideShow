@@ -25,6 +25,7 @@ function Set-VideoFromMedia
         {
             $PrepAllInputFiles = $PrepAllInputFiles + @(Get-ChildItem -LiteralPath $VidPacksRootPath -Filter "*.$GenFrmt")
         }
+        $PrepAllInputFiles = $PrepAllInputFiles | Where-Object {!$_.Name.EndsWith("end.mp4") -and !$_.Name.EndsWith("srt.mp4")}
         $PrepAllInputFiles | Add-Member -MemberType NoteProperty -Name GroupN -Value $([int])
         $PrepAllInputFiles | Add-Member -MemberType NoteProperty -Name Dur -Value $([Decimal])
         $PrepAllInputFiles | Add-Member -MemberType NoteProperty -Name FileInd -Value $([int])
@@ -44,12 +45,19 @@ function Set-VideoFromMedia
         foreach ($file in $AllInputFiles)
         #For each file
         {
-            $file.GroupN = $SelGrpN
-            $SelGrpN++
-            $SetFileInd++
-            $file.FileInd = $SetFileInd
-            if($SelGrpN -gt $NGroups){
-                $SelGrpN = 1
+            if($file.FullName.EndsWith(".srt.mp4") -or $file.FullName.EndsWith(".srt.mp4"))
+            {#Do nothing, should not be added to a positve group number.
+            }
+            else
+            {
+                $file.GroupN = $SelGrpN
+                $SelGrpN++
+                $SetFileInd++
+                $file.FileInd = $SetFileInd
+                if ($SelGrpN -gt $NGroups)
+                {
+                    $SelGrpN = 1
+                }
             }
             #Leaving in case duration is needed in the future for grouping
             #$ToRun = "ffprobe -v error -select_streams v -show_entries stream=width,duration -of csv=p=0 `"" +$file.Fullname+ "`""
@@ -64,7 +72,7 @@ function Set-VideoFromMedia
         #    #$BitTotal = 8*$set.MaxSizeInGB*1.25e+8
         #    #$TarBitrate = $BitTotal/$DurTotal #Assume fading is negligable.
         #}
-        $Groups= $AllInputFiles | Select-Object -ExpandProperty GroupN | Sort-Object -Unique
+        $Groups= $AllInputFiles | Where-Object {$_.GroupN -ne 0} | Select-Object -ExpandProperty GroupN | Sort-Object -Unique
         $Groups | Add-Member -MemberType NoteProperty -Name FileListPath -Value $([string])
         $Groups | Add-Member -MemberType NoteProperty -Name VidExpPath -Value $([string])
         #Map to store file list.

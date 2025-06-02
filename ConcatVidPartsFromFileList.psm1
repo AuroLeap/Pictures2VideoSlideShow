@@ -268,6 +268,8 @@ function Join-VidPartsFromList
             $CurrExpIdx = 0
             $LastVid = 0
             $PrevVid2TransitionFrom = ""
+            $PVSrt = ""
+            $PVEnd = ""
             $PrevVidDuration = 0
             $VidPathStr = [String[]]::new($FileList.Count*2+1)
             foreach ($file in $FileList)
@@ -324,13 +326,13 @@ function Join-VidPartsFromList
                         $CurrExpIdx = $CurrExpIdx+1
                         $tname = $tranprepend + $prename + "to" + $postname + ".$GenFrmt"
                         $tnameNA = $tranprepend + $prename + "to" + $postname + "NA.$GenFrmt"
-                        $V1 = $PrevVid2TransitionFrom+"end"
+                        $V1 = $PVEnd
                         #$tcmd = "ffmpeg -y -i `"$V1`" -i `"$VSrt`" -filter_complex `"[0:v][1:v]xfade=offset=0.0:duration=$tdur[vfade];[0:a][1:a]acrossfade=duration=$tdur[afade]`" -map vfade:v -map afade:a $EncodeDef `"$tname`""
 
                         $FSrt = "ffmpeg  -hide_banner -loglevel error -nostats -y -f lavfi -i"
                         $FAudIn = " anullsrc=r=$selarate`:d=$tdur"
                         $FAudOut =  " -map 0:a"
-                        $tcmd = $FSrt + $FAudIn + " -i `"$V1`" -f '$GenFrmt' -i `"$VSrt`" -filter_complex `"[1:v][2:v]xfade=offset=0.0:duration=$tdur[vfout]`" -map `"[vfout]`""+$FAudOut+" $EncodeDef `"$tname`""
+                        $tcmd = $FSrt + $FAudIn + " -i `"$V1`" -i `"$VSrt`" -filter_complex `"[1:v][2:v]xfade=offset=0.0:duration=$tdur[vfout]`" -map `"[vfout]`""+$FAudOut+" $EncodeDef `"$tname`""
                         if($CurrIdx -eq 13)
                         {
                             #write-host "ChkHere"
@@ -412,6 +414,8 @@ function Join-VidPartsFromList
                     #If we get this far, update the previous properties for the next video to transition from.
                     $PrevVidDuration = $file.dur
                     $PrevVid2TransitionFrom = $file
+                    $PVSrt = $VSrt
+                    $PVEnd = $VEnd
                     $LastExpIdx = $CurrExpIdx
                     $NFilesExported++
 
