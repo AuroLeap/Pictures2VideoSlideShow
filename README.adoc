@@ -1,5 +1,9 @@
 Does your wife, yourself, or your significant other have thousands of pictures and videos stored away but not being enjoyed on a daily basis?  This tools hopes to put recorded media and the memories they hold into a set of videos resized and smoothly sequenced for a specific display, framerate, and quality.
 
+ifndef::env-github[]
+https://github.com/AuroLeap/Pictures2VideoSlideShow[Github Repository Here]
+endif::[]
+
 This is accomplished using a "hacky" set of scripts intended to prepare a set of pictures / videos for content on a digital picture frame.  Click to see the demo below:
 
 ifdef::env-github[]
@@ -16,7 +20,7 @@ While most digital picture frames do offer more settings than the frame that put
 
 == How to use
 
-NOTE: Currently, these scripts are written ad-hoc and without consistent consideration for Linux / Macintosh environments.  This set of scripts is written in Powershell, but should be relatively easy to convert to Python or fix with unix path separator delimiters.
+NOTE: Currently, these scripts are written ad-hoc and without consistent consideration for Linux / Macintosh environments.  This set of scripts is written in Powershell, but should be relatively easy to convert to Python or to fix the current Powershell scripts to work with unix path separators.
 
 === For Windows
 
@@ -28,7 +32,7 @@ NOTE: Currently, these scripts are written ad-hoc and without consistent conside
 ... https://imagemagick.org/script/download.php[ImageMagick] for command line photo manipulation.
 ... https://www.ffmpeg.org/download.html[FFMPEG] for command line media manipulation.
 ... https://annystudio.com/software/jpeglosslessrotator/[JPEG Lossless Rotator] for command line picture rotation, note this tool is not required due to the current methods being used.
-... Ensure environmental paths include both of these products, though that should occur automatically upon install.
+... Ensure environmental paths include all of these products, though that should occur automatically upon install.
 . Highly encouraged - Create a RAM disk to run video creation processes through.
 .. I use https://sourceforge.net/projects/aim-toolkit/[AIM Toolkit]
 .. This can significantly improve processing speed, as -in the default configuration- ImageMagick will create individual frames when converting images to video sequences which are then stitched together with ffmpeg.  Keeping these frames on a RAM drive will significantly improve ffmpeg's processing speed.
@@ -39,8 +43,6 @@ NOTE: Currently, these scripts are written ad-hoc and without consistent conside
 .. At this point I would recommend running the "BuildAlbum.ps1" file to see if the test file is able to build without issue, as that will indicate all dependencies have been properly installed and that the temporary path -if applicable- is being utilized.
 .. $Names2Ig: Structure which defines which names / folders should be ignored when getting media files, and exceptions for this rule.  For myself, I put everything into various "DNP" subfolders, so if I have originals or long videos I still want to keep, they aren't brought into a digital picture frame.
 ... ExceptionParentFldrGreaterThan: Exception designation for ignore attributes, currently this is only designed to look at numbers in the parent folder, but gives a good idea of how other exceptions could be accommodated.  In this instance, if any number in the parent folder of a file matching the ignore definition is greater than this value, it is NOT ignored.
-.. Scroll down to the comment "Define standard / non-test paths and configure the properties accordingly:
-.. $ExceptionParentFldrGreaterThan: A special designation I have for the way I organize images.  Even if they are set to ignore, if their parent folder contains a year designation greater than this value, allow them through, since I label folders starting with the year, and I want to allow newer content through.
 .. Scroll down to the comment "Define standard / non-test paths and configure the properties accordingly:
 ... "$InputFileRootPath": Update the folder path (which for many with a large picture / video collection hopefully is a network / NAS location.)  If you don't want to maintain a copy of your files, set this to an empty string array "".
 ... "$PrepFileRootPath": Update the folder path which defines where the input files will be copied to.  This assumes you have enough space to copy over all the media files.  If you do not want to copy your media, just set this to the actual root location where content is located.
@@ -61,4 +63,6 @@ NOTE: Currently, these scripts are written ad-hoc and without consistent conside
 ... CleanBuild: Generally for debugging only, as it will cause all previously converted media to get wiped out.  This is only really useful for testing, which is what I added it for.
 
 ==== Running
-Run as you would any other powershell script.  You can simply run "BuildAlbum.bat" from the root folder (as admin) to also call the ps1 file, and verify (as long as you haven't changed the test flag) that all processes operator.  The output file for the current test configuration will be located in the folder "AlbumOut1440x900q30-Groups"
+Run as you would any other powershell script.  You can simply run "BuildAlbum.bat" from the root folder (as admin) to also call the ps1 file, and verify (as long as you haven't changed the test flag) that all processes operate.  The output file for the current test configuration will be located in the folder "AlbumOut1440x900q30-Groups"
+
+To run your configuration, change $UseTestPath  to a value of 0.

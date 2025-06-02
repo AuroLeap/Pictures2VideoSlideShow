@@ -56,11 +56,11 @@ if ($UseTestPath)
         PicDispTime = 6;
         MaxSrtRot = 30;
         FadeTime = 0.7;
-        BulkVidTimeMin = 20;
+        BulkVidTimeMin = 0.3;
         NameMethod = "FldrLvl2";
         ImgVidFldr = "\ImgInVid";
         Quality = 30;
-        ExpAud = 0;
+        ExpAud = 1;
         CleanBuild = 0;
     })
 

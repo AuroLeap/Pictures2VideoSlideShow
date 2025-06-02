@@ -69,6 +69,9 @@ function Set-VideoFromMedia
         #Map to store file list.
         $GrpDef = @{}
         #Now build a list for each group.  This will be used in ffmpeg to actually build out the video.
+        Write-Host "***********************************************"
+        Write-Host "Exporting $($NGroups.ToString()) groups..."
+        Write-Host "***********************************************"
         foreach ($grp in $Groups){
             $FileSet = (($AllInputFiles | Where-Object {( $_.GroupN -eq $grp)} | Sort-Object -Property Name) | Select-Object -ExpandProperty FullName)
             $GrpDef[$grp] = $FileSet

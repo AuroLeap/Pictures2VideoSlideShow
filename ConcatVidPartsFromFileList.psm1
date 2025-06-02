@@ -252,7 +252,7 @@ function Join-VidPartsFromList
                         $tname = $tranprepend + "-fadein" + $postname + ".mp4"
                         $tnameNA = $tranprepend + "-fadein" + $postname + "NA.mp4"
                         $tincmd = "ffmpeg -y -f 'mp4' -i `"$VSrt`" -vf `"fade=t=in:st=0:d=$tdur`" $EncodeDef `"$tname`""
-                        write-host $tincmd
+                        #write-host $tincmd
                         #Invoke-Expression $tincmd
                         #Wait-Debugger
                         (Invoke-Expression $tincmd) *> $null
