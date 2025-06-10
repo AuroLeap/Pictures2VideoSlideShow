@@ -6,7 +6,8 @@ function Set-VideoFromMedia
 {
     param (
         $GenFrmt,
-        $OutputSizes
+        $OutputSizes,
+        $ReencodeOpt = ""
     )
 
     if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
@@ -101,8 +102,9 @@ function Set-VideoFromMedia
                 $ExpAud = $locset.ExpAud
                 $SetFPS = $locset.FPS
                 $GenFrmt = $using:GenFrmt
+                $ReencodeOpt = $using:ReencodeOpt
 
-                Join-VidPartsFromList $GenFrmt $SelGrpDef $_.VidExpPath $Quality $ExpAud $SetFPS
+                Join-VidPartsFromList $GenFrmt $SelGrpDef $_.VidExpPath $Quality $ExpAud $SetFPS $ReencodeOpt
             } -ThrottleLimit 4
         }
         else
@@ -118,7 +120,7 @@ function Set-VideoFromMedia
                 #Write-Host $SelVidExpPath
                 #Write-Host $Quality
                 #Write-Host $ExpAud
-                Join-VidPartsFromList $GenFrmt $SelGrpDef $SelVidExpPath $Quality $ExpAud
+                Join-VidPartsFromList $GenFrmt $SelGrpDef $SelVidExpPath $Quality $ExpAud $SetFPS $ReencodeOpt
             }
         }
         $SelGrpN = 0

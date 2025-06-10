@@ -6,7 +6,8 @@ function Join-VidPartsFromList
         [string]$outputFile = "output",
         $vidqty = [Int] 20,
         $IncAud = [Int] 1,
-        $SelFPS = [Decimal] 24
+        $SelFPS = [Decimal] 30,
+        $ReencodeOpt = ""
     )
     if(($FileListProps.Count -gt 1) -and ($FileListProps[0] -is [string]))
     {
@@ -33,6 +34,7 @@ function Join-VidPartsFromList
             Write-Host "Getting properties of all video files and building full command for $outputFile..."
 
             $FileList | Add-Member -MemberType NoteProperty -Name VidDef -Value $([System.ValueTuple[int, int, int, decimal,string, string]])
+            $FileList | Add-Member -MemberType NoteProperty -Name ResDef -Value $([System.ValueTuple[int, int]])
             $FileList | Add-Member -MemberType NoteProperty -Name Dur -Value $([decimal])
             $FileList | Add-Member -MemberType NoteProperty -Name SrtDur -Value $([decimal])
             $FileList | Add-Member -MemberType NoteProperty -Name EndDur -Value $([decimal])
@@ -197,6 +199,8 @@ function Join-VidPartsFromList
                 # pixel format, colorspace, vcodec, acodec, Width, height, timebase, arate,
                 $entry.VidDef = [System.ValueTuple[int, int, int, decimal, string, string]]::new(
                         $Width, $Height, $timebase, $arate, $vdefinition, $adefinition)
+                $entry.ResDef = [System.ValueTuple[int, int]]::new(
+                        $Width, $Height)
 
                 $entry.framerate = $framerate; $entry.timebase = $timebase;
                 $entry.Dur = $Dur ; $entry.SrtDur = $SrtDur ; $entry.EndDur = $EndDur
@@ -216,16 +220,16 @@ function Join-VidPartsFromList
             #*********************************************************************
             $NotInFirstGrp = 0
             $GrpSets = $FileList | Group-Object -Property VidDef
-            #$FileList | Add-Member -MemberType NoteProperty -Name FrameRate -Value $([decimal])
-            $GrpSets | Add-Member -MemberType NoteProperty -Name TotalDur -value $([decimal]0)
+            #Get the output encoding from the group with the most files
+            $GrpSets | Add-Member -MemberType NoteProperty -Name NFiles -value $([decimal]0)
             foreach ($Grp in $GrpSets)
             {
                 foreach ($file in ($Grp| Select-Object -Expand Group))
                 {
-                    $Grp.TotalDur = $Grp.TotalDur + $file.Dur
+                    $Grp.NFiles = $Grp.NFiles + 1
                 }
             }
-            $GrpSets = $GrpSets| Sort-Object TotalDur -Descending
+            $GrpSets = $GrpSets| Sort-Object NFiles -Descending
             foreach ($grp in $GrpSets){
                 if($NotInFirstGrp)
                 {
@@ -251,6 +255,33 @@ function Join-VidPartsFromList
                 }
                 $NotInFirstGrp++
             }
+            #If reencoding, we just need all the videos to be the same size.
+            $RencodeSet = 0
+            if([string]::IsNullOrEmpty($ReencodeOpt)){
+                $selvcodec = $ReencodeOpt
+                $RencodeSet = 1
+                $GrpSets = $FileList | Group-Object -Property ResDef
+                #Get the output encoding from the group with the most files
+                $GrpSets | Add-Member -MemberType NoteProperty -Name NFiles -value $([decimal]0)
+                foreach ($Grp in $GrpSets)
+                {
+                    foreach ($file in ($Grp| Select-Object -Expand Group))
+                    {
+                        $Grp.NFiles = $Grp.NFiles + 1
+                    }
+                }
+                $GrpSets = $GrpSets| Sort-Object NFiles -Descending
+                foreach ($grp in $GrpSets){
+                    if($NotInFirstGrp)
+                    {
+                        foreach($file in ($grp| Select-Object -ExpandProperty Group))
+                        {
+                            $file.Need2Conv = 1
+                        }
+                    }
+                    $NotInFirstGrp++
+                }
+            }
             if ($NotInFirstGrp -gt 1)
             {
                 Write-Host "$grpfldr`: Video sets for are not all the same properties, some files may be ignored, or converted."
@@ -261,16 +292,18 @@ function Join-VidPartsFromList
             #*********************************************************************
             #Only pick files with common format, since they must be concatable.
             $EncodeDef = "-video_track_timescale $vseltimebase -vcodec $selvcodec -crf $vidqty -preset slow -pix_fmt $selpixfmt -colorspace $selcolorspace -movflags faststart "
+            if($RencodeSet)
+            {
+                $FinEncodeDef = "-video_track_timescale $vseltimebase -vcodec $selvcodec -crf $vidqty -preset slow -pix_fmt $selpixfmt -colorspace $selcolorspace -movflags faststart "
+                $EncodeDef = "-video_track_timescale $vseltimebase -vcodec $selvcodec -crf 10 -preset slow -pix_fmt $selpixfmt -colorspace $selcolorspace -movflags faststart "
+            }
             $FileList = @($GrpSets |  Select-Object -ExpandProperty Group) | Where-Object -Property Need2Conv -eq 0
             $FileList | Add-Member -MemberType NoteProperty -Name ExportSuccess -Value $([int]0)
             $NFilesExported = 0
             $LastExpIdx = -1
             $CurrExpIdx = 0
-            $LastVid = 0
             $PrevVid2TransitionFrom = ""
-            $PVSrt = ""
             $PVEnd = ""
-            $PrevVidDuration = 0
             $VidPathStr = [String[]]::new($FileList.Count*2+1)
             foreach ($file in $FileList)
             {
@@ -412,9 +445,7 @@ function Join-VidPartsFromList
                         }
                     }
                     #If we get this far, update the previous properties for the next video to transition from.
-                    $PrevVidDuration = $file.dur
                     $PrevVid2TransitionFrom = $file
-                    $PVSrt = $VSrt
                     $PVEnd = $VEnd
                     $LastExpIdx = $CurrExpIdx
                     $NFilesExported++
@@ -438,9 +469,36 @@ function Join-VidPartsFromList
             }
             #Wait-Debugger
             $VidPathExp = $VidPathStr[0..$LastExpIdx]
-            $VidPathExp| Out-File -FilePath "$appendlist" -force
             #Build list of all raw files to concat.
-            $ffmpegcmd = "ffmpeg -y -safe 0 -f concat -i `"$appendlist`" -c copy -movflags faststart `"$finfile`""
+            $VidPathExp| Out-File -FilePath "$appendlist" -force
+            #Define build command, depend on if reencoding or not.
+            if($RencodeSet){
+                $find = -1
+                $FiltStr = "`""
+                $FileInputStr = ""
+                $N2Concat = 0
+                foreach ($file2con in $VidPathExp){
+                    $find++
+                    $N2Concat++
+                    $FileInputStr+=" -i $file2con"
+                    $FiltStr+= "[$find`:v:0]"
+                    if($IncAud){
+                        FiltStr+= "[$find`:a:0]"
+                    }
+                }
+                #Complete the string.
+                $FiltStr+="concat=n=$N2Concat`:v=1"
+                if($IncAud){
+                    FiltStr+= ":a=1[outv][outa]`" -map `"[outv]`" -map `"[outa]`""
+                }
+                else{
+                    $FiltStr+= "[outv]`" -map `"[outv]`""
+                }
+                $ffmpegcmd = "ffmpeg -y -safe 0 $FileInputStr -filter_complex `"`" $FinEncodeDef `"$finfile`""
+            }
+            else{
+                $ffmpegcmd = "ffmpeg -y -safe 0 -f concat -i `"$appendlist`" -c copy -movflags faststart `"$finfile`""
+            }
             #Wait-Debugger
             $ffmpegcmd | Out-File -FilePath $buildcmd
             (Invoke-Expression $ffmpegcmd) *> $null

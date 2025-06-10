@@ -12,6 +12,7 @@ Set-Location -Path $PSScriptRoot
 $ProcLvl = 0 #Usually 0 (Process all) unless debugging.
 $SetTmpPath = "" #"T" #If utalizing RAM drive for conversion (1 gb), set this to the letter of the drive that should be created.  Else keep blank.
 $GenFrmt = "ts"
+$ReencodeOpt = "libx264"
 
 if ((HOSTNAME) -EQ "DESKTOP-OFFICE")
 {
@@ -62,7 +63,6 @@ if ($UseTestPath)
         ImgVidFldr = "\ImgInVid";
         Quality = 30;
         ExpAud = 0; #Note: Keep 0 until / unless fixed; exporting audio doesn't appear to work (information becomes corrupted, video playback freezes)
-        CleanBuild = 0;
     })
 
 }
@@ -98,11 +98,11 @@ else
         #    ImgVidFldr = "\ImgInVid";
         #    Quality = 23;
         #    ExpAud = 0; #Note: Keep 0 until / unless fixed; exporting audio doesn't appear to work (information becomes corrupted, video playback freezes)
-        #    CleanBuild = 0;
         #}
         [pscustomobject]@{
             XDim = 1920;
             YDim = 1080;
+            Quality = 22;
             FPS = 30;
             PicDispTime = 6;
             MaxSrtRot = 20;
@@ -110,33 +110,21 @@ else
             BulkVidTimeMin = 4;
             NameMethod = "FldrLvl2";
             ImgVidFldr = "\ImgInVid";
-            Quality = 22;
             ExpAud = 0; #Note: Keep 0 until / unless fixed; exporting audio doesn't appear to work (information becomes corrupted, video playback freezes)
-            CleanBuild = 0;
+            #Define any additional sets which are just copies of this definition, but resized.  These should always be lower resolution than the original.
+            AdditionalOutputs = @(
+                [pscustomobject]@{
+                    XDim = 1440;
+                    YDim = 900;
+                    Quality = 22;
+                }
+            )
         }
     )
 }
 #Clean paths if applicable
 $CopyMedia = 0
-foreach ($def in $OutputDefs)
-{
-    if ($def.CleanBuild -and $InputFileRootPath.Length)
-    {
-        $ChkPath = $PrepFileRootPath
-        #$ChkPath = $def.PrepFileRootPath
-        if (Test-Path -LiteralPath $ChkPath)
-        {
-            remove-item -LiteralPath $ChkPath -Recurse -Force
-        }
-        $ChkPath = $ConvFileRootPath
-        #$ChkPath = $def.ConvFileRootPath
-        if (Test-Path -LiteralPath $ChkPath)
-        {
-            remove-item -LiteralPath $ChkPath -Recurse -Force
-        }
-        $CopyMedia = 1
-    }
-}
+
 #Adding dependent scripts:
 Import-Module ".\CopyMediaFromNetwork2Local.psm1" -Force
 Import-Module ".\PrepareMediaForDisplay.psm1" -Force
@@ -145,16 +133,39 @@ Import-Module ".\PackMediaIntoVideo.psm1" -Force
 #Build derived definitions
 $OutputDefs | Add-Member -MemberType NoteProperty -Name Outpath -Value $([string])
 $OutputDefs | Add-Member -MemberType NoteProperty -Name OutGrp -Value $([string])
+$OutputDefs | Add-Member -MemberType NoteProperty -Name InputVideoPath -Value $([string])
 $OutputDefs | Add-Member -MemberType NoteProperty -Name VidPack -Value $([Int])
 $DirSepChar = [System.IO.Path]::DirectorySeparatorChar
+$DerivedSets = @()
+#Create derived group properties, and create the derived set group for group creation from common media segments.
 foreach($set in $OutputDefs)
 {
     $Prepend  = [System.IO.Path]::GetFullPath($OutputFilePrepend, (Get-Location).Path)
-    $Set.Outpath = ($Prepend+$set.XDim+"x"+$set.YDim+"q"+$set.Quality)
+    $BulkDef  = "_FPS"+$set.FPS+"_DT"+$set.PicDispTime+"_FT"+$set.FadeTime+"_MR"+$set.MaxSrtRot
+    $Set.Outpath = ($Prepend+$set.XDim+"x"+$set.YDim+$BulkDef + "q"+$set.Quality)
     $Set.OutGrp = ($Set.Outpath+"-Groups")
     if($Set.PicDispTime -and $Set.BulkVidTimeMin -and $Set.ImgVidFldr.Count)
     {
         $Set.VidPack = 1
+    }
+    $NewSet = $Set | Select-Object -ExcludeProperty AdditionalOutputs
+    $NewSet.InputVideoPath = ""
+    $DerivedSets += @($NewSet)
+    foreach($subset in $Set.AdditionalOutputs){
+        $NewSet = $Set | Select-Object -ExcludeProperty AdditionalOutputs
+        if($subset.Quality){
+            $SubQuality = $subset.Quality
+        }
+        else{
+            $SubQuality = $set.Quality
+        }
+        $NewSet.Quality = $SubQuality
+        $NewSet.XDim = $subset.XDim
+        $NewSet.YDim = $subset.YDim
+        $PreName = $Prepend+$NewSet.XDim+"x"+$NewSet.YDim+$BulkDef + "q"+$SubQuality
+        $NewSet.OutGrp = ($PreName+"-Groups")
+        $NewSet.InputVideoPath = $Set.OutGrp
+        $DerivedSets += @($NewSet)
     }
 }
 #Root path:
@@ -219,7 +230,7 @@ if (($ProcLvl -eq 0) -or ($ProcLvl -eq 3)){
     Write-Host "***************************************"
     Write-Host "**** Building final output videos *****"
     Write-Host "***************************************"
-    Set-VideoFromMedia $GenFrmt $OutputDefs
+    Set-VideoFromMedia $GenFrmt $DerivedSets $ReencodeOpt
 }
 $stopwatch.Stop()
 $elapsedTime = $stopwatch.Elapsed
