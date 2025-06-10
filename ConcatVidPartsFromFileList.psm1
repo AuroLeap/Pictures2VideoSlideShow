@@ -464,6 +464,6 @@ function Join-VidPartsFromList
     finally{
         #Wait-Debugger
         Start-Sleep -Seconds 0.2
-        #(Remove-Item -Path $grpfldr -Recurse -Force -EA SilentlyContinue -Verbose)*>$null
+        (Remove-Item -Path $grpfldr -Recurse -Force -EA SilentlyContinue -Verbose)*>$null
     }
 }

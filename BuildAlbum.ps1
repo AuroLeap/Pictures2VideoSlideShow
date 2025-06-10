@@ -86,34 +86,34 @@ else
     $ConvFileRootPath  = ""
     $OutputFilePrepend = $BuDrv+ ":\Album"
     $OutputDefs = @(
-        [pscustomobject]@{
-            XDim = 1440;
-            YDim = 900;
-            FPS = 30;
-            PicDispTime = 6;
-            MaxSrtRot = 30;
-            FadeTime = 1;
-            BulkVidTimeMin = 20;
-            NameMethod = "FldrLvl2";
-            ImgVidFldr = "\ImgInVid";
-            Quality = 23;
-            ExpAud = 0; #Note: Keep 0 until / unless fixed; exporting audio doesn't appear to work (information becomes corrupted, video playback freezes)
-            CleanBuild = 0;
-        }
         #[pscustomobject]@{
-        #    XDim = 1920;
-        #    YDim = 1080;
+        #    XDim = 1440;
+        #    YDim = 900;
         #    FPS = 30;
         #    PicDispTime = 6;
-        #    MaxSrtRot = 30;
-        #    FadeTime = 0.7;
-        #    BulkVidTimeMin = 30;
+        #    MaxSrtRot = 20;
+        #    FadeTime = 1;
+        #    BulkVidTimeMin = 4;
         #    NameMethod = "FldrLvl2";
         #    ImgVidFldr = "\ImgInVid";
-        #    Quality = 22;
+        #    Quality = 23;
         #    ExpAud = 0; #Note: Keep 0 until / unless fixed; exporting audio doesn't appear to work (information becomes corrupted, video playback freezes)
         #    CleanBuild = 0;
         #}
+        [pscustomobject]@{
+            XDim = 1920;
+            YDim = 1080;
+            FPS = 30;
+            PicDispTime = 6;
+            MaxSrtRot = 20;
+            FadeTime = 0.7;
+            BulkVidTimeMin = 4;
+            NameMethod = "FldrLvl2";
+            ImgVidFldr = "\ImgInVid";
+            Quality = 22;
+            ExpAud = 0; #Note: Keep 0 until / unless fixed; exporting audio doesn't appear to work (information becomes corrupted, video playback freezes)
+            CleanBuild = 0;
+        }
     )
 }
 #Clean paths if applicable
