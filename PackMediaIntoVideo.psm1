@@ -97,7 +97,7 @@ function Set-VideoFromMedia
                 $GrpDef = $using:GrpDef
                 Import-Module $DepPath
                 $SelGrpDef = $GrpDef[$_]
-                $Quality = $locset.Quality
+                $Quality = $locset.OutQuality
                 $ExpAud = $locset.ExpAud
                 $SetFPS = $locset.FPS
                 $GenFrmt = $using:GenFrmt
@@ -109,7 +109,7 @@ function Set-VideoFromMedia
         {
             foreach ($grp in $Groups)
             {
-                $Quality = $set.Quality
+                $Quality = $set.OutQuality
                 $ExpAud = $set.ExpAud
                 $SetFPS = $set.FPS
                 $SelGrpDef = $GrpDef[$grp]

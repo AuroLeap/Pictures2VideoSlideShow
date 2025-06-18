@@ -60,7 +60,9 @@ if ($UseTestPath)
         BulkVidTimeMin = 0.3;
         NameMethod = "FldrLvl2";
         ImgVidFldr = "\ImgInVid";
-        Quality = 30;
+        OutQuality = 30;
+        TrnQuality = 10;
+        UseHQIntermittents = 0;
         ExpAud = 0; #Note: Keep 0 until / unless fixed; exporting audio doesn't appear to work (information becomes corrupted, video playback freezes)
         CleanBuild = 0;
     })
@@ -96,7 +98,9 @@ else
             BulkVidTimeMin = 20;
             NameMethod = "FldrLvl2";
             ImgVidFldr = "\ImgInVid";
-            Quality = 23;
+            OutQuality = 23;
+            TrnQuality = 10;
+            UseHQIntermittents = 0;
             ExpAud = 0; #Note: Keep 0 until / unless fixed; exporting audio doesn't appear to work (information becomes corrupted, video playback freezes)
             CleanBuild = 0;
         }
@@ -110,7 +114,9 @@ else
         #    BulkVidTimeMin = 30;
         #    NameMethod = "FldrLvl2";
         #    ImgVidFldr = "\ImgInVid";
-        #    Quality = 22;
+        #    OutQuality = 22;
+        #    TrnQuality = 10;
+        #    UseHQIntermittents = 0;
         #    ExpAud = 0; #Note: Keep 0 until / unless fixed; exporting audio doesn't appear to work (information becomes corrupted, video playback freezes)
         #    CleanBuild = 0;
         #}
@@ -150,7 +156,7 @@ $DirSepChar = [System.IO.Path]::DirectorySeparatorChar
 foreach($set in $OutputDefs)
 {
     $Prepend  = [System.IO.Path]::GetFullPath($OutputFilePrepend, (Get-Location).Path)
-    $Set.Outpath = ($Prepend+$set.XDim+"x"+$set.YDim+"q"+$set.Quality)
+    $Set.Outpath = ($Prepend+$set.XDim+"x"+$set.YDim+"q"+$set.OutQuality)
     $Set.OutGrp = ($Set.Outpath+"-Groups")
     if($Set.PicDispTime -and $Set.BulkVidTimeMin -and $Set.ImgVidFldr.Count)
     {
