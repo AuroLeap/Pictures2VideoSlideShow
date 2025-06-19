@@ -39,7 +39,7 @@ function Join-VidPartsFromList
             $FileList | Add-Member -MemberType NoteProperty -Name SrtDur -Value $([decimal])
             $FileList | Add-Member -MemberType NoteProperty -Name EndDur -Value $([decimal])
             $FileList | Add-Member -MemberType NoteProperty -Name FrameRate -Value $([decimal])
-            $FileList | Add-Member -MemberType NoteProperty -Name Need2Conv -Value $([int]0)
+            $FileList | Add-Member -MemberType NoteProperty -Name AllowImport -Value $([int]1)
             $FileList | Add-Member -MemberType NoteProperty -Name colorspace -Value $([string]"")
             $FileList | Add-Member -MemberType NoteProperty -Name pixfmt -Value $([string]"")
             $FileList | Add-Member -MemberType NoteProperty -Name vcodec -Value $([string]"")
@@ -236,7 +236,7 @@ function Join-VidPartsFromList
                     #($file in ($_| Select-Object -Expand Group))
                     foreach($file in ($grp| Select-Object -ExpandProperty Group))
                     {
-                        $file.Need2Conv = 1
+                        $file.AllowImport = 0
                     }
 
 
@@ -276,7 +276,7 @@ function Join-VidPartsFromList
                     {
                         foreach($file in ($grp| Select-Object -ExpandProperty Group))
                         {
-                            $file.Need2Conv = 1
+                            $file.AllowImport = 1
                         }
                     }
                     $NotInFirstGrp++
@@ -297,7 +297,7 @@ function Join-VidPartsFromList
                 $FinEncodeDef = "-video_track_timescale $vseltimebase -vcodec $selvcodec -crf $vidqty -preset slow -pix_fmt $selpixfmt -colorspace $selcolorspace -movflags faststart "
                 $EncodeDef = "-video_track_timescale $vseltimebase -vcodec $selvcodec -crf 10 -preset slow -pix_fmt $selpixfmt -colorspace $selcolorspace -movflags faststart "
             }
-            $FileList = @($GrpSets |  Select-Object -ExpandProperty Group) | Where-Object -Property Need2Conv -eq 0
+            $FileList = @($GrpSets |  Select-Object -ExpandProperty Group) | Where-Object -Property AllowImport -eq 1
             $FileList | Add-Member -MemberType NoteProperty -Name ExportSuccess -Value $([int]0)
             $NFilesExported = 0
             $LastExpIdx = -1

@@ -52,8 +52,8 @@ if ($UseTestPath)
     $OutputFilePrepend = ".\AlbumOut"
     $OutputDefs = @(
     [pscustomobject]@{
-        XDim = 1440;
-        YDim = 900;
+        XDim = 1920;
+        YDim = 1080;
         FPS = 20;
         PicDispTime = 6;
         MaxSrtRot = 30;
@@ -65,6 +65,13 @@ if ($UseTestPath)
         TrnQuality = 10;
         UseHQIntermittents = 0;
         ExpAud = 0; #Note: Keep 0 until / unless fixed; exporting audio doesn't appear to work (information becomes corrupted, video playback freezes)
+            AdditionalOutputs = @(
+                [pscustomobject]@{
+                    XDim = 1440;
+                    YDim = 900;
+                    Quality = 22;
+                }
+            )
     })
 
 }
@@ -107,6 +114,8 @@ else
             XDim = 1920;
             YDim = 1080;
             Quality = 22;
+            TrnQuality = 10;
+            UseHQIntermittents = 0;
             FPS = 30;
             PicDispTime = 6;
             MaxSrtRot = 20;

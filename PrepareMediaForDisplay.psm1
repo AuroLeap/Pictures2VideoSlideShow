@@ -852,8 +852,18 @@ function Update-MediaForDisplaySets
         #Definitions for exporting, which will be used in actual data export.
         $GDefs.frameRate = $set.FPS
         $GDefs.MaxSrtRot = $set.MaxSrtRot
-        $GDefs.ffmpegvcdcstd = "-video_track_timescale $vrate -framerate $($Set.fps ) -vcodec libx265 -crf $($Set.OutQuality ) -colorspace 1 -preset slow -pix_fmt yuvj420p -r $( $set.FPS ) -movflags faststart "
-        $GDefs.ffmpegvcdctra = "-video_track_timescale $vrate -framerate $($Set.fps ) -vcodec libx265 -crf $($Set.TrnQuality ) -colorspace 1 -preset slow -pix_fmt yuvj420p -r $( $set.FPS ) -movflags faststart "
+        #If using HQ Intermittents, use x265 for better compression.
+        if($Set.UseHQIntermittents){
+            $IntermediateEncoding = "libx265"
+        }
+        else{
+            $IntermediateEncoding = "libx264"
+        }
+        $GDefs.ffmpegvcdcstd = "-video_track_timescale $vrate -framerate $($Set.fps ) -vcodec $IntermediateEncoding -crf $($Set.OutQuality ) -colorspace 1 -preset slow -pix_fmt yuvj420p -r $( $set.FPS ) -movflags faststart "
+        $GDefs.ffmpegvcdctra = "-video_track_timescale $vrate -framerate $($Set.fps ) -vcodec $IntermediateEncoding -crf $($Set.TrnQuality ) -colorspace 1 -preset slow -pix_fmt yuvj420p -r $( $set.FPS ) -movflags faststart "
+        if($Set.UseHQIntermittents){
+            $GDefs.ffmpegvcdcstd = $GDefs.ffmpegvcdctra
+        }
         #Clear-Variable -Name "Files2Chk"
         $Files2Chk = $AllFiles
         $Files2Chk | Add-Member -MemberType NoteProperty -Name RelContPath -Value $( [string]"" ) -Force

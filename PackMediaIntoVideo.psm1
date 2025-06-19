@@ -90,7 +90,7 @@ function Set-VideoFromMedia
             #Create file to describe what videos to append.
             #$FileSet | Export-Csv -Path $grp.FileListPath -NoTypeInformation
         }
-        if(1)
+        if(0)
         {
             $Groups | ForEach-Object -Parallel{
                 $DepPath = $using:DepPath
@@ -102,7 +102,12 @@ function Set-VideoFromMedia
                 $ExpAud = $locset.ExpAud
                 $SetFPS = $locset.FPS
                 $GenFrmt = $using:GenFrmt
-                $ReencodeOpt = $using:ReencodeOpt
+                if($locset.UseHQIntermittents){
+                $ReencodeOpt = $using:ReencodeOpt}
+                else
+                {
+                    $ReencodeOpt = ""
+                }
 
                 Join-VidPartsFromList $GenFrmt $SelGrpDef $_.VidExpPath $Quality $ExpAud $SetFPS $ReencodeOpt
             } -ThrottleLimit 4
@@ -116,11 +121,13 @@ function Set-VideoFromMedia
                 $SetFPS = $set.FPS
                 $SelGrpDef = $GrpDef[$grp]
                 $SelVidExpPath = $grp.VidExpPath
-                #Write-Host $SelGrpDef
-                #Write-Host $SelVidExpPath
-                #Write-Host $Quality
-                #Write-Host $ExpAud
-                Join-VidPartsFromList $GenFrmt $SelGrpDef $SelVidExpPath $Quality $ExpAud $SetFPS $ReencodeOpt
+                if($set.UseHQIntermittents){
+                $SelReencodeOpt = $using:ReencodeOpt}
+                else
+                {
+                    $SelReencodeOpt = ""
+                }
+                Join-VidPartsFromList $GenFrmt $SelGrpDef $SelVidExpPath $Quality $ExpAud $SetFPS $SelReencodeOpt
             }
         }
         $SelGrpN = 0
