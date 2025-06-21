@@ -69,7 +69,7 @@ if ($UseTestPath)
                 [pscustomobject]@{
                     XDim = 1440;
                     YDim = 900;
-                    Quality = 22;
+                    OutQuality = 22;
                 }
             )
     })
@@ -113,7 +113,7 @@ else
         [pscustomobject]@{
             XDim = 1920;
             YDim = 1080;
-            Quality = 22;
+            OutQuality = 22;
             TrnQuality = 10;
             UseHQIntermittents = 0;
             FPS = 30;
@@ -129,7 +129,7 @@ else
                 [pscustomobject]@{
                     XDim = 1440;
                     YDim = 900;
-                    Quality = 22;
+                    OutQuality = 22;
                 }
             )
         }
@@ -166,18 +166,23 @@ foreach($set in $OutputDefs)
     $DerivedSets += @($NewSet)
     foreach($subset in $Set.AdditionalOutputs){
         $NewSet = $Set | Select-Object -ExcludeProperty AdditionalOutputs
-        if($subset.Quality){
-            $SubQuality = $subset.Quality
+        if($subset.OutQuality){
+            $SubQuality = $subset.OutQuality
         }
         else{
-            $SubQuality = $set.Quality
+            $SubQuality = $set.OutQuality
         }
-        $NewSet.Quality = $SubQuality
+        $NewSet.OutQuality = $SubQuality
         $NewSet.XDim = $subset.XDim
         $NewSet.YDim = $subset.YDim
         $PreName = $Prepend+$NewSet.XDim+"x"+$NewSet.YDim+$BulkDef + "q"+$SubQuality
-        $NewSet.OutGrp = ($PreName+"-Groups")
-        $NewSet.InputVideoPath = $Set.OutGrp
+        $NewSet.OutGrp = $PreName+"-Groups"
+        #If not converting from high quality intermittents, just directly convert from the available group video,
+        #since the quality won't really change.
+        if(-not $NewSet.UseHQIntermittents)
+        {
+            $NewSet.InputVideoPath = $Set.OutGrp
+        }
         $DerivedSets += @($NewSet)
     }
 }

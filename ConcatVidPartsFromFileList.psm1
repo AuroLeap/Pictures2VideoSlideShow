@@ -257,7 +257,7 @@ function Join-VidPartsFromList
             }
             #If reencoding, we just need all the videos to be the same size.
             $RencodeSet = 0
-            if([string]::IsNullOrEmpty($ReencodeOpt)){
+            if( -not ([string]::IsNullOrEmpty($ReencodeOpt))){
                 $selvcodec = $ReencodeOpt
                 $RencodeSet = 1
                 $GrpSets = $FileList | Group-Object -Property ResDef
@@ -525,3 +525,58 @@ function Join-VidPartsFromList
         (Remove-Item -Path $grpfldr -Recurse -Force -EA SilentlyContinue -Verbose)*>$null
     }
 }
+
+function Convert-Video
+{
+    param (
+        $VideoInPath,
+        $VideoOutPath,
+        $VideoOutProps = ""
+    )
+    #Get video properties to determine if resize filter is required
+    $VPramsCmd = "ffprobe -v error -show_streams -select_streams v`:0 -of ini `"$NomChkName`""
+    $VPrams = Invoke-Expression $VPramsCmd
+    if ($VPrams.Count -gt 1)
+    {
+        foreach ($Pram in $VPrams)
+        {
+            if ( $Pram.StartsWith("width="))
+            {
+                $PreWidth = [Int]::Parse($Pram.split('width=')[1])
+            }
+            if ( $Pram.StartsWith("height="))
+            {
+                $PreHeight = [Int]::Parse($Pram.split('height=')[1])
+            }
+        }
+    }
+    if($VideoOutProps.XDim){
+        if($PreWidth -ne $VideoOutProps.XDim){
+            $resizew=$PreWidth
+        }
+    }
+    if($VideoOutProps.YDim){
+        if($PreHeight -ne $VideoOutProps.YDim){
+            $resizeh=$PreHeight
+        }
+    }
+    if($VideoOutProps.OutQuality){
+        $SelQual = $VideoOutProps.OutQuality;
+    }
+    else{
+        $SelQual = 20
+    }
+        #Setup filter according to definition
+
+        #Execute
+
+        #NVidia ref 1:
+        #ffmpeg -y -vsync 0 -hwaccel cuda -hwaccel_output_format cuda –resize 1280x720 -i input.mp4 -c:a copy -c:v h264_nvenc -b:v 5M output.mp4
+
+        #cuda not recommended, but might be necessary for older GPUs, might find a way to set this in an outcome of a try condition.
+        #ffmpeg -y -vsync 0 -hwaccel cuda -hwaccel_output_format cuda -i input.mp4 -vf scale_cuda=1280:720 -c:a copy -c:v h264_nvenc -b:v 5M output.mp4
+
+        #NVidia ref 2:
+        # ffmpeg -y -vsync 0 -hwaccel cuda -hwaccel_output_format cuda -i input.mp4 -vf scale_npp=1280:720 -c:a copy -c:v h264_nvenc -b:v 5M output.mp4
+
+    }}
