@@ -552,12 +552,12 @@ function Convert-Video
     }
     if($VideoOutProps.XDim){
         if($PreWidth -ne $VideoOutProps.XDim){
-            $resizew=$PreWidth
+            $resizew=$VideoOutProps.XDim
         }
     }
     if($VideoOutProps.YDim){
         if($PreHeight -ne $VideoOutProps.YDim){
-            $resizeh=$PreHeight
+            $resizeh=$VideoOutProps.YDim
         }
     }
     if($VideoOutProps.OutQuality){
@@ -594,7 +594,7 @@ function Convert-Video
         $vfstr = ""
     }
         #Setup filter according to definition
-        $ffmpgcmdsw = "ffmpeg -y -vsync 0 -i $VideoInPath $vfstr -crf $SelQual $VideoOutPath"
+        $ffmpgcmdsw = "ffmpeg -y -vsync 0 -i $VideoInPath $vfstr -vcodec h264 -crf $SelQual -preset slow $VideoOutPath"
         (Invoke-Expression $ffmpgcmdsw) *> $null
         #Execute
 

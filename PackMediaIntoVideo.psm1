@@ -27,6 +27,9 @@ function Set-VideoFromMedia
         {
             $Vids2Convert = @(Get-ChildItem -LiteralPath $set.InputVideoPath -Filter "*.$GenFrmt")
             $Vids2Convert | Add-Member -MemberType NoteProperty -Name OutPath -Value $( [string] )
+            if(-not (Test-Path -Path $VidPacksFileDefPath -Type Container)){
+                New-Item -ItemType Directory -Path $VidPacksFileDefPath
+            }
             foreach($VidFile in $Vids2Convert){
                 $VidFile.OutPath = Join-Path -Path $VidPacksFileDefPath -ChildPath $VidFile.Name
             }
