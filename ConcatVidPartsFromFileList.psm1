@@ -534,7 +534,7 @@ function Convert-Video
         $VideoOutProps = ""
     )
     #Get video properties to determine if resize filter is required
-    $VPramsCmd = "ffprobe -v error -show_streams -select_streams v`:0 -of ini `"$NomChkName`""
+    $VPramsCmd = "ffprobe -v error -show_streams -select_streams v`:0 -of ini `"$VideoInPath`""
     $VPrams = Invoke-Expression $VPramsCmd
     if ($VPrams.Count -gt 1)
     {
@@ -566,8 +566,36 @@ function Convert-Video
     else{
         $SelQual = 20
     }
+    if($resizew -and $resizeh){
+        $rszcfg = $resizew.ToString()+"`:"+$resizeh.ToString()
+    }
+    elseif($resizew ){
+        $rszcfg = $resizew.ToString()+"`:-1"
+    }
+    elseif($resizeh){
+        $rszcfg = "-1`:"+$resizeh.ToString()
+    }
+    else{
+        $rszcfg = ""
+    }
+    $filterdefs = @()
+    if([string]::IsNullOrEmpty($rszcfg)){
+        $rszstr = ""
+    }
+    else{
+        $rszstr = "scale="+$rszcfg
+        $filterdefs += @($rszstr)
+    }
+    if ($filterdefs.count){
+        $vfstr = "-vf `"$($filterdefs | Join-String -Separator ",")`""
+    }
+    else
+    {
+        $vfstr = ""
+    }
         #Setup filter according to definition
-
+        $ffmpgcmdsw = "ffmpeg -y -vsync 0 -i $VideoInPath $vfstr -crf $SelQual $VideoOutPath"
+        (Invoke-Expression $ffmpgcmdsw) *> $null
         #Execute
 
         #NVidia ref 1:
@@ -579,4 +607,5 @@ function Convert-Video
         #NVidia ref 2:
         # ffmpeg -y -vsync 0 -hwaccel cuda -hwaccel_output_format cuda -i input.mp4 -vf scale_npp=1280:720 -c:a copy -c:v h264_nvenc -b:v 5M output.mp4
 
-    }}
+
+}
