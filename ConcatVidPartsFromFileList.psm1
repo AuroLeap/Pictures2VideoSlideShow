@@ -2,6 +2,7 @@ function Join-VidPartsFromList
 {
     param (
         $GenFrmt,
+        $OutFrmt,
         $FileListProps,
         [string]$outputFile = "output",
         $vidqty = [Int] 20,
@@ -20,7 +21,8 @@ function Join-VidPartsFromList
     $tranprepend = $grpfldr+"\t"
     $appendlist = $grpfldr+"\buildlist.txt"
     $buildcmd   = $grpfldr+"\buildcmd.txt"
-    $finfile = $outputFile+".$GenFrmt"
+    $finfile = $outputFile+".$OutFrmt"
+    $intermittentfile = $outputFile+".tmp.$OutFrmt"
     if (Test-Path -Path $grpfldr -PathType Container){}
     else {(New-Item -ItemType Directory -Path $grpfldr -Force) *> $null}
     try{
@@ -498,6 +500,18 @@ function Join-VidPartsFromList
                         FiltStr+= "[$find`:a:0]"
                     }
                 }
+                if($resizew -and $resizeh){
+                    $rszcfg = $resizew.ToString()+"`:"+$resizeh.ToString()
+                }
+                elseif($resizew ){
+                    $rszcfg = $resizew.ToString()+"`:-1"
+                }
+                elseif($resizeh){
+                    $rszcfg = "-1`:"+$resizeh.ToString()
+                }
+                else{
+                    $rszcfg = ""
+                }
                 #Complete the string.
                 $FiltStr+="concat=n=$N2Concat`:v=1"
                 if($IncAud){
@@ -507,9 +521,11 @@ function Join-VidPartsFromList
                     $FiltStr+= "[outv]`" -map `"[outv]`""
                 }
                 $ffmpegcmd = "ffmpeg -y $FileInputStr -filter_complex $FiltStr $FinEncodeDef `"$finfile`""
+                $2ndPass = $false
             }
             else{
-                $ffmpegcmd = "ffmpeg -y -safe 0 -f concat -i `"$appendlist`" -c copy -movflags faststart `"$finfile`""
+                $ffmpegcmd = "ffmpeg -y -safe 0 -f concat -i `"$appendlist`" -c copy -movflags faststart `"$intermittentfile`""
+                $2ndPass = $true
             }
             #Wait-Debugger
             $ffmpegcmd | Out-File -FilePath $buildcmd
@@ -518,6 +534,10 @@ function Join-VidPartsFromList
             }
             else{
                 (Invoke-Expression $ffmpegcmd) *> $null
+                if ($2ndPass){
+                    $Outdef = [pscustomobject]@{OutQuality = $vidqty}
+                    Convert-Video $intermittentfile $finfile $Outdef
+                }
             }
 
             #Concat files.

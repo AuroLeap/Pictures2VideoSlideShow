@@ -62,7 +62,7 @@ if ($UseTestPath)
         NameMethod = "FldrLvl2";
         ImgVidFldr = "\ImgInVid";
         OutQuality = 25;
-        TrnQuality = 10;
+        OutFormat  = "mp4";
         UseHQIntermittents = 1;
         ExpAud = 0; #Note: Keep 0 until / unless fixed; exporting audio doesn't appear to work (information becomes corrupted, video playback freezes)
             AdditionalOutputs = @(
@@ -70,6 +70,7 @@ if ($UseTestPath)
                     XDim = 1440;
                     YDim = 900;
                     OutQuality = 30;
+                    OutFormat  = "mp4";
                 }
             )
     })
@@ -106,7 +107,7 @@ else
         #    NameMethod = "FldrLvl2";
         #    ImgVidFldr = "\ImgInVid";
         #    OutQuality = 22;
-        #    TrnQuality = 10;
+        #    OutFormat  = "mp4";
         #    UseHQIntermittents = 0;
         #    ExpAud = 0; #Note: Keep 0 until / unless fixed; exporting audio doesn't appear to work (information becomes corrupted, video playback freezes)
         #}
@@ -114,7 +115,7 @@ else
             XDim = 1920;
             YDim = 1080;
             OutQuality = 22;
-            TrnQuality = 10;
+            OutFormat  = "mp4";
             UseHQIntermittents = 0;
             FPS = 30;
             PicDispTime = 6;
@@ -148,6 +149,8 @@ $OutputDefs | Add-Member -MemberType NoteProperty -Name Outpath -Value $([string
 $OutputDefs | Add-Member -MemberType NoteProperty -Name OutGrp -Value $([string])
 $OutputDefs | Add-Member -MemberType NoteProperty -Name InputVideoPath -Value $([string])
 $OutputDefs | Add-Member -MemberType NoteProperty -Name VidPack -Value $([Int])
+#Define transitioning quality, for video transitions or if intermittent quality is enabled, not recommended to change.
+$OutputDefs | Add-Member -MemberType NoteProperty -Name TrnQuality -Value 15
 $DirSepChar = [System.IO.Path]::DirectorySeparatorChar
 $DerivedSets = @()
 #Create derived group properties, and create the derived set group for group creation from common media segments.
@@ -155,7 +158,12 @@ foreach($set in $OutputDefs)
 {
     $Prepend  = [System.IO.Path]::GetFullPath($OutputFilePrepend, (Get-Location).Path)
     $BulkDef  = "_FPS"+$set.FPS+"_DT"+$set.PicDispTime+"_FT"+$set.FadeTime+"_MR"+$set.MaxSrtRot
-    $Set.Outpath = ($Prepend+$set.XDim+"x"+$set.YDim+$BulkDef + "q"+$set.Quality)
+    #If using high quality intermittents, build the folder of the transition quality so it is still used even if the output
+    #quality is redefined.
+    if(-not $NewSet.UseHQIntermittents){
+    $Set.Outpath = ($Prepend+$set.XDim+"x"+$set.YDim+$BulkDef + "_q"+$set.OutQuality)}
+    else{
+    $Set.Outpath = ($Prepend+$set.XDim+"x"+$set.YDim+$BulkDef + "_q"+$set.TrnQuality)}
     $Set.OutGrp = ($Set.Outpath+"-Groups")
     if($Set.PicDispTime -and $Set.BulkVidTimeMin -and $Set.ImgVidFldr.Count)
     {
@@ -171,6 +179,9 @@ foreach($set in $OutputDefs)
         }
         else{
             $SubQuality = $set.OutQuality
+        }
+        if($subset.OutFormat){
+            $NewSet.OutQuality = $subset.OutFormat
         }
         $NewSet.OutQuality = $SubQuality
         $NewSet.XDim = $subset.XDim

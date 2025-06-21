@@ -139,6 +139,7 @@ function Set-VideoFromMedia
                     $Quality = $locset.OutQuality
                     $ExpAud = $locset.ExpAud
                     $SetFPS = $locset.FPS
+                    $OutFrmt = $locset.OutFormat
                     $GenFrmt = $using:GenFrmt
                     if ($locset.UseHQIntermittents)
                     {
@@ -149,7 +150,7 @@ function Set-VideoFromMedia
                         $ReencodeOpt = ""
                     }
 
-                    Join-VidPartsFromList $GenFrmt $SelGrpDef $_.VidExpPath $Quality $ExpAud $SetFPS $ReencodeOpt
+                    Join-VidPartsFromList $GenFrmt $OutFrmt $SelGrpDef $_.VidExpPath $Quality $ExpAud $SetFPS $ReencodeOpt
                 } -ThrottleLimit 4
             }
             else
@@ -159,6 +160,7 @@ function Set-VideoFromMedia
                     $Quality = $set.OutQuality
                     $ExpAud = $set.ExpAud
                     $SetFPS = $set.FPS
+                    $OutFrmt = $set.OutFormat
                     $SelGrpDef = $GrpDef[$grp]
                     $SelVidExpPath = $grp.VidExpPath
                     if ($set.UseHQIntermittents)
@@ -169,7 +171,7 @@ function Set-VideoFromMedia
                     {
                         $SelReencodeOpt = ""
                     }
-                    Join-VidPartsFromList $GenFrmt $SelGrpDef $SelVidExpPath $Quality $ExpAud $SetFPS $SelReencodeOpt
+                    Join-VidPartsFromList $GenFrmt $OutFrmt $SelGrpDef $SelVidExpPath $Quality $ExpAud $SetFPS $SelReencodeOpt
                 }
             }
             $SelGrpN = 0
