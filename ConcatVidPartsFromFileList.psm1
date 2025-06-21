@@ -305,6 +305,7 @@ function Join-VidPartsFromList
             $PrevVid2TransitionFrom = ""
             $PVEnd = ""
             $VidPathStr = [String[]]::new($FileList.Count*2+1)
+            $VidPathSet = [String[]]::new($FileList.Count*2+1)
             foreach ($file in $FileList)
             {
                 $CurrIdx++
@@ -339,11 +340,13 @@ function Join-VidPartsFromList
                         if($FileL)
                         {
                             $VidPathStr[$CurrExpIdx] = "file `'$tname`'"
+                            $VidPathSet[$CurrExpIdx] = "`"$tname`""
                             if (-not $IncAud)
                             {
                                 $ffmpegcmd = "ffmpeg -y -i `"$tname`"  -c copy -an `"$tnameNA`""
                                 (Invoke-Expression $ffmpegcmd) *> $null
                                 $VidPathStr[$CurrExpIdx] = "file `'$tnameNA`'"
+                                $VidPathSet[$CurrExpIdx] = "`"$tnameNA`""
                             }
                         }
                         else
@@ -380,10 +383,12 @@ function Join-VidPartsFromList
                                 $ffmpegcmd = "ffmpeg -y -i `"$tname`"  -c copy -an `"$tnameNA`""
                                 (Invoke-Expression $ffmpegcmd) *> $null
                                 $VidPathStr[$CurrExpIdx] = "file `'$tnameNA`'"
+                                $VidPathSet[$CurrExpIdx] = "`"$tnameNA`""
                             }
                             else
                             {
                                 $VidPathStr[$CurrExpIdx] = "file `'$tname`'"
+                                $VidPathSet[$CurrExpIdx] = "`"$tname`""
                             }
                         }
                         else
@@ -397,6 +402,7 @@ function Join-VidPartsFromList
                     {
                         $CurrExpIdx = $CurrExpIdx+1
                         $VidPathStr[$CurrExpIdx] = "file `'$tname`'"
+                        $VidPathSet[$CurrExpIdx] = "`"$tname`""
                         if (-not $IncAud)
                         {
                             $dirname = [System.IO.Path]::GetFileNameWithoutExtension($PrevVid2TransitionFrom)
@@ -404,10 +410,12 @@ function Join-VidPartsFromList
                             $ffmpegcmd = "ffmpeg -y -i `"$file`"  -c copy -an `"$tnameNA`""
                             (Invoke-Expression $ffmpegcmd) *> $null
                             $VidPathStr[$CurrExpIdx] = "file `'$tnameNA`'"
+                            $VidPathSet[$CurrExpIdx] = "`"$tnameNA`""
                         }
                         else
                         {
                             $VidPathStr[$CurrExpIdx] = "file `'$file`'"
+                            $VidPathSet[$CurrExpIdx] = "`"$tname`""
                         }
                     }
                     else
@@ -425,6 +433,7 @@ function Join-VidPartsFromList
                         $toutcmd = "ffmpeg -y -i `"$VEnd`" -vf `"fade=t=out:st=0:d=$tdur`" $EncodeDef `"$tname`""
                         (Invoke-Expression $toutcmd) *> $null
                         $VidPathStr[$CurrExpIdx] = "file `'$tname`'"
+                        $VidPathSet[$CurrExpIdx] = "`"$tname`""
                         $FileL = Get-ChildItem -Path "$tname" | Select-Object Length
                         if($FileL)
                         {
@@ -433,10 +442,12 @@ function Join-VidPartsFromList
                                 $ffmpegcmd = "ffmpeg -y -i `"$tname`"  -c copy -an `"$tnameNA`""
                                 (Invoke-Expression $ffmpegcmd) *> $null
                                 $VidPathStr[$CurrExpIdx] = "file `'$tnameNA`'"
+                                $VidPathSet[$CurrExpIdx] = "`"$tnameNA`""
                             }
                             else
                             {
                                 $VidPathStr[$CurrExpIdx] = "file `'$file`'"
+                                $VidPathSet[$CurrExpIdx] = "`"$tname`""
                             }
                         }
                         else
@@ -469,6 +480,7 @@ function Join-VidPartsFromList
             }
             #Wait-Debugger
             $VidPathExp = $VidPathStr[0..$LastExpIdx]
+            $VidPathSelSet = $VidPathSet[0..$LastExpIdx]
             #Build list of all raw files to concat.
             $VidPathExp| Out-File -FilePath "$appendlist" -force
             #Define build command, depend on if reencoding or not.
@@ -477,7 +489,7 @@ function Join-VidPartsFromList
                 $FiltStr = "`""
                 $FileInputStr = ""
                 $N2Concat = 0
-                foreach ($file2con in $VidPathExp){
+                foreach ($file2con in $VidPathSelSet){
                     $find++
                     $N2Concat++
                     $FileInputStr+=" -i $file2con"
@@ -494,14 +506,19 @@ function Join-VidPartsFromList
                 else{
                     $FiltStr+= "[outv]`" -map `"[outv]`""
                 }
-                $ffmpegcmd = "ffmpeg -y -safe 0 $FileInputStr -filter_complex `"`" $FinEncodeDef `"$finfile`""
+                $ffmpegcmd = "ffmpeg -y $FileInputStr -filter_complex $FiltStr $FinEncodeDef `"$finfile`""
             }
             else{
                 $ffmpegcmd = "ffmpeg -y -safe 0 -f concat -i `"$appendlist`" -c copy -movflags faststart `"$finfile`""
             }
             #Wait-Debugger
             $ffmpegcmd | Out-File -FilePath $buildcmd
-            (Invoke-Expression $ffmpegcmd) *> $null
+            if($ffmpegcmd.count -gt 32766){
+                Write-Error "Command length limit reached, reduce the number of videos (via BulkVidTimeMin) or update this script to perform 2-step concat"
+            }
+            else{
+                (Invoke-Expression $ffmpegcmd) *> $null
+            }
 
             #Concat files.
             Write-Host "$finfile complete"

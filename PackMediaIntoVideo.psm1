@@ -163,7 +163,7 @@ function Set-VideoFromMedia
                     $SelVidExpPath = $grp.VidExpPath
                     if ($set.UseHQIntermittents)
                     {
-                        $SelReencodeOpt = $using:ReencodeOpt
+                        $SelReencodeOpt = $ReencodeOpt
                     }
                     else
                     {

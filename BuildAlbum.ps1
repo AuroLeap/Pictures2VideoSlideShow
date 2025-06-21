@@ -63,7 +63,7 @@ if ($UseTestPath)
         ImgVidFldr = "\ImgInVid";
         OutQuality = 25;
         TrnQuality = 10;
-        UseHQIntermittents = 0;
+        UseHQIntermittents = 1;
         ExpAud = 0; #Note: Keep 0 until / unless fixed; exporting audio doesn't appear to work (information becomes corrupted, video playback freezes)
             AdditionalOutputs = @(
                 [pscustomobject]@{
@@ -207,6 +207,7 @@ else
 #Prep path:
 if (Test-Path $PrepFileRootPath)
 {
+    #No need to do anything, path exists.
 }
 elseif ($PrepFileRootPath.Length)
 {
