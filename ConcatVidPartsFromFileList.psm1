@@ -563,6 +563,7 @@ function Join-VidPartsFromList
                 if ($2ndPass){
                     $Outdef = [pscustomobject]@{OutQuality = $vidqty}
                     Convert-Video $intermittentfile $finfile $Outdef
+                    Remove-Item $intermittentfile -Force
                 }
             }
 

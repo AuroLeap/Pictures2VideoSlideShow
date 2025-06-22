@@ -25,7 +25,7 @@ function Set-VideoFromMedia
         #If we have a video input path, then we need to just user that as the input.
         if (-not ([string]::IsNullOrEmpty($set.InputVideoPath)))
         {
-            $Vids2Convert = @(Get-ChildItem -LiteralPath $set.InputVideoPath -Filter "*.$GenFrmt")
+            $Vids2Convert = @(Get-ChildItem -LiteralPath $set.InputVideoPath -Filter "*.$($set.OutFormat)")
             $Vids2Convert | Add-Member -MemberType NoteProperty -Name OutPath -Value $( [string] )
             if(-not (Test-Path -Path $VidPacksFileDefPath -Type Container)){
                 New-Item -ItemType Directory -Path $VidPacksFileDefPath

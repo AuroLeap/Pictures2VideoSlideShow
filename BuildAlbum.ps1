@@ -58,12 +58,12 @@ if ($UseTestPath)
         PicDispTime = 6;
         MaxSrtRot = 30;
         FadeTime = 0.7;
-        BulkVidTimeMin = 0.3;
+        BulkVidTimeMin = 0.5;
         NameMethod = "FldrLvl2";
         ImgVidFldr = "\ImgInVid";
         OutQuality = 25;
         OutFormat  = "mp4";
-        UseHQIntermittents = 1;
+        UseHQIntermittents = 0;
         ExpAud = 0; #Note: Keep 0 until / unless fixed; exporting audio doesn't appear to work (information becomes corrupted, video playback freezes)
             AdditionalOutputs = @(
                 [pscustomobject]@{
