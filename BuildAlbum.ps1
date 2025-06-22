@@ -147,7 +147,7 @@ Import-Module ".\PackMediaIntoVideo.psm1" -Force
 #Build derived definitions
 $OutputDefs | Add-Member -MemberType NoteProperty -Name Outpath -Value $([string])
 $OutputDefs | Add-Member -MemberType NoteProperty -Name OutGrp -Value $([string])
-$OutputDefs | Add-Member -MemberType NoteProperty -Name InputVideoPath -Value $([string])
+$OutputDefs | Add-Member -MemberType NoteProperty -Name InputVideoPath -Value ""
 $OutputDefs | Add-Member -MemberType NoteProperty -Name VidPack -Value $([Int])
 #Define transitioning quality, for video transitions or if intermittent quality is enabled, not recommended to change.
 $OutputDefs | Add-Member -MemberType NoteProperty -Name TrnQuality -Value 15
@@ -160,17 +160,19 @@ foreach($set in $OutputDefs)
     $BulkDef  = "_FPS"+$set.FPS+"_DT"+$set.PicDispTime+"_FT"+$set.FadeTime+"_MR"+$set.MaxSrtRot
     #If using high quality intermittents, build the folder of the transition quality so it is still used even if the output
     #quality is redefined.
-    if(-not $NewSet.UseHQIntermittents){
-    $Set.Outpath = ($Prepend+$set.XDim+"x"+$set.YDim+$BulkDef + "_q"+$set.OutQuality)}
+    $Prepath = ($Prepend+$set.XDim+"x"+$set.YDim+$BulkDef + "_q"+$set.OutQuality)
+    if(-not $Set.UseHQIntermittents){
+        $Set.Outpath = $Prepath
+    }
     else{
-    $Set.Outpath = ($Prepend+$set.XDim+"x"+$set.YDim+$BulkDef + "_q"+$set.TrnQuality)}
-    $Set.OutGrp = ($Set.Outpath+"-Groups")
+        $Set.Outpath = ($Prepend+$set.XDim+"x"+$set.YDim+$BulkDef + "_q"+$set.TrnQuality)
+    }
+    $Set.OutGrp = ($Prepath+"-Groups")
     if($Set.PicDispTime -and $Set.BulkVidTimeMin -and $Set.ImgVidFldr.Count)
     {
         $Set.VidPack = 1
     }
     $NewSet = $Set | Select-Object -ExcludeProperty AdditionalOutputs
-    $NewSet.InputVideoPath = ""
     $DerivedSets += @($NewSet)
     foreach($subset in $Set.AdditionalOutputs){
         $NewSet = $Set | Select-Object -ExcludeProperty AdditionalOutputs
@@ -190,7 +192,7 @@ foreach($set in $OutputDefs)
         $NewSet.OutGrp = $PreName+"-Groups"
         #If not converting from high quality intermittents, just directly convert from the available group video,
         #since the quality won't really change.
-        if(-not $NewSet.UseHQIntermittents)
+        if(-not $Set.UseHQIntermittents)
         {
             $NewSet.InputVideoPath = $Set.OutGrp
         }

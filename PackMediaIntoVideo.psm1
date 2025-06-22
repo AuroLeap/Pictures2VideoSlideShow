@@ -23,7 +23,7 @@ function Set-VideoFromMedia
         $VidPacksRootPath = $ContFileRootPath + $set.ImgVidFldr
         $VidPacksFileDefPath = $set.OutGrp
         #If we have a video input path, then we need to just user that as the input.
-        if ($set.InputVideoPath)
+        if (-not ([string]::IsNullOrEmpty($set.InputVideoPath)))
         {
             $Vids2Convert = @(Get-ChildItem -LiteralPath $set.InputVideoPath -Filter "*.$GenFrmt")
             $Vids2Convert | Add-Member -MemberType NoteProperty -Name OutPath -Value $( [string] )
@@ -136,10 +136,6 @@ function Set-VideoFromMedia
                     $GrpDef = $using:GrpDef
                     Import-Module $DepPath
                     $SelGrpDef = $GrpDef[$_]
-                    $Quality = $locset.OutQuality
-                    $ExpAud = $locset.ExpAud
-                    $SetFPS = $locset.FPS
-                    $OutFrmt = $locset.OutFormat
                     $GenFrmt = $using:GenFrmt
                     if ($locset.UseHQIntermittents)
                     {
@@ -150,17 +146,13 @@ function Set-VideoFromMedia
                         $ReencodeOpt = ""
                     }
 
-                    Join-VidPartsFromList $GenFrmt $OutFrmt $SelGrpDef $_.VidExpPath $Quality $ExpAud $SetFPS $ReencodeOpt
+                    Join-VidPartsFromList $SelGrpDef $_.VidExpPath $GenFrmt $locset $ReencodeOpt
                 } -ThrottleLimit 4
             }
             else
             {
                 foreach ($grp in $Groups)
                 {
-                    $Quality = $set.OutQuality
-                    $ExpAud = $set.ExpAud
-                    $SetFPS = $set.FPS
-                    $OutFrmt = $set.OutFormat
                     $SelGrpDef = $GrpDef[$grp]
                     $SelVidExpPath = $grp.VidExpPath
                     if ($set.UseHQIntermittents)
@@ -171,7 +163,7 @@ function Set-VideoFromMedia
                     {
                         $SelReencodeOpt = ""
                     }
-                    Join-VidPartsFromList $GenFrmt $OutFrmt $SelGrpDef $SelVidExpPath $Quality $ExpAud $SetFPS $SelReencodeOpt
+                    Join-VidPartsFromList $SelGrpDef $SelVidExpPath $GenFrmt $set $SelReencodeOpt
                 }
             }
             $SelGrpN = 0

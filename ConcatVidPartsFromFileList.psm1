@@ -1,15 +1,16 @@
 function Join-VidPartsFromList
 {
     param (
-        $GenFrmt,
-        $OutFrmt,
         $FileListProps,
         [string]$outputFile = "output",
-        $vidqty = [Int] 20,
-        $IncAud = [Int] 1,
-        $SelFPS = [Decimal] 30,
+        $GenFrmt = ".ts",
+        [pscustomobject]$FrmtDef = [pscustomobject]@{OutFormat = "mp4";OutQuality = 20;ExpAud = 0;FPS = 30},
         $ReencodeOpt = ""
     )
+    $OutFrmt = $FrmtDef.OutFormat
+    $vidqty  = $FrmtDef.OutQuality
+    $IncAud  = $FrmtDef.ExpAud
+    $SelFPS  = $FrmtDef.FPS
     if(($FileListProps.Count -gt 1) -and ($FileListProps[0] -is [string]))
     {
         $FileList = $FileListProps
@@ -500,6 +501,12 @@ function Join-VidPartsFromList
                         FiltStr+= "[$find`:a:0]"
                     }
                 }
+                if($FrmtDef.XDim -ne $PreWidth){
+                $resizew = $FrmtDef.XDim}
+                else{$resizew = $null}
+                if($FrmtDef.YDim -ne $PreHeight){
+                $resizeh = $FrmtDef.YDim}
+                else{$resizeh = $null}
                 if($resizew -and $resizeh){
                     $rszcfg = $resizew.ToString()+"`:"+$resizeh.ToString()
                 }
@@ -512,13 +519,32 @@ function Join-VidPartsFromList
                 else{
                     $rszcfg = ""
                 }
-                #Complete the string.
+                #Complete the concat string.
                 $FiltStr+="concat=n=$N2Concat`:v=1"
                 if($IncAud){
-                    FiltStr+= ":a=1[outv][outa]`" -map `"[outv]`" -map `"[outa]`""
+                    FiltStr+= ":a=1[outv][outa]"
                 }
                 else{
-                    $FiltStr+= "[outv]`" -map `"[outv]`""
+                    $FiltStr+= "[outv]"
+                }
+                #Add in the resize filter if defined, else just map what's available.
+                if([string]::IsNullOrEmpty($rszcfg)){
+                    $rszstr = ""
+                    if($IncAud){
+                        FiltStr+= "`" -map `"[outv]`" -map `"[outa]`""
+                    }
+                    else{
+                        $FiltStr+= "`" -map `"[outv]`""
+                    }
+                }
+                else{
+                    $rszstr = "`;[outv]scale="+$rszcfg+"[sclv]"
+                    if($IncAud){
+                        FiltStr+= "$rszstr`" -map `"[sclv]`" -map `"[outa]`""
+                    }
+                    else{
+                        $FiltStr+= "$rszstr`" -map `"[sclv]`""
+                    }
                 }
                 $ffmpegcmd = "ffmpeg -y $FileInputStr -filter_complex $FiltStr $FinEncodeDef `"$finfile`""
                 $2ndPass = $false
