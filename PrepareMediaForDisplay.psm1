@@ -248,14 +248,14 @@ function New-VideoZoomedOutFromPic
         if (($PrescaleApply -lt 0.8) -and ($PrescaleApply -gt 0))
         {
             $PrescaleApplyPerc = $PrescaleApply*100
-            $PrescaleCmd = " -adaptive-resize " + $PrescaleApplyPerc.ToString("00.00000") + "%"
+            $PrescaleCmd = " -auto-orient -adaptive-resize " + $PrescaleApplyPerc.ToString("00.00000") + "%"
             $InputWidth = $InputWidth*$PrescaleApply
             $InputHeight = $InputHeight*$PrescaleApply
             $Orig2NewScale = $PrescaledOrig2NewScale/$PrescaleApply
         }
         else
         {
-            $PrescaleCmd = ""
+            $PrescaleCmd = " -auto-orient"
             $Orig2NewScale = $PrescaledOrig2NewScale
         }
 
@@ -381,7 +381,7 @@ function New-VideoZoomedOutFromPic
         }
         $BuildDir = $SetTmpPath + "\" + $TmpDirName
         $BorderImg = "`"" + $BuildDir + "\" + "refimg.jpg" + "`""
-        $IMViewPortDef = "-define distort:viewport=$OutWidth" + "x" + "$OutHeight"
+        $IMViewPortDef = "-define distort:viewport="+$OutWidth.ToString() + "x" + $OutHeight.ToString() + "+0+0"
         $IMCmdSrt = "`"$( $file.ConvPath )`" " + $PrescaleCmd + " -bordercolor black -border $InputBorderDef -colorspace LAB -write MPR:orig -write $BorderImg -delete 0--1 $IMViewPortDef"
         $IMConvPrepend = "-read MPR:orig -distort SRT "
         $IMConvPreWrite = " -quality 92 -colorspace sRGB -write "
@@ -1139,8 +1139,8 @@ function Update-MediaForDisplaySets
         }
         Write-Host ("Exporting " + ($Files2Chk | Where-Object -Property Exp2ContPath -eq 1).Count.ToString() + " files...")
         #Wait-Debugger
-        #(($Files2Chk| Where-Object -Property Exp2ContPath -eq 1)) | ForEach-Object -Parallel{
-        (($Files2Chk| Where-Object -Property Exp2ContPath -eq 1)) | ForEach-Object{
+        (($Files2Chk| Where-Object -Property Exp2ContPath -eq 1)) | ForEach-Object -Parallel{
+        #(($Files2Chk| Where-Object -Property Exp2ContPath -eq 1)) | ForEach-Object{
             if ($RunSeries) {
                 $file = $_
                 $XDim = $set.XDim
@@ -1557,7 +1557,7 @@ function Update-MediaForDisplaySets
                     Write-Progress @InnerLoopProg
                 }
             }
-        }
-        #} -ThrottleLimit 4
+        #}
+        } -ThrottleLimit 4
     }
 }

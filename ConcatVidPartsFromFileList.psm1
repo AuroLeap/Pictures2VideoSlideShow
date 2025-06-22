@@ -222,7 +222,14 @@ function Join-VidPartsFromList
             #*********************** End of property import *************************
             #*********************************************************************
             $NotInFirstGrp = 0
-            $GrpSets = $FileList | Group-Object -Property VidDef
+            if( -not ([string]::IsNullOrEmpty($ReencodeOpt))){
+                $GrpSets = $FileList | Group-Object -Property VidDef
+                $RencodeSet = 0
+            }
+            else{
+                $GrpSets = $FileList | Group-Object -Property ResDef
+                $RencodeSet = 1
+            }
             #Get the output encoding from the group with the most files
             $GrpSets | Add-Member -MemberType NoteProperty -Name NFiles -value $([decimal]0)
             foreach ($Grp in $GrpSets)
@@ -258,33 +265,6 @@ function Join-VidPartsFromList
                 }
                 $NotInFirstGrp++
             }
-            #If reencoding, we just need all the videos to be the same size.
-            $RencodeSet = 0
-            if( -not ([string]::IsNullOrEmpty($ReencodeOpt))){
-                $selvcodec = $ReencodeOpt
-                $RencodeSet = 1
-                $GrpSets = $FileList | Group-Object -Property ResDef
-                #Get the output encoding from the group with the most files
-                $GrpSets | Add-Member -MemberType NoteProperty -Name NFiles -value $([decimal]0)
-                foreach ($Grp in $GrpSets)
-                {
-                    foreach ($file in ($Grp| Select-Object -Expand Group))
-                    {
-                        $Grp.NFiles = $Grp.NFiles + 1
-                    }
-                }
-                $GrpSets = $GrpSets| Sort-Object NFiles -Descending
-                foreach ($grp in $GrpSets){
-                    if($NotInFirstGrp)
-                    {
-                        foreach($file in ($grp| Select-Object -ExpandProperty Group))
-                        {
-                            $file.AllowImport = 1
-                        }
-                    }
-                    $NotInFirstGrp++
-                }
-            }
             if ($NotInFirstGrp -gt 1)
             {
                 Write-Host "$grpfldr`: Video sets for are not all the same properties, some files may be ignored, or converted."
@@ -298,7 +278,7 @@ function Join-VidPartsFromList
             if($RencodeSet)
             {
                 $FinEncodeDef = "-video_track_timescale $vseltimebase -vcodec $selvcodec -crf $vidqty -preset slow -pix_fmt $selpixfmt -colorspace $selcolorspace -movflags faststart "
-                $EncodeDef = "-video_track_timescale $vseltimebase -vcodec $selvcodec -crf 10 -preset slow -pix_fmt $selpixfmt -colorspace $selcolorspace -movflags faststart "
+                $EncodeDef = "-video_track_timescale $vseltimebase -vcodec $selvcodec -crf 17 -preset slow -pix_fmt $selpixfmt -colorspace $selcolorspace -movflags faststart "
             }
             $FileList = @($GrpSets |  Select-Object -ExpandProperty Group) | Where-Object -Property AllowImport -eq 1
             $FileList | Add-Member -MemberType NoteProperty -Name ExportSuccess -Value $([int]0)

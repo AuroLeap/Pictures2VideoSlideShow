@@ -25,7 +25,7 @@ else
     $SetTmpPath = ""
 }
 #For testing, note the configuration file is also
-$UseTestPath = 0;
+$UseTestPath = 1;
 $DemoPrepAndConvPaths = 0;
 if ($UseTestPath)
 {
@@ -56,7 +56,7 @@ if ($UseTestPath)
         YDim = 1080;
         OutQuality = 25;
         OutFormat  = "mp4";
-        UseHQIntermittents = 0;
+        UseHQIntermittents = 1;
         FPS = 20;
         PicDispTime = 6;
         MaxSrtRot = 30;
