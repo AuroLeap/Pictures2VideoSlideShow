@@ -312,6 +312,9 @@ function Join-VidPartsFromList
             foreach ($file in $FileList)
             {
                 $CurrIdx++
+                if($CurrIdx -eq 36){
+                    Write-Host "Chk"
+                }
                 try
                 {
                     $postname = [System.IO.Path]::GetFileNameWithoutExtension($file)
@@ -372,9 +375,9 @@ function Join-VidPartsFromList
                         $FAudIn = " anullsrc=r=$selarate"
                         $FAudOut =  " -map 0:a -c:a $selacodec -ar $selarate -shortest"
                         $tcmd = $FSrt + $FAudIn + " -i `"$V1`" -i `"$VSrt`" -filter_complex `"[1:v][2:v]xfade=offset=0.0:duration=$tdur[vfout]`" -map `"[vfout]`""+$FAudOut+" $EncodeDef `"$tname`""
-                        if($CurrIdx -eq 13)
+                        if($CurrIdx -eq 36)
                         {
-                            #write-host "ChkHere"
+                            write-host "ChkHere"
                         }
                         #write-host $tname
                         (Invoke-Expression $tcmd) *> $null
@@ -555,7 +558,7 @@ function Join-VidPartsFromList
             }
             #Wait-Debugger
             $ffmpegcmd | Out-File -FilePath $buildcmd
-            if($ffmpegcmd.count -gt 32766){
+            if($ffmpegcmd.length -gt 32766){
                 Write-Error "Command length limit reached, reduce the number of videos (via BulkVidTimeMin) or update this script to perform 2-step concat"
             }
             else{

@@ -1139,8 +1139,8 @@ function Update-MediaForDisplaySets
         }
         Write-Host ("Exporting " + ($Files2Chk | Where-Object -Property Exp2ContPath -eq 1).Count.ToString() + " files...")
         #Wait-Debugger
-        (($Files2Chk| Where-Object -Property Exp2ContPath -eq 1)) | ForEach-Object -Parallel{
-        #(($Files2Chk| Where-Object -Property Exp2ContPath -eq 1)) | ForEach-Object{
+        #(($Files2Chk| Where-Object -Property Exp2ContPath -eq 1)) | ForEach-Object -Parallel{
+        (($Files2Chk| Where-Object -Property Exp2ContPath -eq 1)) | ForEach-Object{
             if ($RunSeries) {
                 $file = $_
                 $XDim = $set.XDim
@@ -1557,7 +1557,7 @@ function Update-MediaForDisplaySets
                     Write-Progress @InnerLoopProg
                 }
             }
-        #}
-        } -ThrottleLimit 4
+        }
+        #} -ThrottleLimit 4
     }
 }

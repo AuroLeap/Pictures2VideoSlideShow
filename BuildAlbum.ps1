@@ -25,7 +25,7 @@ else
     $SetTmpPath = ""
 }
 #For testing, note the configuration file is also
-$UseTestPath = 1;
+$UseTestPath = 0;
 $DemoPrepAndConvPaths = 0;
 if ($UseTestPath)
 {
@@ -54,6 +54,9 @@ if ($UseTestPath)
     [pscustomobject]@{
         XDim = 1920;
         YDim = 1080;
+        OutQuality = 25;
+        OutFormat  = "mp4";
+        UseHQIntermittents = 0;
         FPS = 20;
         PicDispTime = 6;
         MaxSrtRot = 30;
@@ -61,9 +64,6 @@ if ($UseTestPath)
         BulkVidTimeMin = 0.5;
         NameMethod = "FldrLvl2";
         ImgVidFldr = "\ImgInVid";
-        OutQuality = 25;
-        OutFormat  = "mp4";
-        UseHQIntermittents = 0;
         ExpAud = 0; #Note: Keep 0 until / unless fixed; exporting audio doesn't appear to work (information becomes corrupted, video playback freezes)
             AdditionalOutputs = @(
                 [pscustomobject]@{
@@ -116,7 +116,7 @@ else
             YDim = 1080;
             OutQuality = 22;
             OutFormat  = "mp4";
-            UseHQIntermittents = 0;
+            UseHQIntermittents = 1;
             FPS = 30;
             PicDispTime = 6;
             MaxSrtRot = 20;
