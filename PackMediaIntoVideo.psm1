@@ -1,4 +1,4 @@
-$UseParallel = 0
+$UseParallel = 1
 $ConcatModulePath = ".\ConcatVidPartsFromFileList.psm1"
 $RingShiftRatio = 0
 $DepPath = Resolve-Path $ConcatModulePath
@@ -36,6 +36,8 @@ function Set-VideoFromMedia
             if ($UseParallel)
             {
                 $Vids2Convert | ForEach-Object -Parallel{
+                    $DepPath = $using:DepPath
+                    Import-Module $DepPath
                     $set = $using:set
                     $Vid2Convert = $_
                     Convert-Video $Vid2Convert.FullName $Vid2Convert.OutPath $set
