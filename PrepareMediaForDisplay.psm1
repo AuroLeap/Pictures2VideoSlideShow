@@ -860,7 +860,7 @@ function Update-MediaForDisplaySets
             $IntermediateEncoding = "libx264"
         }
         $GDefs.ffmpegvcdcstd = "-video_track_timescale $vrate -framerate $($Set.fps ) -vcodec $IntermediateEncoding -crf $($Set.OutQuality ) -colorspace 1 -preset slow -pix_fmt yuvj420p -r $( $set.FPS ) -movflags faststart "
-        $GDefs.ffmpegvcdctra = "-video_track_timescale $vrate -framerate $($Set.fps ) -vcodec $IntermediateEncoding -crf $($Set.TrnQuality ) -colorspace 1 -preset slow -pix_fmt yuvj420p -r $( $set.FPS ) -movflags faststart "
+        $GDefs.ffmpegvcdctra = "-video_track_timescale $vrate -framerate $($Set.fps ) -vcodec $IntermediateEncoding -crf $($Set.TrnQuality ) -colorspace 1 -preset slower -pix_fmt yuvj420p -r $( $set.FPS ) -movflags faststart "
         if($Set.UseHQIntermittents){
             $GDefs.ffmpegvcdcstd = $GDefs.ffmpegvcdctra
         }

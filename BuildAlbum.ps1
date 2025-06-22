@@ -150,7 +150,7 @@ $OutputDefs | Add-Member -MemberType NoteProperty -Name OutGrp -Value $([string]
 $OutputDefs | Add-Member -MemberType NoteProperty -Name InputVideoPath -Value ""
 $OutputDefs | Add-Member -MemberType NoteProperty -Name VidPack -Value $([Int])
 #Define transitioning quality, for video transitions or if intermittent quality is enabled, not recommended to change.
-$OutputDefs | Add-Member -MemberType NoteProperty -Name TrnQuality -Value 15
+$OutputDefs | Add-Member -MemberType NoteProperty -Name TrnQuality -Value 17
 $DirSepChar = [System.IO.Path]::DirectorySeparatorChar
 $DerivedSets = @()
 #Create derived group properties, and create the derived set group for group creation from common media segments.
