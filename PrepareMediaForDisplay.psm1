@@ -1579,6 +1579,6 @@ function Update-MediaForDisplaySets
                 }
             }
         #}
-        } -ThrottleLimit 4
+        } -ThrottleLimit 6
     }
 }

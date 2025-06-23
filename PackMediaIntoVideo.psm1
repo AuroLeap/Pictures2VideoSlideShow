@@ -1,4 +1,4 @@
-$UseParallel = 0
+$UseParallel = 1
 $ConcatModulePath = ".\ConcatVidPartsFromFileList.psm1"
 $RingShiftRatio = 0
 $DepPath = Resolve-Path $ConcatModulePath
