@@ -292,7 +292,6 @@ function Join-VidPartsFromList
             $VidPathSet = [String[]]::new($FileList.Count*2+1)
             foreach ($file in $FileList)
             {
-                $CurrIdx++
                 if($CurrIdx -eq 36){
                     Write-Host "Chk"
                 }
@@ -312,8 +311,8 @@ function Join-VidPartsFromList
                     #If first video, fade in.
                     if ($NFilesExported -eq 0)
                     {
+                        $FileAppendSuccess = $false
                         $tdur = $file.srtdur
-                        $CurrExpIdx = $CurrExpIdx+1
                         $tname = $tranprepend + "-fadein" + $postname + ".$GenFrmt"
                         $tnameNA = $tranprepend + "-fadein" + $postname + "NA.$GenFrmt"
                         $tincmd = "ffmpeg -y -i `"$VSrt`" -vf `"fade=t=in:st=0:d=$tdur`" $EncodeDef -c:a copy `"$tname`""
@@ -322,20 +321,25 @@ function Join-VidPartsFromList
                         #Wait-Debugger
                         (Invoke-Expression $tincmd) *> $null
                         Start-Sleep -Seconds 0.2
-                        $FileL = Get-ChildItem -Path "$tname" | Select-Object Length
+                        $TranL = Get-ChildItem -Path "$tname" | Select-Object Length
                         #Wait-Debugger
-                        if($FileL)
+                        if($TranL)
                         {
                             #Include original file with audio stream if enabled, otherwise remove the audio.
                             if ($IncAud){
+                                $CurrExpIdx++
                                 $VidPathStr[$CurrExpIdx] = "file `'$tname`'"
                                 $VidPathSet[$CurrExpIdx] = "`"$tname`""
                             }
                             else{
                                 $ffmpegcmd = "ffmpeg -y -i `"$tname`"  -c copy -an `"$tnameNA`""
                                 (Invoke-Expression $ffmpegcmd) *> $null
-                                $VidPathStr[$CurrExpIdx] = "file `'$tnameNA`'"
-                                $VidPathSet[$CurrExpIdx] = "`"$tnameNA`""
+                                $TranL = Get-ChildItem -Path "$tnameNA" | Select-Object Length
+                                if($TranL){
+                                    $CurrExpIdx++
+                                    $VidPathStr[$CurrExpIdx] = "file `'$tnameNA`'"
+                                    $VidPathSet[$CurrExpIdx] = "`"$tnameNA`""
+                                }
                             }
                         }
                         else
@@ -363,13 +367,13 @@ function Join-VidPartsFromList
                         }
                         #write-host $tname
                         (Invoke-Expression $tcmd) *> $null
-                        $FileL = Get-ChildItem -Path "$tname" | Select-Object Length
-                        if($FileL)
+                        $TranL = Get-ChildItem -Path "$tname" | Select-Object Length
+                        if($TranL)
                         {
-                            $CurrExpIdx++
                             #Include original file with audio stream if enabled, otherwise remove the audio.
                             if ($IncAud)
                             {
+                                $CurrExpIdx++
                                 $VidPathStr[$CurrExpIdx] = "file `'$tname`'"
                                 $VidPathSet[$CurrExpIdx] = "`"$tname`""
                             }
@@ -377,8 +381,12 @@ function Join-VidPartsFromList
                             {
                                 $ffmpegcmd = "ffmpeg -y -i `"$tname`"  -c copy -an `"$tnameNA`""
                                 (Invoke-Expression $ffmpegcmd) *> $null
-                                $VidPathStr[$CurrExpIdx] = "file `'$tnameNA`'"
-                                $VidPathSet[$CurrExpIdx] = "`"$tnameNA`""
+                                $TranL = Get-ChildItem -Path "$tnameNA" | Select-Object Length
+                                if($TranL){
+                                    $CurrExpIdx++
+                                    $VidPathStr[$CurrExpIdx] = "file `'$tnameNA`'"
+                                    $VidPathSet[$CurrExpIdx] = "`"$tnameNA`""
+                                }
                             }
                         }
                         else
@@ -386,34 +394,55 @@ function Join-VidPartsFromList
                             Write-Error "Blank File"
                         }
                     }
-                    #Standard, just add the file to the transition list.
+                    #Standard, just add the file to the transition list assuming the previous transiiton was successful
                     $FileL = Get-ChildItem -Path "$file" | Select-Object Length
-                    if($FileL)
+                    if($FileL -and $TranL)
                     {
-                        $CurrExpIdx++
                         #Include original file with audio stream if enabled, otherwise remove the audio.
                         if ($IncAud)
                         {
+                            $CurrExpIdx++
                             $VidPathStr[$CurrExpIdx] = "file `'$file`'"
                             $VidPathSet[$CurrExpIdx] = "`"$file`""
+                            $FileAppendSuccess = $true
                         }
                         else
                         {
-                            $dirname = [System.IO.Path]::GetFileNameWithoutExtension($PrevVid2TransitionFrom)
-                            $tnameNA = $tranprepend + $dirname + "NA.$GenFrmt"
+                            $fname = [System.IO.Path]::GetFileNameWithoutExtension($file)
+                            $fileNA = $tranprepend + $fname + "NA.$GenFrmt"
                             $ffmpegcmd = "ffmpeg -y -i `"$file`"  -c copy -an `"$fileNA`""
                             (Invoke-Expression $ffmpegcmd) *> $null
-                            $VidPathStr[$CurrExpIdx] = "file `'$fileNA`'"
-                            $VidPathSet[$CurrExpIdx] = "`"$fileNA`""
+                            if(Get-ChildItem -Path "$fileNA" | Select-Object Length){
+                                $CurrExpIdx++
+                                $VidPathStr[$CurrExpIdx] = "file `'$fileNA`'"
+                                $VidPathSet[$CurrExpIdx] = "`"$fileNA`""
+                                $FileAppendSuccess = $true
+                            }
                         }
+                    }
+                    #If the file had a transition entry
+                    elseif($TranL)
+                    {
+                        Write-Error "Blank File"
                     }
                     else
                     {
                         Write-Error "Blank File"
                     }
 
-                    #If the last file, fade to black.
-                    if ($CurrIdx -eq $FileList.Count)
+                    #If we get this far, update the previous properties for the next video to transition from.
+                    if($FileAppendSuccess){
+                        $PrevVid2TransitionFrom = $file
+                        $PVEnd = $VEnd
+                        $LastExpIdx = $CurrExpIdx
+                        $NFilesExported++
+                    }
+                    else{
+
+                    }
+
+                    #If the last file, fade to black, and include it in the export
+                    if ($FileAppendSuccess -and ($CurrIdx -eq $FileList.Count))
                     {
                         $tdur = ($file.enddur*0.9)
                         $tname = $tranprepend + "-fadeout" + $postname + ".$GenFrmt"
@@ -423,19 +452,25 @@ function Join-VidPartsFromList
                         $FileL = Get-ChildItem -Path "$tname" | Select-Object Length
                         if($FileL)
                         {
-                            $CurrExpIdx++
                             #Include original file with audio stream if enabled, otherwise remove the audio.
                             if ($IncAud)
                             {
+                                $CurrExpIdx++
                                 $VidPathStr[$CurrExpIdx] = "file `'$tname`'"
                                 $VidPathSet[$CurrExpIdx] = "`"$tname`""
+                                $LastExpIdx = $CurrExpIdx
                             }
                             else
                             {
                                 $ffmpegcmd = "ffmpeg -y -i `"$tname`"  -c copy -an `"$tnameNA`""
                                 (Invoke-Expression $ffmpegcmd) *> $null
-                                $VidPathStr[$CurrExpIdx] = "file `'$tnameNA`'"
-                                $VidPathSet[$CurrExpIdx] = "`"$tnameNA`""
+                                $TranL = Get-ChildItem -Path "$tnameNA" | Select-Object Length
+                                if($TranL){
+                                    $CurrExpIdx++
+                                    $VidPathStr[$CurrExpIdx] = "file `'$tnameNA`'"
+                                    $VidPathSet[$CurrExpIdx] = "`"$tnameNA`""
+                                    $LastExpIdx = $CurrExpIdx
+                                }
                             }
                         }
                         else
@@ -443,11 +478,6 @@ function Join-VidPartsFromList
                             Write-Error "Blank File"
                         }
                     }
-                    #If we get this far, update the previous properties for the next video to transition from.
-                    $PrevVid2TransitionFrom = $file
-                    $PVEnd = $VEnd
-                    $LastExpIdx = $CurrExpIdx
-                    $NFilesExported++
 
                     #Wait-Debugger
                 }
