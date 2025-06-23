@@ -64,7 +64,7 @@ if ($UseTestPath)
         BulkVidTimeMin = 0.5;
         NameMethod = "FldrLvl2";
         ImgVidFldr = "\ImgInVid";
-        ExpAud = 0; #Note: Keep 0 until / unless fixed; exporting audio doesn't appear to work (information becomes corrupted, video playback freezes)
+        ExpAud = 1; #Note: Keep 0 until / unless fixed; exporting audio doesn't appear to work (information becomes corrupted, video playback freezes)
             AdditionalOutputs = @(
                 [pscustomobject]@{
                     XDim = 1440;

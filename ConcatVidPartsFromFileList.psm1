@@ -222,7 +222,8 @@ function Join-VidPartsFromList
             #*********************** End of property import *************************
             #*********************************************************************
             $NotInFirstGrp = 0
-            if( -not ([string]::IsNullOrEmpty($ReencodeOpt))){
+            #If it is empty, they we aren't truing to re-encode.
+            if(([string]::IsNullOrEmpty($ReencodeOpt))){
                 $GrpSets = $FileList | Group-Object -Property VidDef
                 $RencodeSet = 0
             }
@@ -325,10 +326,12 @@ function Join-VidPartsFromList
                         #Wait-Debugger
                         if($FileL)
                         {
-                            $VidPathStr[$CurrExpIdx] = "file `'$tname`'"
-                            $VidPathSet[$CurrExpIdx] = "`"$tname`""
-                            if (-not $IncAud)
-                            {
+                            #Include original file with audio stream if enabled, otherwise remove the audio.
+                            if ($IncAud){
+                                $VidPathStr[$CurrExpIdx] = "file `'$tname`'"
+                                $VidPathSet[$CurrExpIdx] = "`"$tname`""
+                            }
+                            else{
                                 $ffmpegcmd = "ffmpeg -y -i `"$tname`"  -c copy -an `"$tnameNA`""
                                 (Invoke-Expression $ffmpegcmd) *> $null
                                 $VidPathStr[$CurrExpIdx] = "file `'$tnameNA`'"
@@ -345,7 +348,6 @@ function Join-VidPartsFromList
                     {
                         #Wait-Debugger
                         $tdur = $file.srtdur
-                        $CurrExpIdx = $CurrExpIdx+1
                         $tname = $tranprepend + $prename + "to" + $postname + ".$GenFrmt"
                         $tnameNA = $tranprepend + $prename + "to" + $postname + "NA.$GenFrmt"
                         $V1 = $PVEnd
@@ -364,17 +366,19 @@ function Join-VidPartsFromList
                         $FileL = Get-ChildItem -Path "$tname" | Select-Object Length
                         if($FileL)
                         {
-                            if (-not $IncAud)
+                            $CurrExpIdx++
+                            #Include original file with audio stream if enabled, otherwise remove the audio.
+                            if ($IncAud)
+                            {
+                                $VidPathStr[$CurrExpIdx] = "file `'$tname`'"
+                                $VidPathSet[$CurrExpIdx] = "`"$tname`""
+                            }
+                            else
                             {
                                 $ffmpegcmd = "ffmpeg -y -i `"$tname`"  -c copy -an `"$tnameNA`""
                                 (Invoke-Expression $ffmpegcmd) *> $null
                                 $VidPathStr[$CurrExpIdx] = "file `'$tnameNA`'"
                                 $VidPathSet[$CurrExpIdx] = "`"$tnameNA`""
-                            }
-                            else
-                            {
-                                $VidPathStr[$CurrExpIdx] = "file `'$tname`'"
-                                $VidPathSet[$CurrExpIdx] = "`"$tname`""
                             }
                         }
                         else
@@ -386,22 +390,21 @@ function Join-VidPartsFromList
                     $FileL = Get-ChildItem -Path "$file" | Select-Object Length
                     if($FileL)
                     {
-                        $CurrExpIdx = $CurrExpIdx+1
-                        $VidPathStr[$CurrExpIdx] = "file `'$tname`'"
-                        $VidPathSet[$CurrExpIdx] = "`"$tname`""
-                        if (-not $IncAud)
+                        $CurrExpIdx++
+                        #Include original file with audio stream if enabled, otherwise remove the audio.
+                        if ($IncAud)
                         {
-                            $dirname = [System.IO.Path]::GetFileNameWithoutExtension($PrevVid2TransitionFrom)
-                            $tnameNA = $tranprepend + $dirname + "NA.$GenFrmt"
-                            $ffmpegcmd = "ffmpeg -y -i `"$file`"  -c copy -an `"$tnameNA`""
-                            (Invoke-Expression $ffmpegcmd) *> $null
-                            $VidPathStr[$CurrExpIdx] = "file `'$tnameNA`'"
-                            $VidPathSet[$CurrExpIdx] = "`"$tnameNA`""
+                            $VidPathStr[$CurrExpIdx] = "file `'$file`'"
+                            $VidPathSet[$CurrExpIdx] = "`"$file`""
                         }
                         else
                         {
-                            $VidPathStr[$CurrExpIdx] = "file `'$file`'"
-                            $VidPathSet[$CurrExpIdx] = "`"$tname`""
+                            $dirname = [System.IO.Path]::GetFileNameWithoutExtension($PrevVid2TransitionFrom)
+                            $tnameNA = $tranprepend + $dirname + "NA.$GenFrmt"
+                            $ffmpegcmd = "ffmpeg -y -i `"$file`"  -c copy -an `"$fileNA`""
+                            (Invoke-Expression $ffmpegcmd) *> $null
+                            $VidPathStr[$CurrExpIdx] = "file `'$fileNA`'"
+                            $VidPathSet[$CurrExpIdx] = "`"$fileNA`""
                         }
                     }
                     else
@@ -413,27 +416,26 @@ function Join-VidPartsFromList
                     if ($CurrIdx -eq $FileList.Count)
                     {
                         $tdur = ($file.enddur*0.9)
-                        $CurrExpIdx = $CurrExpIdx+1
                         $tname = $tranprepend + "-fadeout" + $postname + ".$GenFrmt"
                         $tnameNA = $tranprepend + "-fadeout" + $postname + "NA.$GenFrmt"
                         $toutcmd = "ffmpeg -y -i `"$VEnd`" -vf `"fade=t=out:st=0:d=$tdur`" $EncodeDef `"$tname`""
                         (Invoke-Expression $toutcmd) *> $null
-                        $VidPathStr[$CurrExpIdx] = "file `'$tname`'"
-                        $VidPathSet[$CurrExpIdx] = "`"$tname`""
                         $FileL = Get-ChildItem -Path "$tname" | Select-Object Length
                         if($FileL)
                         {
-                            if (-not $IncAud)
+                            $CurrExpIdx++
+                            #Include original file with audio stream if enabled, otherwise remove the audio.
+                            if ($IncAud)
+                            {
+                                $VidPathStr[$CurrExpIdx] = "file `'$tname`'"
+                                $VidPathSet[$CurrExpIdx] = "`"$tname`""
+                            }
+                            else
                             {
                                 $ffmpegcmd = "ffmpeg -y -i `"$tname`"  -c copy -an `"$tnameNA`""
                                 (Invoke-Expression $ffmpegcmd) *> $null
                                 $VidPathStr[$CurrExpIdx] = "file `'$tnameNA`'"
                                 $VidPathSet[$CurrExpIdx] = "`"$tnameNA`""
-                            }
-                            else
-                            {
-                                $VidPathStr[$CurrExpIdx] = "file `'$file`'"
-                                $VidPathSet[$CurrExpIdx] = "`"$tname`""
                             }
                         }
                         else
@@ -481,7 +483,7 @@ function Join-VidPartsFromList
                     $FileInputStr+=" -i $file2con"
                     $FiltStr+= "[$find`:v:0]"
                     if($IncAud){
-                        FiltStr+= "[$find`:a:0]"
+                        $FiltStr+= "[$find`:a:0]"
                     }
                 }
                 if($FrmtDef.XDim -ne $PreWidth){
@@ -505,7 +507,7 @@ function Join-VidPartsFromList
                 #Complete the concat string.
                 $FiltStr+="concat=n=$N2Concat`:v=1"
                 if($IncAud){
-                    FiltStr+= ":a=1[outv][outa]"
+                    $FiltStr+= ":a=1[outv][outa]"
                 }
                 else{
                     $FiltStr+= "[outv]"
@@ -514,7 +516,7 @@ function Join-VidPartsFromList
                 if([string]::IsNullOrEmpty($rszcfg)){
                     $rszstr = ""
                     if($IncAud){
-                        FiltStr+= "`" -map `"[outv]`" -map `"[outa]`""
+                        $FiltStr+= "`" -map `"[outv]`" -map `"[outa]`""
                     }
                     else{
                         $FiltStr+= "`" -map `"[outv]`""
@@ -523,17 +525,17 @@ function Join-VidPartsFromList
                 else{
                     $rszstr = "`;[outv]scale="+$rszcfg+"[sclv]"
                     if($IncAud){
-                        FiltStr+= "$rszstr`" -map `"[sclv]`" -map `"[outa]`""
+                        $FiltStr+= "$rszstr`" -map `"[sclv]`" -map `"[outa]`""
                     }
                     else{
                         $FiltStr+= "$rszstr`" -map `"[sclv]`""
                     }
                 }
-                $ffmpegcmd = "ffmpeg -y $FileInputStr -filter_complex $FiltStr $FinEncodeDef `"$finfile`""
+                $ffmpegcmd = "ffmpeg -y -vsync -1 $FileInputStr -filter_complex $FiltStr $FinEncodeDef `"$finfile`""
                 $2ndPass = $false
             }
             else{
-                $ffmpegcmd = "ffmpeg -y -safe 0 -f concat -i `"$appendlist`" -c copy -movflags faststart `"$intermittentfile`""
+                $ffmpegcmd = "ffmpeg -y -vsync -1 -safe 0 -f concat -i `"$appendlist`" -c copy -movflags faststart `"$intermittentfile`""
                 $2ndPass = $true
             }
             #Wait-Debugger
