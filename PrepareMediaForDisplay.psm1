@@ -860,7 +860,7 @@ function Update-MediaForDisplaySets
             $IntermediateEncoding = "libx264"
         }
         $GDefs.ffmpegvcdcstd = "-video_track_timescale $vrate -framerate $($Set.fps ) -vcodec $IntermediateEncoding -crf $($Set.OutQuality ) -colorspace 1 -preset slow -pix_fmt yuvj420p -r $( $set.FPS ) -movflags faststart "
-        $GDefs.ffmpegvcdctra = "-video_track_timescale $vrate -framerate $($Set.fps ) -vcodec $IntermediateEncoding -crf $($Set.TrnQuality ) -colorspace 1 -preset slower -pix_fmt yuvj420p -r $( $set.FPS ) -movflags faststart "
+        $GDefs.ffmpegvcdctra = "-video_track_timescale $vrate -framerate $($Set.fps ) -vcodec $IntermediateEncoding -crf $($Set.TrnQuality ) -colorspace 1 -preset slow -pix_fmt yuvj420p -r $( $set.FPS ) -movflags faststart "
         if($Set.UseHQIntermittents){
             $GDefs.ffmpegvcdcstd = $GDefs.ffmpegvcdctra
         }
@@ -1364,6 +1364,7 @@ function Update-MediaForDisplaySets
                 elseif($file.IsVid)
                 {
                     $VPrams = ffprobe -v error -show_streams -select_streams v:0 -of ini $file.FullName
+                    $APrams = ffprobe -v error -show_streams -select_streams a:0 -of ini $file.FullName
                     $VWidth = [Int]::0
                     $VWidth = [Int]::0
                     $Rotation = [Int]::0
@@ -1396,6 +1397,13 @@ function Update-MediaForDisplaySets
                                 {
                                     $AudioSet = 1
                                 }
+                            }
+                        }
+                        foreach ($Pram in $APrams)
+                        {
+                            if ( $Pram.StartsWith("codec_name="))
+                            {
+                                $AudioSet = 1
                             }
                         }
                         #If video is not oriented according to it's resolution, assume  a 90 deg turn.
@@ -1477,6 +1485,12 @@ function Update-MediaForDisplaySets
                         {
                             $PadOpt = ""
                         }
+                        if(($PreWidth -eq $XDim) -and ($PreHeight -eq $YDim)){
+                            $ReqScale = $false
+                        }
+                        else{
+                            $ReqScale = $true
+                        }
                         $nomdur = $Duration - ($SelFadeTime*2)
                         $endsrt = $Duration - $SelFadeTime
                         $NFramesNom = [math]::floor($nomdur*$framerate)
@@ -1488,12 +1502,19 @@ function Update-MediaForDisplaySets
                         $ffmpeginputnom = "ffmpeg -y -ss $SelFadeTime -t $nomdur -i `"$( $file.FullName )`" "
                         $ffmpeginputend = "ffmpeg -y -ss $endsrt -t $SelFadeTime -i `"$( $file.FullName )`" "
                         $ffmpegvidfiltsub = "scale=$wint`:$hint`:force_original_aspect_ratio=decrease$PadOpt"
-                        $ffmpegvidfilt = "fps=fps=$framerate[vint]`;[vint]$ffmpegvidfiltsub"
+                        if($ReqScale){
+                            $ffmpegvidfilt = "fps=fps=$framerate[vint]`;[vint]$ffmpegvidfiltsub"
+                        }
+                        else{
+                            $ffmpegvidfilt = "fps=fps=$framerate"
+                        }
                         $ffmpegvidcmd1 = "-vf "+ $ffmpegvidfiltsub
                         $ffmpegcmdsrt = $ffmpeginputsrt + $ffmpegvidcmd1 + " " + $ffmpegaudcmd + $ffmpegvcdctra + " -movflags faststart `"$srtpath`""
                         $ffmpegcmdend = $ffmpeginputend + $ffmpegvidcmd1 + " " + $ffmpegaudcmd + $ffmpegvcdctra + " -movflags faststart `"$endpath`""
                         if($AudioSet)
-                        {$ffmpegcmdnom = $ffmpeginputnom + "-filter_complex `"[0:v]$ffmpegvidfilt`;[0:a]afade=t=in:st=0:d=$AFd,afade=t=out:st=$AOtOf`:d=$AFd`" " + $ffmpegaudcmd + $ffmpegvcdcstd + " `"$nompath`""}
+                        {$ffmpegcmdnom = $ffmpeginputnom + "-filter_complex `"[0:v]$ffmpegvidfilt[vout]`;[0:a]afade=t=in:st=0:d=$AFd,afade=t=out:st=$AOtOf`:d=$AFd[aout]`" -map `"[vout]`" -map `"[aout]`" -frames:v $NFramesNom " + $ffmpegaudcmd + $ffmpegvcdcstd + " `"$nompath`""}
+                        #{$ffmpegcmdnom = $ffmpeginputnom + "-filter_complex `"[0:v]$ffmpegvidfilt[vout]`" -map `"[vout]`" -frames:v $NFramesNom " + $ffmpegaudcmd + $ffmpegvcdcstd + " `"$nompath`""}
+                        #{$ffmpegcmdnom = $ffmpeginputnom + "-filter_complex `"[0:v]$ffmpegvidfilt[vout]`" -map `"[vout]`" -frames:v $NFramesNom -an " + $ffmpegvcdcstd + " `"$nompath`""}
                         else
                         {$ffmpegcmdnom = $ffmpeginputnom + " $ffmpegCmdA " + "-filter_complex `"[0:v]$ffmpegvidfilt[vout]`" " + $ffmpegaudcmd + $ffmpegvcdcstd + " -map `"[vout]`" -map 1:a -frames:v $NFramesNom `"$nompath`""}
 
