@@ -595,7 +595,7 @@ function Join-VidPartsFromList
         $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 
         # Writing to a file
-        $logEntry = "$timestamp - Error: $errorMessage - Details: $errorDetails - Item: $failedItem"
+        $logEntry = "$timestamp - Error: $errorMessage - Details: $errorDetails - Item: $failedItem `n`t Files Imported: $NfilesProc `n`t Files To Import: $($FileList.Count)"
         Add-Content -Path $errorlogpath -Value $logEntry
     }
     finally{
