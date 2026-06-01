@@ -75,8 +75,9 @@ impl FrameRenderer {
 
         // Rotate (if any) about center, then center-crop to the output size.
         // The render margin guarantees the crop stays within real content.
+        // Fades/dissolves are applied later by the pipeline's transition mixer.
         let angle = self.plan.rotation_deg(i);
-        let mut frame = if angle.abs() > f32::EPSILON {
+        let frame = if angle.abs() > f32::EPSILON {
             let rotated = rotate_about_center(
                 &render,
                 angle.to_radians(),
@@ -93,16 +94,6 @@ impl FrameRenderer {
             let off_y = (render_h - out_h) / 2;
             ::image::imageops::crop_imm(&render, off_x, off_y, out_w, out_h).to_image()
         };
-
-        // Apply fade (brightness) if needed.
-        let b = self.plan.brightness(i);
-        if b < 0.999 {
-            for px in frame.pixels_mut() {
-                px.0[0] = (px.0[0] as f32 * b) as u8;
-                px.0[1] = (px.0[1] as f32 * b) as u8;
-                px.0[2] = (px.0[2] as f32 * b) as u8;
-            }
-        }
 
         frame.into_raw()
     }

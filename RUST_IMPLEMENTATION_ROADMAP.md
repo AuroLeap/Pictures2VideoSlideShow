@@ -20,12 +20,13 @@ The core engine is implemented end-to-end and produces real slideshow videos.
 | 6. Pipeline | ✅ Done | One encoder per output; images + videos interleaved in order into a single MP4 |
 | 7. Testing/tuning | ✅ Done | `cargo test` green, `cargo clippy` clean, `cargo fmt` clean; `bench` subcommand reports real throughput |
 | 8. Video passthrough | ✅ Done | Videos decoded (cover-fit, fps-resampled) and streamed inline; audio dropped |
+| 8b. Cross-fade transitions | ✅ Done | Streaming dissolve mixer: tail of each clip dissolves into the next over `fade_frames`; first clip fades in, last fades out. Holds only a rolling window (no whole videos buffered) — independent of bulk splitting |
 
 **Measured on free-use test media (`TestInput/`, 24-core, release build):**
 - Frame generation: ~0.78 s/image (180 frames @ 1440×900) → **~230 frames/s**, projecting ~26 min for 2000 images vs. the 12-hour PowerShell baseline.
 - Full pipeline incl. encode: 10 mixed items (6 images + 4 videos) → 2156 frames in **24.8 s**.
 
-**Not yet done**: audio tracks, xfade/dissolve transitions (currently fade-to-black between clips), `bulk_video_time_min` grouping into multiple part files, multi-output dedup of decode work, GPU acceleration.
+**Not yet done**: audio tracks, `bulk_video_time_min` grouping into multiple part files (note: independent of cross-fade — the mixer only needs a rolling `fade_frames` window, not whole clips), multi-output dedup of decode work, GPU acceleration.
 
 Run it:
 ```bash

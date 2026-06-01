@@ -69,7 +69,6 @@ pub struct CropWindow {
 #[derive(Debug, Clone)]
 pub struct ClipPlan {
     pub total_frames: u32,
-    pub fade_frames: u32,
     /// Final output frame size.
     pub out_w: u32,
     pub out_h: u32,
@@ -100,7 +99,6 @@ impl ClipPlan {
         let out_w = out.width;
         let out_h = out.height;
         let total_frames = out.total_frames();
-        let fade_frames = out.fade_frames();
 
         // Scale needed for the source to fully cover the output canvas.
         let cover = (out_w as f32 / img_w as f32).max(out_h as f32 / img_h as f32);
@@ -157,7 +155,6 @@ impl ClipPlan {
 
         Self {
             total_frames,
-            fade_frames,
             out_w,
             out_h,
             render_w,
@@ -221,24 +218,6 @@ impl ClipPlan {
             h: ch,
         }
     }
-
-    /// Brightness multiplier in `[0, 1]` for fade in/out on frame `i`.
-    pub fn brightness(&self, i: u32) -> f32 {
-        if self.fade_frames == 0 {
-            return 1.0;
-        }
-        let fade = self.fade_frames;
-        // Fade in.
-        if i < fade {
-            return (i + 1) as f32 / fade as f32;
-        }
-        // Fade out.
-        if i >= self.total_frames.saturating_sub(fade) {
-            let remaining = self.total_frames.saturating_sub(i);
-            return remaining as f32 / fade as f32;
-        }
-        1.0
-    }
 }
 
 #[cfg(test)]
@@ -287,15 +266,6 @@ mod tests {
         let plan = ClipPlan::new(1230, 1920, &out, 7);
         assert!(plan.pre_w >= out.width);
         assert!(plan.pre_h >= out.height);
-    }
-
-    #[test]
-    fn brightness_fades_from_zero_to_full() {
-        let out = test_output();
-        let plan = ClipPlan::new(1920, 1280, &out, 1);
-        assert!(plan.brightness(0) < 1.0);
-        assert!((plan.brightness(plan.total_frames / 2) - 1.0).abs() < f32::EPSILON);
-        assert!(plan.brightness(plan.total_frames - 1) < 1.0);
     }
 
     #[test]

@@ -1,85 +1,108 @@
 //! Video passthrough: decode an input video to raw `rgb24` frames at the target
-//! resolution/fps (cover-fit, like images) and stream them into the slideshow
-//! encoder, so videos play inline in the sequence.
+//! resolution/fps (cover-fit, like images), one frame at a time, so it can feed
+//! the same streaming pipeline (and cross-fade mixer) as image clips.
 
 use crate::error::{Result, SlideshowError};
-use crate::ffmpeg::FfmpegEncoder;
 use std::io::Read;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Child, ChildStdout, Command, Stdio};
 
-/// Decode `path` into the running [`FfmpegEncoder`], scaling/cropping to
-/// `width`x`height` and resampling to `fps`. Returns the number of frames
-/// streamed. Audio is dropped (the slideshow track is silent).
-pub fn stream_into(
-    path: &Path,
-    width: u32,
-    height: u32,
-    fps: u32,
-    encoder: &mut FfmpegEncoder,
-) -> Result<u64> {
-    // Cover-fit (fill then crop) to match the image Ken Burns framing, then
-    // resample to the target frame rate and emit raw rgb24.
-    let vf = format!(
-        "scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},fps={fps}",
-        w = width,
-        h = height,
-        fps = fps
-    );
+/// Streams decoded `rgb24` frames from a video via an ffmpeg child process.
+pub struct VideoFrameReader {
+    child: Child,
+    stdout: ChildStdout,
+    frame_bytes: usize,
+    finished: bool,
+}
 
-    let mut child = Command::new("ffmpeg")
-        .arg("-v")
-        .arg("error")
-        .arg("-i")
-        .arg(path)
-        .arg("-an")
-        .arg("-vf")
-        .arg(&vf)
-        .arg("-pix_fmt")
-        .arg("rgb24")
-        .arg("-f")
-        .arg("rawvideo")
-        .arg("pipe:1")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| SlideshowError::Ffmpeg(format!("Failed to spawn ffmpeg decoder: {}", e)))?;
+impl VideoFrameReader {
+    /// Spawn ffmpeg to decode `path`, scaling/cropping to `width`x`height`
+    /// (cover-fit) and resampling to `fps`. Audio is dropped.
+    pub fn open(path: &Path, width: u32, height: u32, fps: u32) -> Result<Self> {
+        // Cover-fit (fill then crop) to match the image Ken Burns framing, then
+        // resample to the target frame rate and emit raw rgb24.
+        let vf = format!(
+            "scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},fps={fps}",
+            w = width,
+            h = height,
+            fps = fps
+        );
 
-    let mut stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| SlideshowError::Ffmpeg("ffmpeg decoder stdout unavailable".into()))?;
+        let mut child = Command::new("ffmpeg")
+            .arg("-v")
+            .arg("error")
+            .arg("-i")
+            .arg(path)
+            .arg("-an")
+            .arg("-vf")
+            .arg(&vf)
+            .arg("-pix_fmt")
+            .arg("rgb24")
+            .arg("-f")
+            .arg("rawvideo")
+            .arg("pipe:1")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| {
+                SlideshowError::Ffmpeg(format!("Failed to spawn ffmpeg decoder: {}", e))
+            })?;
 
-    let frame_bytes = (width * height * 3) as usize;
-    let mut buf = vec![0u8; frame_bytes];
-    let mut frames = 0u64;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| SlideshowError::Ffmpeg("ffmpeg decoder stdout unavailable".into()))?;
 
-    loop {
-        match read_full(&mut stdout, &mut buf)? {
-            // A complete frame.
-            n if n == frame_bytes => {
-                encoder.write_frame(&buf)?;
-                frames += 1;
-            }
-            // EOF (clean end of stream).
-            0 => break,
-            // Truncated trailing frame — ignore.
-            _ => break,
+        Ok(Self {
+            child,
+            stdout,
+            frame_bytes: (width * height * 3) as usize,
+            finished: false,
+        })
+    }
+
+    /// Read the next decoded frame, or `None` at end of stream.
+    pub fn read_frame(&mut self) -> Result<Option<Vec<u8>>> {
+        if self.finished {
+            return Ok(None);
+        }
+        let mut buf = vec![0u8; self.frame_bytes];
+        let n = read_full(&mut self.stdout, &mut buf)?;
+        if n == self.frame_bytes {
+            return Ok(Some(buf));
+        }
+        // EOF (clean, n == 0) or a truncated trailing frame: end the stream.
+        self.wait()?;
+        Ok(None)
+    }
+
+    fn wait(&mut self) -> Result<()> {
+        if self.finished {
+            return Ok(());
+        }
+        self.finished = true;
+        let status = self.child.wait().map_err(|e| {
+            SlideshowError::Ffmpeg(format!("Failed waiting for ffmpeg decoder: {}", e))
+        })?;
+        if !status.success() {
+            return Err(SlideshowError::Ffmpeg(format!(
+                "ffmpeg decoder exited with status {}",
+                status
+            )));
+        }
+        Ok(())
+    }
+}
+
+impl Drop for VideoFrameReader {
+    fn drop(&mut self) {
+        if !self.finished {
+            // Source dropped before EOF (e.g. an error upstream): don't leak the
+            // child process.
+            let _ = self.child.kill();
+            let _ = self.child.wait();
         }
     }
-
-    let status = child
-        .wait()
-        .map_err(|e| SlideshowError::Ffmpeg(format!("Failed waiting for ffmpeg decoder: {}", e)))?;
-    if !status.success() {
-        return Err(SlideshowError::Ffmpeg(format!(
-            "ffmpeg decoder exited with status {} for {}",
-            status,
-            path.display()
-        )));
-    }
-
-    Ok(frames)
 }
 
 /// Read until `buf` is full or EOF. Returns the number of bytes read.
