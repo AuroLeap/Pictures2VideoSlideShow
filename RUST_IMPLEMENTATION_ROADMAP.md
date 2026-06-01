@@ -6,6 +6,37 @@
 
 ---
 
+## Implementation Status (2026-05-30)
+
+The core engine is implemented end-to-end and produces real slideshow videos.
+
+| Phase | Status | Notes |
+|---|---|---|
+| 1. Configuration | ✅ Done | TOML/JSON load + validate; added `zoom_amount`/`ken_burns` with serde defaults |
+| 2. Media loading | ✅ Done | Parallel scan (rayon), real image dims via `image`, video dims/duration via `ffprobe`, ignore patterns |
+| 3. Transform math | ✅ Done | Ken Burns zoom/pan (smoothstep easing) + rotation with no-black-corner margin; unit tested |
+| 4. Frame generation | ✅ Done | Pre-scale once (`Arc`), per-frame crop→resize→rotate→fade, rayon-parallel, range-bounded memory |
+| 5. FFmpeg encode | ✅ Done | Stream raw `rgb24` to `libx264` (yuv420p, faststart) over stdin |
+| 6. Pipeline | ✅ Done | One encoder per output; images + videos interleaved in order into a single MP4 |
+| 7. Testing/tuning | ✅ Done | `cargo test` green, `cargo clippy` clean, `cargo fmt` clean; `bench` subcommand reports real throughput |
+| 8. Video passthrough | ✅ Done | Videos decoded (cover-fit, fps-resampled) and streamed inline; audio dropped |
+
+**Measured on free-use test media (`TestInput/`, 24-core, release build):**
+- Frame generation: ~0.78 s/image (180 frames @ 1440×900) → **~230 frames/s**, projecting ~26 min for 2000 images vs. the 12-hour PowerShell baseline.
+- Full pipeline incl. encode: 10 mixed items (6 images + 4 videos) → 2156 frames in **24.8 s**.
+
+**Not yet done**: audio tracks, xfade/dissolve transitions (currently fade-to-black between clips), `bulk_video_time_min` grouping into multiple part files, multi-output dedup of decode work, GPU acceleration.
+
+Run it:
+```bash
+cargo run --release -- --config test_config.toml validate   # check config
+cargo run --release -- --config test_config.toml stats       # list media
+cargo run --release -- --config test_config.toml bench -i 2000  # frame-gen throughput
+cargo run --release -- --config test_config.toml build       # produce the slideshow
+```
+
+---
+
 ## Setup Prerequisites
 
 ### Install Rust (5 minutes)

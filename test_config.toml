@@ -1,0 +1,23 @@
+[input]
+media_root = "TestInput"
+ignore_patterns = ["DNP"]
+
+[output]
+base_dir = "TestOut/RustOut"
+
+[processing]
+use_parallelism = true
+dry_run = false
+verbose = false
+
+[[outputs]]
+name = "test-1440x900"
+width = 1440
+height = 900
+fps = 30
+pic_display_time_secs = 6.0
+fade_time_secs = 0.5
+max_rotation_degrees = 15.0
+bulk_video_time_min = 20
+quality_crf = 28
+enable_audio = false

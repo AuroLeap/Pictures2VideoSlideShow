@@ -1,3 +1,7 @@
+// Reserved for richer progress reporting; the pipeline currently logs progress
+// inline.
+#![allow(dead_code)]
+
 pub struct ProgressTracker {
     total: usize,
     current: usize,

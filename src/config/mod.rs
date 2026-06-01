@@ -44,6 +44,36 @@ pub struct OutputDef {
     pub bulk_video_time_min: u32,
     pub quality_crf: u32,
     pub enable_audio: bool,
+
+    /// Ken Burns zoom amount as a fraction (e.g. 0.12 = up to 12% zoom over the
+    /// clip). Direction (zoom in vs out) is randomized per image.
+    #[serde(default = "default_zoom_amount")]
+    pub zoom_amount: f32,
+
+    /// Enable the Ken Burns pan/zoom effect. When false, images are shown
+    /// statically (cover-fit) with only the fade applied.
+    #[serde(default = "default_true")]
+    pub ken_burns: bool,
+}
+
+fn default_zoom_amount() -> f32 {
+    0.12
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl OutputDef {
+    /// Total number of frames for one image's clip.
+    pub fn total_frames(&self) -> u32 {
+        ((self.pic_display_time_secs * self.fps as f32).round() as u32).max(1)
+    }
+
+    /// Number of frames spent fading in (and, symmetrically, fading out).
+    pub fn fade_frames(&self) -> u32 {
+        (self.fade_time_secs * self.fps as f32).round() as u32
+    }
 }
 
 impl Config {
@@ -62,12 +92,10 @@ impl Config {
 
     pub fn validate(&self) -> Result<()> {
         if !self.input.media_root.exists() {
-            return Err(SlideshowError::InvalidConfig(
-                format!(
-                    "Input media root does not exist: {}",
-                    self.input.media_root.display()
-                ),
-            ));
+            return Err(SlideshowError::InvalidConfig(format!(
+                "Input media root does not exist: {}",
+                self.input.media_root.display()
+            )));
         }
 
         if self.outputs.is_empty() {
@@ -78,27 +106,24 @@ impl Config {
 
         for output in &self.outputs {
             if output.width == 0 || output.height == 0 {
-                return Err(SlideshowError::InvalidConfig(
-                    format!(
-                        "Output '{}' has invalid dimensions: {}x{}",
-                        output.name, output.width, output.height
-                    ),
-                ));
+                return Err(SlideshowError::InvalidConfig(format!(
+                    "Output '{}' has invalid dimensions: {}x{}",
+                    output.name, output.width, output.height
+                )));
             }
 
             if output.fps == 0 {
-                return Err(SlideshowError::InvalidConfig(
-                    format!("Output '{}' has invalid fps: {}", output.name, output.fps),
-                ));
+                return Err(SlideshowError::InvalidConfig(format!(
+                    "Output '{}' has invalid fps: {}",
+                    output.name, output.fps
+                )));
             }
 
             if output.quality_crf > 51 {
-                return Err(SlideshowError::InvalidConfig(
-                    format!(
-                        "Output '{}' has invalid quality CRF: {} (must be 0-51)",
-                        output.name, output.quality_crf
-                    ),
-                ));
+                return Err(SlideshowError::InvalidConfig(format!(
+                    "Output '{}' has invalid quality CRF: {} (must be 0-51)",
+                    output.name, output.quality_crf
+                )));
             }
         }
 

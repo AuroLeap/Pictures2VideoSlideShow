@@ -4,14 +4,14 @@ use std::path::PathBuf;
 
 mod config;
 mod error;
+mod ffmpeg;
+mod image;
 mod logging;
 mod media;
-mod image;
-mod video;
-mod transform;
-mod ffmpeg;
 mod pipeline;
+mod transform;
 mod util;
+mod video;
 
 use config::Config;
 use logging::init_logging;
@@ -116,6 +116,8 @@ async fn main() -> Result<()> {
 }
 
 async fn run_build(config: &Config) -> Result<()> {
+    config.validate()?;
+
     // 1. Load media
     log::info!("Loading media files...");
     let media_loader = media::MediaLoader::new(config.input.clone());
@@ -126,18 +128,14 @@ async fn run_build(config: &Config) -> Result<()> {
         album.total_size / (1024 * 1024)
     );
 
-    // 2. Process images for each output definition
-    for output_def in &config.outputs {
-        log::info!("Processing for output: {}", output_def.name);
-
-        let pipeline = pipeline::FrameGenerationPipeline::new(
-            album.clone(),
-            vec![output_def.clone()],
-            config.processing.clone(),
-        );
-
-        pipeline.execute().await?;
-    }
+    // 2. Process all output definitions in one pipeline.
+    let pipeline = pipeline::FrameGenerationPipeline::new(
+        album,
+        config.outputs.clone(),
+        config.processing.clone(),
+        config.output.base_dir.clone(),
+    );
+    pipeline.execute().await?;
 
     log::info!("All outputs processed successfully");
     Ok(())
@@ -167,20 +165,58 @@ async fn run_stats(config: &Config) -> Result<()> {
 }
 
 async fn run_bench(config: &Config, num_images: usize) -> Result<()> {
+    let media_loader = media::MediaLoader::new(config.input.clone());
+    let album = media_loader.scan_and_index().await?;
+
+    let first_image = album
+        .media_files
+        .iter()
+        .find(|m| m.file_type == media::MediaType::Image)
+        .ok_or_else(|| {
+            crate::error::SlideshowError::Media("No images found to benchmark".into())
+        })?;
+
+    let output_def = config
+        .outputs
+        .first()
+        .ok_or_else(|| crate::error::SlideshowError::InvalidConfig("No output defined".into()))?;
+
+    log::info!(
+        "Benchmarking frame generation on {} ({} simulated images)...",
+        first_image.path.display(),
+        num_images
+    );
+
+    let renderer = image::FrameRenderer::load(&first_image.path, output_def)?;
+    let frames_per_image = renderer.total_frames();
+
     let start = std::time::Instant::now();
-
-    // Simulate processing
-    log::info!("Benchmarking with {} images...", num_images);
-    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-
+    // Render the full clip once (this is the real per-image cost).
+    let mut total_frames = 0u64;
+    let mut next = 0;
+    while next < frames_per_image {
+        let end = (next + 32).min(frames_per_image);
+        total_frames += renderer.render_range(next, end).len() as u64;
+        next = end;
+    }
     let elapsed = start.elapsed();
-    let secs_per_image = elapsed.as_secs_f64() / num_images as f64;
+
+    let per_image = elapsed.as_secs_f64();
+    let fps = total_frames as f64 / per_image.max(0.001);
 
     println!("\n=== Benchmark Results ===");
-    println!("Images processed: {}", num_images);
-    println!("Total time: {:.2}s", elapsed.as_secs_f64());
-    println!("Per image: {:.2}s", secs_per_image);
-    println!("Throughput: {:.1} images/sec", 1.0 / secs_per_image);
+    println!("Image: {}", first_image.path.display());
+    println!(
+        "Output: {}x{} @ {}fps, {} frames/image",
+        output_def.width, output_def.height, output_def.fps, frames_per_image
+    );
+    println!("Per image: {:.2}s", per_image);
+    println!("Frame throughput: {:.1} frames/sec", fps);
+    println!(
+        "Projected for {} images: {:.1} min",
+        num_images,
+        per_image * num_images as f64 / 60.0
+    );
 
     Ok(())
 }

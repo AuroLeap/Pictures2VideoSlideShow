@@ -1,5 +1,8 @@
 ﻿.vs
 TestOut
+
+# Rust build artifacts
+/target
 AlbumOut1440x900q30-Groups
 AlbumOut1440x900q30
 AlbumOut1920x1080_FPS20_DT6_FT0.7_MR30q-Groups
