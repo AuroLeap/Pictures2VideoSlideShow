@@ -95,3 +95,4 @@ _Generated 2026-06-02. Public items by module:_
   - `pub fn read_frame(&mut self) -> Result<Option<Vec<u8>>>`
 <!-- END GENERATED MODULE MAP -->
 
+

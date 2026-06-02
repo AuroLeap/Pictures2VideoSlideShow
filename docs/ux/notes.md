@@ -10,7 +10,7 @@ Back to [docs index](../README.md) · [project README](../../README.md).
 
 | Topic | Owner doc | Notes |
 |---|---|---|
-| Rust commands, recommended frame settings, config fields (unit+default), current gaps | **[quick-reference.md](../quick-reference.md)** | Canonical. README + all Rust planning docs link here; values appear nowhere else. |
+| End-user setup (no Rust) vs Developer build-from-source (Rust); commands, recommended frame settings, config fields (unit+default), current gaps | **[quick-reference.md](../quick-reference.md)** | Canonical. §1 = end-user (setup script + prebuilt `slideshow.exe`, no Rust); §1a = developer build (Rust only here). README + all Rust planning docs link here; values appear nowhere else. |
 | Why each frame constraint exists (4 GB FAT32, codec/fps/CRF, audio) | [README → Output Constraints](../../README.md#output-constraints--limitations-digital-picture-frames) | Explains *why*; defers the *what to set* values to the Quick Reference. |
 | Project status / which engine to use | [README → Project Status](../../README.md#project-status) | PowerShell (feature-complete, `main`) vs Rust (fast, `rust-rewrite`). |
 | PowerShell pipeline config + optimization | [README → Configuration Guide / Performance Optimization](../../README.md#configuration-guide) | PowerShell-specific; CRF table now labeled general guidance, defers default to Quick Reference. |
@@ -38,6 +38,20 @@ Back to [docs index](../README.md) · [project README](../../README.md).
 - **[MINOR → @system-engineer]** SR-003's `[input]`/`[processing]` field enumeration in its Permutations does not list `exception_pattern`/`exception_threshold`/`max_workers`; consider including them so the "every field documented" acceptance is complete.
 
 ---
+
+## Findings (Round 3 — end-user path must not require Rust)
+
+Human gate feedback reopened OBJ1: end users were being told to install Rust. Rust is a build-only/developer concern. Applied the audience split (UN-021 / SR-025) in the docs UX owns.
+
+### Done / satisfied
+- **Audience split in the Quick Reference (UN-021 / SR-025):** Rewrote [§1](../quick-reference.md#1-end-user-setup-in-three-steps-no-rust-no-compiler) as the **End-user** path — (1) run the setup script (installs/locates FFmpeg + fetches/places the prebuilt `slideshow.exe`, self-elevating for admin; UN-020 / SR-024), (2) edit one TOML config (UN-003 / SR-003), (3) run one `build`. No Rust, no `cargo`, no source checkout. Added a new **[§1a Developer — build from source](../quick-reference.md#1a-developer-setup--build-from-source-rust)** containing the Rust/`cargo` instructions. Rust now appears **only** in §1a (and a developer note in §2).
+- **No-Rust runtime model (UN-001/UN-002 → SR-001/SR-002):** §1 states the only runtime dependency is FFmpeg and that `validate` checks runtime prerequisites only — never Rust. §2 commands rewritten to invoke `slideshow.exe` directly (the prebuilt binary), with `cargo run` relegated to a developer note.
+- **Honest TARGET-state note (SR-023/SR-024):** Added an explicit interim-availability callout in §1 — the prebuilt binary (GitHub Releases) and setup script are **planned, not yet published**; until they ship the end user builds the binary once via §1a or uses the PowerShell pipeline on `main`. Mirrored as a note in the README Rust section. Does not imply a release/setup script exists today.
+- **README de-duplicated and redirected (DRY / SR-020):** Split the README Rust "Build, run & configure" block into **"Run it (end user) — no Rust required"** (links to QR §1; states FFmpeg-only runtime + setup script) and **"Build from source (developer) — Rust"** (the `cargo build` block, links QR §1a/§2). The README no longer presents Rust as an end-user prerequisite; the only `cargo`/Rust install instruction for the end-user flow is gone, with facts owned by the Quick Reference and referenced by ID/link.
+
+### Notes
+- The PowerShell pipeline's [Quick Start → Install Dependencies](../../README.md#windows-setup) (`InstallDependencies.ps1`, ImageMagick + FFmpeg) is a *separate engine* and never mentioned Rust — left as-is; it is the cited precedent for the planned Rust setup script (SR-024).
+- SR references in the Quick Reference header updated to include SR-001/SR-002 and SR-023/SR-024/SR-025.
 
 ## Recommendations (not blocking)
 - Consider trimming/merging the four overlapping Rust planning docs (SPEC/ROADMAP/NEXT_STEPS/PROJECT_SUMMARY) into one historical "design notes" doc post-OBJ1; they overlap heavily and are now superseded by the README + Quick Reference. Banners are a stopgap.

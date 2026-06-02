@@ -1,37 +1,55 @@
 # Quick Reference — Rust Slideshow Engine
 
-The one-page cheat-sheet for the Rust engine (`rust-rewrite` branch): the commands, the recommended frame settings, every config field, and what is **not implemented yet**. This is the **single source of truth** for these facts — other docs link here instead of restating them (per [anti-duplication](process.md#4-traceability--anti-duplication-read-this-carefully)).
+The one-page cheat-sheet for the Rust slideshow engine (`rust-rewrite` branch): the end-user setup, the commands, the recommended frame settings, every config field, and what is **not implemented yet**. This is the **single source of truth** for these facts — other docs link here instead of restating them (per [anti-duplication](process.md#4-traceability--anti-duplication-read-this-carefully)).
 
-Back to the [project README](../README.md) · docs index: [docs/README.md](README.md). Engineering acceptance for these facts: SR-019/SR-020/SR-021 in [system-requirements.csv](requirements/system-requirements.csv).
+The setup path is split by audience (UN-021 / SR-025): **§1 End user** (run a prebuilt `slideshow.exe` — no Rust) and **§1a Developer** (build from source — Rust). Rust appears only in §1a.
+
+Back to the [project README](../README.md) · docs index: [docs/README.md](README.md). Engineering acceptance for these facts: SR-001/SR-002, SR-019/SR-020/SR-021, SR-023/SR-024/SR-025 in [system-requirements.csv](requirements/system-requirements.csv).
 
 ---
 
-## 1. Setup in three steps (non-programmer path)
+## 1. End-user setup in three steps (no Rust, no compiler)
 
-No source-code edits required (UN-001).
+You do **not** install Rust or compile anything to run this tool. The product is a prebuilt `slideshow.exe` whose only runtime dependency is FFmpeg. No source-code edits required (UN-001 / SR-001; audience split UN-021 / SR-025).
 
-1. **Install prerequisites** — [Rust](https://rustup.rs/) (gives you `cargo`) and [FFmpeg](https://www.ffmpeg.org/download.html) on your `PATH`. Verify: `cargo --version` and `ffmpeg -version` both print a version.
-2. **Edit one config file** — copy `test_config.toml`, point `media_root` at your photos and `base_dir` at where the MP4s should go. Leave everything else at the recommended defaults (§3). Every field is documented in §4.
-3. **Run one command** — `cargo run --release -- --config your_config.toml build`.
+1. **Run the setup script** — one script installs/locates FFmpeg and fetches/places the prebuilt `slideshow.exe`, self-elevating to administrator when an action needs it, then reports success or what to fix (UN-020 / SR-024). After it finishes you have `slideshow.exe` and FFmpeg ready — no manual download/copy/PATH steps.
+2. **Edit one config file** — copy the example config (`test_config.toml`), point `media_root` at your photos and `base_dir` at where the MP4s should go. Leave everything else at the recommended defaults (§3). Every field is documented in §4.
+3. **Run one command** — `slideshow.exe --config your_config.toml build`.
 
-Always run `validate` before a long `build` (UN-002) — it checks FFmpeg, config, and paths before committing to a multi-hour run.
+Always run `validate` before a long `build` (UN-002 / SR-002): `slideshow.exe --config your_config.toml validate`. It checks the **runtime** prerequisites only — FFmpeg present, config valid, media folder readable, output folder writable — before committing to a multi-hour run. It never checks for Rust; Rust is not a runtime prerequisite.
+
+> ⚠️ **Availability today (interim path).** The prebuilt `slideshow.exe` on GitHub Releases (SR-023) and the setup script (SR-024) are **planned / TARGET state** — they are not published yet. Until they ship, an end user gets the same result by following the **Developer (build from source)** path in §1a once to produce `slideshow.exe`, *or* by using the feature-complete **PowerShell pipeline** on `main` (see the README [Project Status](../README.md#project-status)). The three steps above are how the end-user path will read once SR-023/SR-024 land; do not assume a release or setup script exists before then.
+
+---
+
+## 1a. Developer setup — build from source (Rust)
+
+This section is **for developers only** — the audience that builds the binary (UN-021 / SR-025). End users do **not** need any of this. Rust appears **only** here.
+
+Prerequisites: [Rust](https://rustup.rs/) (gives you `cargo`) and [FFmpeg](https://www.ffmpeg.org/download.html) on your `PATH`. Verify: `cargo --version` and `ffmpeg -version` both print a version.
+
+```bash
+cargo build --release        # produces target/release/slideshow.exe
+```
+
+The resulting `target/release/slideshow.exe` is the same binary an end user would otherwise get from the setup script (§1) — copy it somewhere on your `PATH` and the §2 commands work as written. Until the prebuilt release ships, this is also the interim way to obtain `slideshow.exe`.
 
 ---
 
 ## 2. Commands
 
-Run from the repo root. `--release` is strongly recommended for `build`/`bench` (10-15x faster than debug).
+These work for both audiences once you have `slideshow.exe` (end user: from the setup script per §1; developer: from `cargo build --release` per §1a).
 
 ```bash
-cargo build --release                                            # compile once
-
-cargo run --release -- --config your_config.toml validate        # check config + media root + prerequisites
-cargo run --release -- --config your_config.toml stats           # list media found + output definitions
-cargo run --release -- --config your_config.toml bench -i 2000   # frame-generation throughput (i = image count to project)
-cargo run --release -- --config your_config.toml build           # produce the slideshow MP4(s)
+slideshow.exe --config your_config.toml validate        # check config + media root + runtime prerequisites
+slideshow.exe --config your_config.toml stats           # list media found + output definitions
+slideshow.exe --config your_config.toml bench -i 2000   # frame-generation throughput (i = image count to project)
+slideshow.exe --config your_config.toml build           # produce the slideshow MP4(s)
 ```
 
 Useful flags: `--input <dir>` and `--output <dir>` override the config paths; `--dry-run` plans without encoding; `-v`/`--verbose` (or `RUST_LOG=debug`) increases logging. `build` accepts `--output <name>` to build only one output definition.
+
+> **Developers running from a source checkout** can use `cargo run --release -- --config your_config.toml <command>` instead of invoking the built `slideshow.exe` directly — it is the same engine. `--release` is strongly recommended for `build`/`bench` (10-15x faster than debug).
 
 ---
 
