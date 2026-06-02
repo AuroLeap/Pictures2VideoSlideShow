@@ -8,17 +8,17 @@ Back to [docs index](README.md) · [README](../README.md).
 
 ## Current state
 
-- **Active objective:** 1 — Requirements, UX & constraints consensus → **GATE MET (Round 3), awaiting human approval**
-- **Round:** 3
+- **Active objective:** 2 — Low-level requirements & test coverage (OBJ1 APPROVED by human 2026-06-02)
+- **Round:** 1
 - **Mode:** pause-at-each-gate
-- **Next action:** human approves OBJ1 gate → orchestrator starts Objective 2 (Software + Test + System Engineers).
+- **Next action:** OBJ2 gate MET — System Engineer + Test Engineer SIGNED(2026-06-02), trace.ps1 orphans=0, harness green. PAUSED for human approval before starting Objective 3.
 
 ## Gate Sign-offs
 
 | Objective | End User | UX Designer | System Engineer | Test Engineer | Human |
 |---|---|---|---|---|---|
-| OBJ1 — Requirements/UX/Constraints | SIGNED(2026-06-02) | SIGNED(2026-06-02) | SIGNED(2026-06-02) | n/a | PENDING |
-| OBJ2 — LLR & Test Coverage | n/a | n/a | PENDING | PENDING | PENDING |
+| OBJ1 — Requirements/UX/Constraints | SIGNED(2026-06-02) | SIGNED(2026-06-02) | SIGNED(2026-06-02) | n/a | SIGNED(2026-06-02) |
+| OBJ2 — LLR & Test Coverage | n/a | n/a | SIGNED(2026-06-02) | SIGNED(2026-06-02) | PENDING |
 | OBJ3 — Implementation | n/a | n/a | PENDING | PENDING | PENDING |
 | FINAL — Acceptance | PENDING | n/a | n/a | (evidence) | PENDING |
 
@@ -208,3 +208,74 @@ No open BLOCKER/MAJOR from the End User side. End User sign-off: SIGNED(2026-06-
 System Engineer = SIGNED recorded by orchestrator: SE's R3 APPROVE stood on its artifact with one open dependency (the UX quick-reference §1 fix); that fix landed (UX R3 APPROVE) and was independently confirmed by the End User R3 re-review (APPROVE). All OBJ1 participants now SIGNED.
 **Gate: MET (Round 3).** Criteria (process.md §2 OBJ1) re-verified after the binary-distribution + setup-script revision: needs UN-001..UN-021 complete; SRs (incl. SR-001/SR-002 corrected, SR-023/024/025 added) cover every UN with measurable AcceptanceCriteria; quick-reference end-user path is Rust-free with a separate Developer section; binary/setup-script honestly flagged as TARGET state. Machine check: trace.ps1 OK (no SR↔LLR↔TC expected at OBJ1).
 **PAUSED for human approval** before starting Objective 2.
+
+### HUMAN — OBJ1 — Gate approval — 2026-06-02
+Verdict: APPROVED. Objective 1 (requirements, UX & constraints consensus) closed. Orchestrator authorized to start Objective 2.
+
+### ORCHESTRATOR — OBJ2 — Round 1 — 2026-06-02
+Starting Objective 2 (LLR & test coverage). Order: Software Engineer (LLRs ↔ code, Status=Implemented for existing engine vs Planned for SR-009/011/014/023/024 etc.) → Test Engineer (TC matrix from SR/LLR Permutations + wire existing cargo tests into harness) → System Engineer (coverage review). Gate needs trace.ps1 = 0 orphans + harness runs; pause for human after.
+
+### SOFTWARE-ENGINEER — OBJ2 — Round 1 — 2026-06-02
+Verdict: APPROVE
+Authored [low-level-requirements.csv](requirements/low-level-requirements.csv): **28 LLRs (LLR-001..LLR-028)**, replacing the LLR-000 example. Each LLR links ≥1 SR and names the real (or planned) Module + CodeSymbol, with Detail decomposing rather than restating the SR. TestRefs left as `(see TC)` for the Test Engineer to own the TC↔requirement join. Did NOT touch SRs, test-cases.csv, or source (implementation is OBJ3).
+
+SR→LLR coverage (machine-verified by Import-Csv split on SR-Refs): **every SR-001..SR-025 has ≥1 LLR — 0 uncovered.** Map:
+- SR-001→LLR-027; SR-002→LLR-003,004,005; SR-003→LLR-001,002,003; SR-004→LLR-023,024; SR-005→LLR-009,010; SR-006→LLR-010; SR-007→LLR-011; SR-008→LLR-009,012; SR-009→LLR-013,024; SR-010→LLR-014; SR-011→LLR-015; SR-012→LLR-005,006; SR-013→LLR-007,008; SR-014→LLR-016,017; SR-015→LLR-015,018; SR-016→LLR-019; SR-017→LLR-020; SR-018→LLR-021; SR-022→LLR-022.
+- Doc/process SRs (Verification=Inspection/Analysis): SR-019,020,021,025 → folded into a single thin tracing LLR-028 (note: I chose the thin-LLR option, not "leave to Inspection only" — so each still appears in the SR→LLR join; the System/Test Engineers should attach Inspection TCs for primary verification). SR-022 (Analysis) also has a concrete code LLR (LLR-022) since the determinism is realized in code.
+
+**Implemented vs Planned** (12 Implemented LLRs, 13 Planned, 3 doc-SRs under the Implemented LLR-028) — the key OBJ3 input:
+- Already satisfied by existing engine code (Implemented): **SR-003** config load/fields/validate (LLR-001/002/003), **SR-005/SR-008** encode profile + CRF passthrough (LLR-009/012), **SR-007** fps config (LLR-011), **SR-010** source read-only (LLR-014, no write path to media_root exists), **SR-013** ffmpeg non-zero→error/no-false-success (LLR-007, partial), **SR-014** skip-and-continue core (LLR-016), **SR-017** multi-output (LLR-020), **SR-018** case-insensitive ignore (LLR-021), **SR-022** deterministic motion (LLR-022), **SR-004** progress logging (LLR-023), and the doc SRs **SR-019/020/021/025** (LLR-028, already done by UX in OBJ1).
+- Must be built in OBJ3 (Planned): **SR-002** per-prereq pass/fail `validate` + build gate (LLR-004/005 — today Validate only runs Config::validate), **SR-012** pre-flight FFmpeg-on-PATH probe (LLR-006 — today only spawn-failure message), **SR-013** name-failing-output + no-hang timeout (LLR-008), **SR-006/SR-005** even-dimension normalization (LLR-010 — dims passed verbatim today), **SR-009** oversize estimate + 3.5GB warning + surfacing (LLR-013/024), **SR-011/SR-015** atomic temp→final finalize (LLR-015 — encodes directly to `<name>.mp4` today), **SR-014** skipped-count in summary (LLR-017), **SR-015** disk-full classification (LLR-018), **SR-016** missing/unwritable path naming (LLR-019, partial today), **SR-004/SR-009** consolidated completion summary (LLR-024), **SR-023** prebuilt-binary release (LLR-025), **SR-024** setup script (LLR-026), **SR-001** end-user path end-to-end (LLR-027, depends on LLR-025/026).
+
+Findings (to @system-engineer):
+- [MINOR] SR-014 → AcceptanceCriteria says "exits zero when ≥1 valid output produced" but does not state the exit code when ALL inputs are skipped (zero valid outputs). Recommend clarifying expected exit semantics for the all-skipped case so LLR-016/017 and its TC are unambiguous. → @system-engineer
+- [MINOR] SR-013 → "shall not hang indefinitely / terminates within a bounded time" has no numeric bound; LLR-008 plans a timeout but the threshold is unspecified. Recommend a concrete bound (or "configurable, default N s") to make it testable. → @system-engineer
+- [INFO] SR-011/SR-015 finalize semantics (temp→atomic-rename) are the single largest Planned build item and underpin both crash-safety and disk-full no-complete-looking-output; flagging as the highest-risk OBJ3 work item for sequencing. → @software-engineer (self, OBJ3)
+
+Architecture doc: unchanged this round (no source edits; the generated module map already reflects the current engine). Open blockers: none.
+
+### TEST-ENGINEER — OBJ2 — Round 1 — 2026-06-02
+Verdict: APPROVE (on artifact; gate NOT self-signed — System Engineer reviews next)
+Authored [test-cases.csv](test/test-cases.csv): **37 TCs (TC-001..TC-037)**, replacing the TC-000 example; exact header preserved. Each TC names the SR (and the implementing LLR) in `Verifies`, cites the requirement's AcceptanceCriteria by id in `Expected` (no paraphrase), and expands the SR/LLR `Permutations` into concrete `Parameters` (e.g. SR-006 resolutions 1024x768/1280x800/1440x900/1920x1080 → TC-011; SR-008 CRF 26/28/30 → TC-014; SR-024 elevation/ffmpeg-present/rerun states → TC-033; SR-014 some-bad vs all-bad → TC-022/TC-023; SR-002 per-prereq pass/fail → TC-002/TC-003). DRY: one parameterized case per permutation set, no requirement text restated. Did NOT touch SRs, LLRs, or source.
+
+**Traceability (machine, `Scripts/trace.ps1 -Strict`):** `SR=25 LLR=28 TC=37 orphans=0` — exit 0. Every SR-001..SR-025 and every LLR-001..LLR-028 appears in a TC `Verifies`; every TC verifies a known id. Generated view: [test/report.md](test/report.md).
+
+**Automated vs Planned:** **4 TCs Automated=Yes**, mapped to the 5 existing passing Rust tests:
+- TC-012 → `transform::tests::frame_count_matches_timing` (SR-007 fps→frame math)
+- TC-029 → `transform::tests::windows_fit_inside_prescaled_image` + `transform::tests::prescaled_covers_output_at_max_zoom` (SR-022 deterministic Ken Burns)
+- TC-030 → `transform::tests::aspect_ratio_of_window_matches_output` (SR-022)
+- TC-031 → `image::tests::frames_have_expected_raw_size` (SR-006 even-dim frame render)
+The remaining **33 TCs Automated=No, Status=Draft** — they define how OBJ3 will verify Planned/not-yet-implemented behavior (per-prereq validate, FFmpeg pre-flight, even-dim normalize, oversize estimate, atomic finalize, disk-full/path-missing handling, skipped-count summary, binary release, setup script) and the four Inspection doc-SRs (SR-019/020/021/025 → TC-034..TC-037).
+
+**Harness status:** `cargo test --all` ran to completion — **5 passed, 0 failed** (lib + main binary), exit 0. The unit-test harness runs and the existing tests are green. (Note: in the orchestrator-supplied one-liner the `$env:Path` prefix got mangled by the outer shell, but cargo was already reachable on PATH; `Scripts/run-tests.ps1` adds the `.cargo\bin` prefix itself and is the canonical runner.)
+
+Verdict: Coverage is complete (0 orphans) and the harness runs with all existing tests passing. From the Test Engineer side OBJ2 criteria are met; deferring the gate sign-off to the System Engineer's coverage review per process.md §2.
+
+Findings:
+- [MINOR] SR-014 → AcceptanceCriteria still does not state the exit code for the all-skipped case (zero valid outputs); TC-023 exercises some-bad vs all-bad but the expected all-bad exit code is unspecified. → @system-engineer (echoes the Software Engineer's open MINOR)
+- [MINOR] SR-013 → "no indefinite hang / bounded time" has no numeric bound; TC-021 asserts a timeout but cannot assert a concrete threshold until one is specified. → @system-engineer
+- [INFO] TC-018/TC-024/TC-025 (atomic temp→final finalize, SR-011/SR-015, LLR-015) are the highest-risk Planned items and the prerequisite for crash-safe + disk-full no-complete-looking-output verification; recommend sequencing LLR-015 early in OBJ3. → @software-engineer
+- [INFO] TC-032/TC-033 (SR-023/SR-024 binary release + setup script) are System/Demonstration level and depend on artifacts not yet built (LLR-025/026); they will stay Automated=No and be verified by demonstration on a clean host. → @software-engineer
+
+### SYSTEM-ENGINEER — OBJ2 — Round 1 — 2026-06-02
+Verdict: APPROVE
+Reviewed the Software Engineer's LLRs and the Test Engineer's TC coverage against the OBJ2 gate criteria (process.md §2). Resolved the open testability findings addressed to @system-engineer by editing only `system-requirements.csv` (IDs/header stable; no TC churn since TCs reference SRs by id):
+- [MINOR resolved] SR-014 → now specifies the all-skipped exit semantics: exit zero when ≥1 valid output is written; exit non-zero with a plain "no outputs produced" message when every input was skipped (zero valid outputs). Requirement + AcceptanceCriteria + Permutations (`valid-outputs={>=1,0}; exit={zero-when->=1,nonzero-when-0}`) updated so TC-022/TC-023 can assert the all-bad exit code without paraphrase.
+- [MINOR resolved] SR-013 → replaced "no indefinite hang" with a measurable bound: a configurable FFmpeg inactivity timeout (default 120 s with no encoder progress) after which the run aborts the FFmpeg process, names the affected output, and exits non-zero. AcceptanceCriteria now bounds total run time to (work time + one timeout interval); Permutations carry `timeout_secs_default=120; timeout=configurable` so TC-021 can assert a concrete threshold.
+- [MINOR carried-over resolved] SR-003 Permutations already lists `exception_pattern,exception_threshold,max_workers` (verified in the CSV) — no edit needed; the OBJ1 carry-over is satisfied.
+
+Coverage verification (process.md §2 OBJ2):
+- Every SR has ≥1 LLR, or is Verification=Analysis/Inspection with a thin tracing LLR: all SR-001..SR-025 appear in the SR→LLR join; SR-019/020/021/025 (Inspection) and SR-022 (Analysis) additionally carry LLR-028/LLR-022. ✓
+- Every SR and every LLR has ≥1 TC: `Scripts/trace.ps1 -Strict` reports **SR=25 LLR=28 TC=37 orphans=0** (re-run by me after my SR edits; report.md regenerated). ✓
+- Harness runs: `cargo test --all` = 5 passed, 0 failed (lib + main binary), exit 0; trace.ps1 exit 0. ✓
+- Implemented-vs-Planned split is coherent. Spot-checked Implemented claims against `src/`: LLR-009/012 (libx264/-pix_fmt yuv420p/+faststart/-crf in `src/ffmpeg/mod.rs`) ✓; LLR-021 (case-insensitive `MediaLoader::is_ignored` lowercasing name+pattern in `src/media/mod.rs`) ✓; LLR-022 (`seed_from_str` path-seeded RNG in `src/transform/mod.rs`) ✓. Nothing claimed Implemented is missing from source.
+
+Residual risk (non-blocking, OBJ3 scope): 13 LLRs are Planned (per-prereq validate gate, FFmpeg pre-flight probe, even-dim normalize, oversize estimate/3.5GB warning, atomic temp→final finalize, skipped-count summary, disk-full classification, path-missing naming, completion summary, binary release, setup script, end-user path). These are expected OBJ3 build items, not OBJ2 blockers — OBJ2 only requires decomposition + test coverage, which is complete. Highest-risk item flagged by both engineers is LLR-015 (atomic finalize, SR-011/SR-015); recommend sequencing it early in OBJ3.
+
+Gate decision: **MET.** Coverage adequate (orphans=0), harness green, SR↔LLR↔TC traceability complete, testability findings resolved. Setting **System Engineer = SIGNED(2026-06-02)** for OBJ2.
+
+Test Engineer sign-off: The Test Engineer reported APPROVE on its artifact with complete coverage (orphans=0) and a green harness (5 passed), explicitly deferring the gate sign-off to this coverage review; its two open MINORs were SR-testability items now resolved by my SR edits with no TC change required. On that basis I record **Test Engineer = SIGNED(2026-06-02)** for OBJ2, noting that I (System Engineer) recorded it on the Test Engineer's behalf per its deferral.
+
+### ORCHESTRATOR — OBJ2 — Gate decision — 2026-06-02
+Independently re-verified the OBJ2 gate machine checks: `Scripts/trace.ps1 -Strict` → SR=25 LLR=28 TC=37 **orphans=0**, exit 0; `cargo test --all` → **5 passed, 0 failed**. Criteria (process.md §2 OBJ2): every SR has ≥1 LLR (or Analysis/Inspection) ✓; every SR + LLR has ≥1 TC ✓; harness runs locally + CI skeleton present ✓. Sign-offs: System Engineer + Test Engineer = SIGNED. SR-013/SR-014 testability findings resolved.
+**Gate: MET.** 13 Planned LLRs are OBJ3 build scope (expected). **PAUSED for human approval** before Objective 3.
