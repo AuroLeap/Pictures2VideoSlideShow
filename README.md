@@ -13,31 +13,44 @@ Does your wife, yourself, or your significant other have thousands of pictures a
 1. [Project Status](#project-status)
 2. [Architecture Overview](#architecture-overview)
 3. [Quick Start](#quick-start)
-4. [Performance Optimization](#performance-optimization)
-5. [Configuration Guide](#configuration-guide)
-6. [Troubleshooting](#troubleshooting)
-7. [Contributing](#contributing)
+4. [Rust Engine (High-Performance Rewrite)](#rust-engine-high-performance-rewrite)
+5. [Output Constraints & Limitations (Digital Picture Frames)](#output-constraints--limitations-digital-picture-frames)
+6. [Performance Optimization](#performance-optimization)
+7. [Configuration Guide](#configuration-guide)
+8. [Troubleshooting](#troubleshooting)
+9. [Contributing](#contributing)
+
+> **Just want the commands and safe settings?** See the **[Quick Reference](docs/quick-reference.md)** — the one-page cheat-sheet for the Rust engine (commands, recommended frame settings, every config field, and current gaps). It is the single source of truth for those facts.
 
 ---
 
 ## Project Status
 
-### Current Performance
+There are **two implementations** in this repository:
+
+| Implementation | Branch | Status | Use it for |
+|---|---|---|---|
+| **PowerShell** (original) | `main` / `dev` | Feature-complete reference | Audio, multi-part splitting, battle-tested output |
+| **Rust engine** (rewrite) | `rust-rewrite` | Active development, end-to-end working | **Speed** (~10-15x faster); see [Rust Engine](#rust-engine-high-performance-rewrite) |
+
+### PowerShell Performance (baseline)
 - **Test album** (20 images): ~3 hours
 - **Production album** (2000 images): ~12 hours
 - **Large album** (5000+ images): ~30+ hours
 
-### Performance Bottleneck Breakdown
-1. **ImageMagick frame generation**: 60% of time
-2. **FFmpeg re-encoding**: 20-25% of time
-3. **File I/O**: 10-15% of time
-4. **FFprobe metadata parsing**: 5% of time
+**Bottlenecks**: ImageMagick frame generation (60%), FFmpeg re-encoding (20-25%), file I/O (10-15%), ffprobe (5%).
 
-### Last Changes (Dev Branch)
-- Fixed audio extraction (partial implementation)
-- Updated index definitions and file creation validation
-- Parallel video creation improvements
-- Minor debug additions
+### Rust Engine Performance (rust-rewrite, measured 24-core/release)
+- **Frame generation**: ~230 frames/s (≈0.78 s per 1440×900 image at 180 frames)
+- **Mixed 10-item album** (6 images + 4 videos): ~2,000 frames encoded in ~25 s
+- **Projected 2000-image album**: ~25-30 min of frame generation vs ~12 h in PowerShell
+
+### Recent Changes (rust-rewrite)
+- Full media → frame-generation → FFmpeg pipeline implemented end-to-end
+- Ken Burns pan/zoom + subtle rotation (rendered with a margin so rotation never shows black corners)
+- **Cross-fade (dissolve) transitions** between every clip via a streaming mixer
+- Inline video playback (videos decoded, cover-fit, fps-resampled, and dissolved like images)
+- Parallel media scan, real image/video metadata, `cargo test`/`clippy`/`fmt` clean
 
 ---
 
@@ -162,6 +175,103 @@ Output will be in: `AlbumOut1440x900q30/` (or your configured folder)
 
 ---
 
+## Rust Engine (High-Performance Rewrite)
+
+> **Status:** Active development on the `rust-rewrite` branch. It produces complete slideshow videos end-to-end and is roughly **10-15x faster** than the PowerShell pipeline. The PowerShell scripts remain the feature-complete reference (audio, multi-part splitting); the Rust engine is the recommended path when speed matters.
+
+A native Rust reimplementation that renders frames directly in-process (no per-frame ImageMagick spawn) and streams them to FFmpeg, using all CPU cores via [rayon](https://docs.rs/rayon/).
+
+### What it does today
+- **Parallel media scan** — image dimensions via the `image` crate, video dimensions/duration via `ffprobe`, case-insensitive ignore patterns
+- **Ken Burns pan/zoom** — smoothstep easing, direction/pan randomized but deterministic per file (reproducible output)
+- **Subtle rotation** — rendered with a computed margin so a tilt never exposes black corners
+- **Cross-fade (dissolve) transitions** — the tail of each clip dissolves into the head of the next over `fade_time_secs`; the first clip fades in from black and the last fades out
+- **Inline video playback** — videos are decoded, cover-fit to the target resolution, resampled to the target fps, and dissolved exactly like images
+- **Streaming H.264 encode** — `yuv420p`, `+faststart`; one `<name>.mp4` per output definition
+
+### Build, run & configure
+
+Prerequisites: [Rust](https://rustup.rs/) (cargo) and FFmpeg on `PATH`.
+
+The commands, the example TOML config, and **every config field with its unit and default** live in one place: the **[Quick Reference](docs/quick-reference.md)**. `test_config.toml` in the repo root is a ready-to-edit starting point. In short:
+
+```bash
+cargo build --release
+cargo run --release -- --config test_config.toml validate   # check config + prerequisites
+cargo run --release -- --config test_config.toml build      # produce the slideshow(s)
+```
+
+### Not yet implemented in the Rust engine
+
+Audio and `bulk_video_time_min` part-splitting are **not implemented** in the Rust engine, plus some performance items. The authoritative gap list and the PowerShell workaround for each are in the [Quick Reference §5](docs/quick-reference.md#5-rust-engine--what-is-not-implemented-yet-and-the-workaround). See the constraints below for why the splitting gap matters.
+
+---
+
+## Output Constraints & Limitations (Digital Picture Frames)
+
+The whole point of this tool is to produce videos that **loop on a digital picture frame**. Those are typically inexpensive devices with real hardware and filesystem limits, so plan the output around them rather than around what your PC can play.
+
+### 1. File size — the 4 GB FAT32 wall (most important)
+
+Most picture frames read media from an SD card or USB stick, and many only support **FAT32**, which **cannot store a single file larger than 4 GB**. A slideshow that crosses that boundary will fail to copy or silently truncate.
+
+- **Keep each output file under ~3.5 GB** for headroom.
+- This is exactly why `bulk_video_time_min` exists: the PowerShell pipeline splits output into ~20-minute parts. **The Rust engine does not split yet** — it writes one continuous MP4 per output. The workarounds for the Rust engine (keep the album small, raise CRF, use exFAT/NTFS, or use the PowerShell pipeline) are listed in the [Quick Reference §5](docs/quick-reference.md#5-rust-engine--what-is-not-implemented-yet-and-the-workaround).
+
+### 2. Estimating size and length
+
+File size is driven by **bitrate × duration**, and bitrate depends on CRF, resolution, and how much motion/detail the content has. As a rule of thumb at 1080p with H.264:
+
+| CRF | Approx. bitrate | Minutes to reach 4 GB |
+|---|---|---|
+| 22 (high quality) | ~12-15 Mbps | ~35-45 min |
+| 26 (balanced) | ~6-9 Mbps | ~60-90 min |
+| 28 (recommended) | ~4-6 Mbps | ~90-130 min |
+| 30 (smaller) | ~3-4 Mbps | ~130-180 min |
+
+Quick formula: **max minutes ≈ 32768 ÷ (bitrate in Mbps × 60)** (32768 Mb = 4 GB).
+
+**Estimating slideshow duration** (cross-fades shorten each boundary by one `fade_time_secs`):
+
+```
+duration ≈ Σ(image clips) × (pic_display_time_secs)
+         + Σ(video durations)
+         − (number_of_transitions × fade_time_secs)
+```
+
+### 3. Resolution & dimensions
+
+- **Match the frame's native panel** (common: 1024×768, 1280×800, 1440×900, 1920×1080). Encoding larger than the panel just wastes bitrate and file size.
+- **Width and height must be even** — required by `yuv420p` H.264 (the engine and most frames need this).
+
+### 4. Codec / container compatibility
+
+- Output is **H.264 in an MP4** with `yuv420p` and `+faststart` — the most broadly compatible combination for cheap players.
+- **Avoid H.265/HEVC** unless you have verified your specific frame decodes it; many do not.
+- If a frame refuses a file, try a lower resolution, lower bitrate (higher CRF), and confirm 30 fps.
+
+### 5. Frame rate
+
+- Many panels cap at **30 fps** (some at 24/25). **60 fps is often unsupported** and roughly doubles file size for little visible benefit on a frame. Stick to **24-30 fps**.
+
+### 6. Playback smoothness (bitrate)
+
+- Budget frames have weak decoders; very high bitrate (very low CRF) can **stutter or drop frames**. **CRF 26-30** is a good quality/smoothness balance for frames.
+
+### 7. Duration / responsiveness
+
+- Some frames have a maximum per-file duration or **seek slowly** on long files. Shorter files (the ~20-minute part target) both dodge the 4 GB cap and feel more responsive.
+
+### 8. Audio
+
+- Many frames ignore or cannot play audio. The **Rust engine output is silent by design** for now; the PowerShell pipeline has partial audio support.
+
+### Recommended starting point for a typical frame
+
+The recommended values (resolution, codec, fps, CRF, size/duration caps, card format) live in the **[Quick Reference §3](docs/quick-reference.md#3-recommended-starting-point-for-a-typical-frame)** — the single source for those settings. The sections above explain *why* each value is chosen; use the Quick Reference for *what to set*.
+
+---
+
 ## Performance Optimization
 
 ### Overview
@@ -282,7 +392,7 @@ function Get-CachedVideoProperties {
 - 40% smaller output files
 - Better compression quality
 
-**Trade-off**: H.265 support varies by device (check your frame before deploying)
+**Trade-off**: H.265 support varies by device (check your frame before deploying). **For digital picture frames the default guidance is to stay on H.264** — many cheap frames cannot decode H.265 (see [Output Constraints §4](#4-codec--container-compatibility)). Only switch to H.265 if you have verified your specific frame plays it.
 
 ---
 
@@ -490,9 +600,9 @@ Each definition controls resolution, quality, and timing:
 
 ### Understanding Quality Settings
 
-**CRF (Constant Rate Factor)**:
+**CRF (Constant Rate Factor)** — general quality scale (lower = better, larger):
 - `18-20`: Visually lossless (large files)
-- `22-26`: Good quality, balanced (recommended)
+- `22-26`: Good quality, balanced
 - `28-32`: Acceptable quality, smaller files
 - `40+`: Poor quality
 
@@ -500,6 +610,8 @@ Each definition controls resolution, quality, and timing:
 - High-end displays: CRF 22-24
 - Standard frames: CRF 26-28
 - Budget frames: CRF 30-32
+
+> For the **default frame-friendly starting value**, use **CRF 28** as given in the [Quick Reference §3](docs/quick-reference.md#3-recommended-starting-point-for-a-typical-frame) (the single source for recommended settings). The table above is general guidance for tuning around that default.
 
 ---
 
@@ -567,6 +679,11 @@ $env:PATH += ";C:\Program Files\ffmpeg\bin"
 
 | Document | Purpose | Read When |
 |---|---|---|
+| **[docs/quick-reference.md](docs/quick-reference.md)** | One-page cheat-sheet: Rust commands, recommended frame settings, every config field, current gaps | You just want the command + safe settings |
+| **[docs/](docs/README.md)** | Engineering docs index: requirements, traceability, architecture, tests | Contributing or tracing a requirement |
+| **[docs/process.md](docs/process.md)** | Multi-agent SDLC: roles, gates, ID scheme, anti-duplication, verdict protocol | Running/understanding the `/grind` workflow |
+| **RUST_IMPLEMENTATION_ROADMAP.md** | Rust rewrite phases + live implementation status | Working on the Rust engine |
+| **RUST_IMPLEMENTATION_SPEC.md** | Rust technical architecture & data model | Understanding the Rust design |
 | **PERFORMANCE_REVIEW.md** | Deep technical bottleneck analysis | Planning Phase 2+, understanding architecture |
 | **PHASE1_OPTIMIZATIONS.md** | Step-by-step Phase 1 guide | Starting Phase 1 implementation |
 | **PHASE2_IMPLEMENTATION.md** | C# wrapper implementation guide | Planning/implementing Phase 2 |
@@ -643,6 +760,6 @@ For questions or issues:
 
 ---
 
-**Last Updated**: 2026-05-30  
-**Status**: Phase 1 implementation ready  
-**Next Step**: [Implement Phase 1 Optimizations](#phase-1-quick-wins)
+**Last Updated**: 2026-06-02  
+**Status**: PowerShell pipeline stable on `main`; Rust engine working end-to-end on `rust-rewrite` (Ken Burns + rotation + cross-fade + inline video)  
+**Next Step (Rust)**: `bulk_video_time_min` splitting into part files, then audio

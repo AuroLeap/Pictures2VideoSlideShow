@@ -1,5 +1,7 @@
 # Rust Slideshow Engine - Technical Specification
 
+> **Design doc.** Describes the intended architecture/data model. For the authoritative **commands, config fields, and recommended settings**, use the **[Quick Reference](docs/quick-reference.md)** (single source of truth); `src/config/mod.rs` is the config schema of record. Code/config samples below are design sketches and may differ from shipped code (e.g. the engine defaults to **H.264 / yuv420p / +faststart**, not the H.265 shown in some samples here).
+
 ## Project Overview
 
 **Goal**: Rewrite Pictures2VideoSlideShow in Rust for **5-8x performance improvement** while maintaining feature parity with PowerShell version.

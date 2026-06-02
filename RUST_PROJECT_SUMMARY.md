@@ -1,9 +1,9 @@
 # Rust Rewrite Project - Complete Summary
 
-**Status**: ✅ Foundation Complete, Ready for Implementation  
+> **Historical snapshot (2026-05-30)** from when the engine was stubbed. It is now **working end-to-end** — see the [README Project Status](README.md#project-status). For current **commands, config, and recommended settings**, use the **[Quick Reference](docs/quick-reference.md)** (single source of truth). Status/phase claims below are out of date and kept for history only.
+
 **Branch**: `rust-rewrite`  
 **Created**: 2026-05-30  
-**Expected Timeline**: 3-5 weeks  
 **Target Improvement**: 5-8x (12 hours → 1.5-2.5 hours)
 
 ---

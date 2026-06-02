@@ -1,0 +1,2 @@
+LLR-ID,SR-Refs,Title,Module,CodeSymbol,Detail,TestRefs,Status
+LLR-000,SR-000,EXAMPLE - delete on first real entry,src/example/mod.rs,example_fn,"Decomposition detail (not a paraphrase of the SR).",TC-000,Draft

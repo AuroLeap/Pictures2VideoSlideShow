@@ -1,0 +1,2 @@
+TC-ID,Verifies,Level,Method,Parameters,Expected,Automated,Status
+TC-000,SR-000,Unit,EXAMPLE - delete on first real entry,"param=a; other=x","Cite AcceptanceCriteria of the verified requirement by id (do not paraphrase).",No,Draft
