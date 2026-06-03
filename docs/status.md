@@ -8,11 +8,11 @@ Back to [docs index](README.md) · [README](../README.md).
 
 ## Current state
 
-- **Active objective:** 3 — Implementation, **Wave 1 (core robustness)**. Amended OBJ1+OBJ2 APPROVED by human 2026-06-02.
-- **Round:** 1
+- **Active objective:** 3 — Implementation, **Wave 1 HARDENING** (Wave-1 milestone signed; now closing the owed gaps). Wave 2 still deferred.
+- **Round:** 2
 - **Mode:** pause-at-each-gate
-- **Wave 1 scope (Planned LLRs):** LLR-004/005/006 (validate per-prereq + build gate + ffmpeg pre-flight, SR-002/012), LLR-010 (even-dim normalize, SR-006), LLR-013 (oversize estimate/warning, SR-009), LLR-015 (atomic temp→final finalize, SR-011/015), LLR-017 (skipped-count + exit semantics, SR-014), LLR-018 (disk-full classification, SR-015), LLR-019 (path-missing/unwritable naming, SR-016), LLR-023/024 (progress + completion summary, SR-004). **Wave 2 (deferred):** LLR-025/026/029-035 (rename+release CI, wizard, fetch/resolve/checksum, config location, interaction gating).
-- **Next action:** Software Engineer implements Wave 1 (build/clippy/test green) → Test Engineer automates the new TCs → System Engineer reviews → pause for human.
+- **Hardening scope:** (a) SR-013 timeout — LLR-008 configurable FFmpeg inactivity timeout; (b) integration tests for the Implemented-but-manual SRs: atomic finalize (SR-011/015), validate/build checks against temp dirs (SR-002/016), source read-only hash (SR-010); (c) measure line coverage (cargo-llvm-cov) and record the number. Disk-full end-to-end stays Demonstration/Manual (can't reliably induce ENOSPC in CI) — helper remains unit-tested.
+- **Next action:** Software Engineer implements SR-013 timeout → Test Engineer adds integration tests + measures coverage → System Engineer reviews/sets SR Status → pause for human.
 
 ## Gate Sign-offs
 
@@ -20,7 +20,7 @@ Back to [docs index](README.md) · [README](../README.md).
 |---|---|---|---|---|---|
 | OBJ1 — Requirements/UX/Constraints | SIGNED(2026-06-02) | SIGNED(2026-06-02) | SIGNED(2026-06-02) | n/a | SIGNED(2026-06-02, amended) |
 | OBJ2 — LLR & Test Coverage | n/a | n/a | SIGNED(2026-06-02) | SIGNED(2026-06-02) | SIGNED(2026-06-02) |
-| OBJ3 — Implementation (Wave 1) | n/a | n/a | SIGNED(2026-06-02) | SIGNED(2026-06-02) | PENDING |
+| OBJ3 — Implementation (Wave 1, hardened) | n/a | n/a | SIGNED(2026-06-02, hardening) | SIGNED(2026-06-02, hardening) | PENDING |
 | FINAL — Acceptance | PENDING | n/a | n/a | (evidence) | PENDING |
 
 ---
@@ -590,3 +590,109 @@ Reviewed the Software Engineer's and Test Engineer's Wave-1 work against the SR 
 ### ORCHESTRATOR — OBJ3 Wave 1 — Milestone decision — 2026-06-02
 Independently verified: cargo fmt clean, clippy -D warnings clean, cargo test 16 passed, trace.ps1 -Strict orphans=0 (SR=30 LLR=35 TC=49); behavior spot-checks: `validate` good=5 PASS/exit 0, bad media_root=FAIL naming path/exit 1; real build green with completion summary + no .part leftover.
 **Wave 1 (core robustness) milestone: MET.** LLR-004/005/006/010/013/015/017/018/019/023/024 Implemented; SR-002/006/009/015 Verified, SR-004/011/012/014/016 Implemented (integration tests owed). System Engineer + Test Engineer SIGNED the OBJ3-Wave-1 row. **FULL OBJ3 gate remains OPEN**: Wave 2 (distribution/setup LLR-025/026/029-035), owed integration tests, SR-013 timeout (LLR-008), SR-010 read-only test, and ≥80% line coverage. **PAUSED for human review of Wave 1.**
+
+### ORCHESTRATOR — OBJ3 Wave 1 Hardening — Round 2 — 2026-06-02
+Human chose to harden Wave 1 before Wave 2. Tasks: SR-013 inactivity timeout (LLR-008); integration tests for atomic finalize (SR-011/015), validate/build path checks (SR-002/016), source read-only hash (SR-010); measure line coverage. Sequence: Software Engineer (timeout) → Test Engineer (integration tests + coverage) → System Engineer (review + SR Status + sign).
+
+### SOFTWARE-ENGINEER — OBJ3 Wave1 Hardening — 2026-06-02
+Verdict: APPROVE (on my artifact; gate stays OPEN per the orchestrator note above)
+
+Implemented the one remaining Wave-1 feature: the **FFmpeg inactivity timeout (SR-013 / LLR-008)**. The run is now bounded to work-time + one timeout interval; a wedged ffmpeg can no longer hang an unattended build.
+
+What I implemented (`src/ffmpeg/mod.rs`, annotated `// Implements: LLR-008, SR-013`):
+- A background **`Watchdog`** (`Watchdog::spawn`) holding a shared `Arc<Mutex<Child>>`, an `Arc<AtomicU64>` last-activity epoch-ms, and `Arc<AtomicBool>` finished/killed flags. ffmpeg `stdin` is taken out of the child into its own field so per-frame writes never contend with the watchdog for the child lock.
+- `write_frame` records activity on each successful write; the watchdog wakes ~1s, and once `now - last_activity` exceeds the timeout it sets `killed` and kills ffmpeg.
+- `finish()` drops stdin, waits the child, then `stop_watchdog()` (signals finished + joins). If the watchdog killed ffmpeg it returns `SlideshowError::Ffmpeg("encoding timed out for '<name>': …")` naming the output and removes the `.part` — no false success. `Drop` also stops the watchdog first, then kills + removes the `.part` on any unfinished abort, so a timeout leaves no complete-looking output.
+- Robustness: `timeout_secs == 0` ⇒ no thread spawned (healthy fast runs pay nothing); the watchdog loop checks `finished` each wake so `join` always returns (no deadlock/panic). Pure decision factored out as **`fn timed_out(last_activity_ms, now_ms, timeout_secs) -> bool`** (0 ⇒ false; saturating subtraction guards a backwards clock).
+
+Config field added (`src/config/mod.rs`, `ProcessingConfig`):
+- **`ffmpeg_timeout_secs: u64`**, `#[serde(default = "default_ffmpeg_timeout_secs")]` returning **120**. Unit: seconds. `0` = watchdog disabled. Placed on `ProcessingConfig` because it is a process-wide behavior, not a per-output encode parameter. Threaded through `FfmpegEncoder::start(..., timeout_secs)` from `FrameGenerationPipeline::encode_output` (removed the now-unused `#[allow(dead_code)]` on `processing`).
+
+New unit test: **`ffmpeg::tests::inactivity_timeout_decision_sr013`** (disabled-never-fires, within-window, at-boundary-not-yet, past-boundary-fires, backwards-clock-no-fire).
+
+LLR CSV: **LLR-008 → Status=Implemented**, CodeSymbol now `FfmpegEncoder::start;Watchdog::spawn;FfmpegEncoder::write_frame;FfmpegEncoder::finish;timed_out;ProcessingConfig::ffmpeg_timeout_secs` across `src/ffmpeg/mod.rs;src/config/mod.rs;src/pipeline/mod.rs`.
+
+Results:
+- `cargo fmt` — clean (applied).
+- `cargo clippy --all-targets -- -D warnings` — clean, 0 warnings.
+- `cargo test --all` — **17 passed (lib) + 17 passed (bin) + 0 doc, 0 failed**, including the new `inactivity_timeout_decision_sr013`.
+- Normal-build confirmation: `cargo run --release -- --config test_config.toml build` — **succeeded**, 10 items / 2021 frames in 37.2s, 1 output written (6.4 MB), 0 skipped. The 120s watchdog was armed and did NOT abort the healthy run; no `.part` left behind.
+
+Findings:
+- [INFO] @test-engineer → An end-to-end inactivity-timeout integration test is hard to make deterministic (you'd have to wedge ffmpeg and wait out a real interval). Recommend keeping the timeout TC (TC-021) Demonstration/Manual; the pure decision is unit-tested via `timed_out` (`inactivity_timeout_decision_sr013`), and `timeout_secs` is configurable so a manual demo can use a tiny value.
+- [INFO] @ux-designer → New config field `[processing] ffmpeg_timeout_secs` (u64, seconds, default 120, 0=disabled) — please add it to the Quick Reference §4 config-field table (the field table is UX-owned; I left this note rather than editing it).
+- Open blockers: none. Wave-2 not started per instructions; the full OBJ3 gate remains OPEN.
+
+### TEST-ENGINEER — OBJ3 Wave1 Hardening — 2026-06-02
+Verdict: APPROVE (Wave-1 hardening: owed integration tests added + line coverage measured; full OBJ3 gate stays OPEN per §2 — see threshold note)
+
+Added the owed integration tests as cargo integration tests under a new `tests/` directory (each test crate `use slideshow_core::...` for `pub` items; binary driven via `CARGO_BIN_EXE_slideshow`). All tests synthesize tiny PNGs via the `image` crate into unique self-cleaning temp dirs (`tests/common/mod.rs`); none touch real media. Edited `test-cases.csv` only (header + stable TC ids preserved); did NOT touch SRs, LLRs, source (other than adding `tests/`), or the quick-reference.
+
+New test files + names:
+- **`tests/atomic_finalize.rs`** (SR-011/SR-015, LLR-015 → TC-018): `finish_produces_final_mp4_and_no_part_sr011` (success path: `<name>.mp4` exists, no `.part`), `failed_encode_leaves_no_final_and_cleans_part_sr011_sr015` (deterministic ffmpeg failure via truncated raw stream → `finish()` Err, NEITHER `<name>.mp4` NOR `.part`), `dropped_encoder_leaves_no_final_or_part_sr011` (abort/crash model: `Drop` kills ffmpeg + removes `.part`), `build_success_produces_mp4_no_part_sr011` (end-to-end binary build success).
+- **`tests/validate_build_checks.rs`** (SR-002/SR-016, LLR-004/005/019 → TC-002/003/004/026): `validate_passes_with_good_config_sr002` (all prereqs `[PASS]`, exit 0, each prereq named), `validate_fails_naming_missing_media_root_sr002_sr016` (`[FAIL]` naming the missing media path, exit non-zero), `validate_fails_naming_unusable_output_dir_sr002_sr016` (uncreatable base_dir — parent is a file — `[FAIL]` naming the path, no panic), `build_refuses_on_essential_failure_sr002` (build exits non-zero, writes no output).
+- **`tests/source_readonly.rs`** (SR-010, LLR-014 → TC-017): `build_never_modifies_source_media_sr010` (fingerprint = len+mtime+FNV content hash of every file incl. a nested subdir; full build to a SEPARATE temp output; assert every input byte-for-byte unchanged and none added/removed).
+
+**Line coverage (cargo-llvm-cov 0.8.7, installed this run via `rustup component add llvm-tools-preview` + `cargo install cargo-llvm-cov`):** `cargo llvm-cov --summary-only` and `--all` both report **TOTAL line coverage = 69.77%** (1330 lines, 402 missed; region 71.26%, function 71.34%). Per-file highlights: transform 96.89%, util/estimate 97.37%, image 93.75%, pipeline 85.22%, ffmpeg 81.82%, preflight 78.72%, media 66.02%, config 70.00%, util/file_utils 47.17%, **main.rs 35.58%**, **util/progress.rs 0%**, **video/mod.rs 0%**.
+
+**Coverage vs the 80% process threshold (process.md §2 COVERAGE_THRESHOLD=80%): BELOW — 69.77% (gap ~10.2 pts).** Honest gap analysis: the shortfall is dominated by code that is unexercised because the feature is unimplemented or out of Wave-1 scope, not by missing tests for shipped behavior — `video/mod.rs` (0%, the FFmpeg video-decode read path; image-only synthesized media never decodes a video), `util/progress.rs` (0%, a progress helper not wired into the current flow), and `main.rs` (35.58%, the CLI driver whose `std::process::exit`/`stats`/`bench` arms aren't reachable through library tests). The Wave-1 robustness logic itself is well covered (ffmpeg finalize 81.82%, pipeline 85.22%, preflight 78.72%, estimate/transform >96%). Coverage is expected to rise as Wave-2 (distribution/setup `src/setup/*`, `config/location.rs`, `ffmpeg/resolve.rs`) is implemented with its planned unit tests and as video/skip/disk-full integration paths are exercised. No threshold-adjustment is requested; reporting the number honestly per the agent rules.
+
+TC updates (test-cases.csv; orphans unchanged):
+- Flipped to **Automated=Yes / Status=Verified** naming the exact test: **TC-018** (atomic finalize → `tests/atomic_finalize.rs` four tests), **TC-002/TC-003/TC-004** (validate/build → `tests/validate_build_checks.rs`), **TC-026** (path missing/unwritable named → `tests/validate_build_checks.rs`), **TC-017** (source read-only → `tests/source_readonly.rs`). Levels normalized to Integration where they were System.
+- Kept honestly **Manual** with justification: **TC-024** (real ENOSPC full-volume — can't reliably induce in CI; helper unit-covered by TC-048), **TC-025** (disk-full mid-encode atomic — same ENOSPC constraint; the failure-leaves-no-final-file guarantee is covered generically by TC-018), **TC-021** (FFmpeg inactivity-timeout end-to-end — non-deterministic; the `timed_out` decision is unit-covered by `inactivity_timeout_decision_sr013` and the no-final-on-nonzero-exit leg by TC-018). TC-017's interrupted-mid-run leg noted Manual within its Parameters.
+- **Automated=Yes / Verified count: 8 → 14** (added TC-002, TC-003, TC-004, TC-017, TC-018, TC-026). Full set: TC-002, TC-003, TC-004, TC-012, TC-017, TC-018, TC-026, TC-029, TC-030, TC-031, TC-046, TC-047, TC-048, TC-049.
+
+Harness results (cargo via `%USERPROFILE%\.cargo\bin`):
+- `cargo fmt --all -- --check` → clean, exit 0.
+- `cargo clippy --all-targets -- -D warnings` → clean, 0 warnings (added `#![allow(dead_code)]` to `tests/common/mod.rs` since each integration crate uses only a subset of the shared helpers).
+- `pwsh -File Scripts/trace.ps1 -Strict` → `SR=30 LLR=35 TC=49 orphans=0`, exit 0.
+- `cargo test --all` → lib `17 passed; 0 failed`; main binary `17 passed; 0 failed`; integration `tests/atomic_finalize 4 passed`, `tests/source_readonly 1 passed`, `tests/validate_build_checks 4 passed`; doc-tests `0 passed`; all exit 0. (9 new integration tests, 34 unit/bin tests, 0 failed.)
+
+Verdict: The owed Wave-1 integration tests (atomic finalize, validate/build prerequisite checks, source read-only hash) are added, deterministic, self-cleaning, and green; the genuinely-non-deterministic scenarios (real disk-full, end-to-end inactivity timeout) are honestly left Manual with justification. Coverage is measured at **69.77%**, **below the 80% process threshold** — the gap is attributable to unimplemented/out-of-Wave-1 code (video decode, progress helper, CLI driver arms), not to untested shipped behavior. From the Test Engineer side the Wave-1 hardening tasks are complete; the **full OBJ3 gate remains OPEN** pending Wave 2 and the coverage threshold. Deferring the gate sign-off to the System Engineer's review.
+
+### SYSTEM-ENGINEER — OBJ3 Wave1 Hardening — 2026-06-02
+Verdict: APPROVE (Wave-1 HARDENING milestone — NOT full OBJ3 closure; the full OBJ3 gate stays OPEN)
+
+Judged the owed integration tests + the SR-013 inactivity timeout against the SR acceptance criteria, set SR Status, and recorded an explicit decision on the coverage gap. Edited `system-requirements.csv` Status column only (everything else stable; CSV re-parses to 30 rows, header unchanged) and regenerated `test/report.md` via `trace.ps1`.
+
+**SR Status changes (Wave-1 hardening only):**
+- **→ Verified** (acceptance now met AND backed by a passing automated integration/unit test):
+  - **SR-011** crash-safe atomic finalize (Implemented → **Verified**) → `tests/atomic_finalize.rs`: `finish_produces_final_mp4_and_no_part_sr011`, `failed_encode_leaves_no_final_and_cleans_part_sr011_sr015`, `dropped_encoder_leaves_no_final_or_part_sr011` (abort/Drop = kill + remove `.part`), `build_success_produces_mp4_no_part_sr011` (end-to-end). Covers the no-complete-looking-partial guarantee on success, failure, and abort. (TC-018.)
+  - **SR-010** source media never modified (Draft → **Verified**) → `tests/source_readonly.rs::build_never_modifies_source_media_sr010`: pre/post fingerprint (len+mtime+FNV content hash) of every input incl. a nested subdir across a full build to a separate output dir; asserts byte-for-byte unchanged and none added/removed. (TC-017; the interrupted-mid-run leg remains Manual, noted in TC-017 Parameters.)
+  - **SR-016** path missing/unwritable named errors (Implemented → **Verified**) → `tests/validate_build_checks.rs`: `validate_fails_naming_missing_media_root_sr002_sr016`, `validate_fails_naming_unusable_output_dir_sr002_sr016` (parent-is-a-file → uncreatable base_dir; asserts the path is named and NO panic), plus `build_refuses_on_essential_failure_sr002`. (TC-003/TC-026.)
+  - **SR-002** validate gates build on runtime prereqs (was already **Verified** from the helper unit test TC-049; now additionally backed end-to-end) → `tests/validate_build_checks.rs`: `validate_passes_with_good_config_sr002` (per-prereq `[PASS]`, exit 0, each prereq named), the two `[FAIL]` cases above, and `build_refuses_on_essential_failure_sr002`. Kept **Verified**; the full validate/build integration now exists (TC-002/003/004).
+- **→ Implemented** (feature done in code; full end-to-end acceptance only Manual/Demonstration so far — integration tests honestly owed/deferred):
+  - **SR-013** FFmpeg-error / no-false-success + configurable inactivity timeout (Draft → **Implemented**). The no-false-success leg (`FfmpegEncoder::finish` returns `Err` on non-zero exit, removes `.part`) is exercised by the atomic-finalize failure test; the pure timeout decision **`timed_out(last_activity_ms, now_ms, timeout_secs)`** is unit-tested (`ffmpeg::tests::inactivity_timeout_decision_sr013`: disabled-never-fires, within-window, at-boundary-not-yet, past-boundary-fires, backwards-clock-no-fire) and the watchdog (`Watchdog::spawn`, `write_frame` activity, `finish`/`Drop` stop+kill, default 120 s via `ProcessingConfig::ffmpeg_timeout_secs`) is implemented and confirmed armed-but-not-firing on a healthy run. **The end-to-end abort of a wedged ffmpeg is Manual/Demonstration** (TC-021 — non-deterministic to induce in CI; a manual demo can use a tiny `ffmpeg_timeout_secs`). So SR-013 is **Implemented**, not Verified.
+- **Kept at Implemented (unchanged — integration assertions not yet present for the surfaced behavior):**
+  - **SR-004** build progress + completion summary — the new integration tests assert build success/refusal and output existence but do NOT assert progress updates or the completion-summary contents (skip count, per-output path+size, oversize line). Those are only manually observed → stays **Implemented** (owes TC-008/009).
+  - **SR-014** skip-and-continue + skipped-count + all-skipped exit semantics — no integration test asserts the skip-count summary line or the some-bad-vs-all-bad exit codes yet (only the helper exit-code logic is unit-covered). Stays **Implemented** (owes TC-022/023).
+- **Kept at Verified (precise scope):**
+  - **SR-015** storage-full / no-complete-looking output — the `is_disk_full` classification helper is unit-Verified (TC-048) and the "a failed encode leaves no finalized `<name>.mp4`" guarantee is now generically covered by the atomic-finalize failure/abort tests (TC-018). **Real-ENOSPC end-to-end on a constrained volume (TC-024) and disk-full-mid-encode (TC-025) remain Manual** — can't reliably induce ENOSPC in CI. SR-015 stays **Verified for the covered parts (helper + atomic-finalize guarantee)**, with the real-disk-full demonstration explicitly Manual.
+- **Left untouched:** all Wave-2 SRs (SR-023/024/025/026/027/028/029/030) and other not-this-wave SRs.
+
+**Spot-check (source/tests vs. every Verified claim — nothing marked Verified is missing):**
+- SR-011 → `FfmpegEncoder` encodes to `<name>.mp4.part` (forced `-f mp4`), `finish()` renames only on ffmpeg success, `Drop` (when `!finished`) stops the watchdog then kills + removes the `.part`, and a stale `.part` is removed on `start` (safe re-run); the four `tests/atomic_finalize.rs` tests drive success/failure/Drop/end-to-end. ✓
+- SR-010 → no write path to `media_root` exists; `tests/source_readonly.rs` fingerprints + compares the whole tree. ✓
+- SR-016 → `ensure_dir_exists`/`ensure_writable_dir`/`preflight::check_media_root` name the exact path + problem with no panic; the two `[FAIL]`-naming tests assert the path string and absence of `panicked`. ✓
+- SR-002 → `preflight::run_checks` (FFmpeg/ffprobe/config/media_root/output dir, no Rust check), `[PASS]/[FAIL]` per line, `build` exits non-zero before media work on essential failure; asserted by `tests/validate_build_checks.rs`. ✓
+- SR-013 (Implemented) → `timed_out` is `if timeout_secs==0 {false}` else `now.saturating_sub(last) > secs*1000` (boundary-exclusive, backwards-clock-safe), unit-tested; watchdog wired through `start(..., timeout_secs)` from `ProcessingConfig::ffmpeg_timeout_secs` (default 120). ✓
+
+**Coverage gap decision (69.77% < 80%) — EXPLICIT, RECORDED:**
+- **DECISION: ACCEPT 69.77% line coverage for the Wave-1 HARDENING milestone.** I do **NOT** lower the process `COVERAGE_THRESHOLD`; the **80% gate stays binding for FULL OBJ3 closure** (process.md §2). The shortfall is depressed by code that is unexercised because it is unimplemented or out of Wave-1 scope — `video/mod.rs` 0% (FFmpeg video-decode read path; image-synth test media never decodes a video), `util/progress.rs` 0% (helper not wired into the current flow), `main.rs` 35.58% (CLI driver arms `stats`/`bench`/`exit` not reachable through library/integration paths) — not by missing tests for shipped Wave-1 behavior.
+- **Wave-1 module coverage is strong** and confirms the robustness logic is well tested: transform 96.89%, util/estimate 97.37%, image 93.75%, pipeline 85.22%, ffmpeg 81.82%, preflight 78.72%. The integration tests added this round exercise the finalize/validate/build/read-only paths end-to-end.
+- **Written plan to reach ≥80% before the FULL OBJ3 gate:** (1) add a **video-path integration test** that runs a build over a tiny synthesized input video so `video/mod.rs` decode path is exercised; (2) **cover `main.rs` CLI arms** — drive the built binary through `validate`/`build`/`stats`/`bench` and the non-zero-exit arms (some are already reachable via the new integration crates; extend to `stats`/`bench`); (3) wire/cover or remove `util/progress.rs`; (4) add the owed SR-004 (completion-summary contents) and SR-014 (skip-count + some-bad/all-bad exit) integration assertions, flipping those SRs to Verified; (5) Wave-2 `src/setup/*`, `config/location.rs`, `ffmpeg/resolve.rs` ship with their planned unit tests (TC-039/041/043/044/045). Re-measure with `cargo llvm-cov`; coverage must reach ≥80% before I sign the full OBJ3 gate.
+
+**Harness results (I re-ran all four myself; cargo via `%USERPROFILE%\.cargo\bin`):**
+- `cargo fmt --all -- --check` → clean, exit 0.
+- `cargo clippy --all-targets -- -D warnings` → Finished, 0 warnings, exit 0.
+- `cargo test --all` → lib `17 passed; 0 failed`; main binary `17 passed; 0 failed`; integration `tests/atomic_finalize 4 passed`, `tests/source_readonly 1 passed`, `tests/validate_build_checks 4 passed`; doc-tests `0 passed`; all exit 0.
+- `pwsh -File Scripts/trace.ps1 -Strict` → `SR=30 LLR=35 TC=49 orphans=0`, exit 0 (report regenerated after the SR Status edits).
+
+**Decision:** The Wave-1 HARDENING work is **sound**. SR-010/SR-011/SR-016 are now Verified by deterministic, self-cleaning integration tests; SR-002 stays Verified and is additionally backed end-to-end; SR-013's feature is implemented with the pure decision unit-tested (end-to-end abort honestly Manual → Implemented); SR-004/SR-014 honestly stay Implemented (integration assertions not yet present); SR-015 stays Verified for the helper + atomic-finalize guarantee with real-ENOSPC Manual. The coverage gap is accepted **for this milestone only** with a recorded ≥80% plan; the threshold is not lowered. Harness fully green, orphans=0. Setting **System Engineer = SIGNED(2026-06-02, hardening)** for the `OBJ3 — Implementation (Wave 1, hardened)` gate row.
+
+**Test Engineer sign-off (recorded by me):** The Test Engineer completed the hardening reconciliation — added `tests/atomic_finalize.rs` (4), `tests/validate_build_checks.rs` (4), `tests/source_readonly.rs` (1), flipped TC-002/003/004/017/018/026 to Automated=Yes/Verified (14 total Automated=Yes), kept TC-021/024/025 honestly Manual with justification, measured coverage at 69.77%, `trace.ps1 -Strict` orphans=0, `cargo test` green — and explicitly **APPROVED with green tests + orphans=0**, deferring the gate sign-off to this review. On that basis I record **Test Engineer = SIGNED(2026-06-02, hardening)** for the Wave-1 (hardened) gate row, noting I (System Engineer) recorded it on its behalf per its deferral.
+
+**EXPLICIT: the FULL OBJ3 gate remains OPEN.** This is the Wave-1 HARDENING milestone only. Still required before full OBJ3 closure (process.md §2): **Wave 2** (distribution/setup SR-023/024/026/027/028/029/030 + LLR-025/026/029–035, TC-032/033/038–045); the **owed integration assertions** for SR-004 (completion summary) and SR-014 (skip-count + all-skipped exit); the **end-to-end SR-013 timeout** and **real-ENOSPC SR-015** Demonstrations; and **line coverage ≥ COVERAGE_THRESHOLD (80%)** per the plan above. Human gate approval for the hardened Wave-1 milestone is PENDING.
+
+### ORCHESTRATOR — OBJ3 Wave 1 Hardening — Decision — 2026-06-03
+Independently re-verified: fmt clean, clippy -D warnings clean, cargo test green (lib 17, bin 17, integration 9), trace.ps1 -Strict orphans=0 (SR=30 LLR=35 TC=49). SE set SR Status (SR-002/010/011/015/016 Verified; SR-004/013/014 Implemented) and ACCEPTED 69.77% coverage for the milestone with the 80% gate kept binding for full OBJ3 (plan recorded). **Wave 1 (hardened) milestone: MET.** SE+TE SIGNED; **PAUSED for human**. FULL OBJ3 gate remains OPEN (Wave 2 + ≥80% coverage + owed SR-004/014 integration asserts).

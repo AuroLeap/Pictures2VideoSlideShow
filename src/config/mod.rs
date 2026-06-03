@@ -30,6 +30,19 @@ pub struct ProcessingConfig {
     pub use_parallelism: bool,
     pub dry_run: bool,
     pub verbose: bool,
+
+    /// Seconds of no encoder progress (no frame written to ffmpeg) after which a
+    /// stalled encode is aborted and the run fails non-zero. `0` disables the
+    /// watchdog. Default 120s. Unit: seconds.
+    // Implements: LLR-008, SR-013
+    #[serde(default = "default_ffmpeg_timeout_secs")]
+    pub ffmpeg_timeout_secs: u64,
+}
+
+/// Default FFmpeg inactivity timeout (SR-013): 120s with no encoder progress.
+// Implements: LLR-008, SR-013
+fn default_ffmpeg_timeout_secs() -> u64 {
+    120
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

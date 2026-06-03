@@ -34,7 +34,7 @@ config (TOML)               media scan (rayon)            per clip
 | `src/util` | dirs, progress |
 
 <!-- BEGIN GENERATED MODULE MAP (scripts/trace.ps1) -->
-_Generated 2026-06-02. Public items by module:_
+_Generated 2026-06-03. Public items by module:_
 
 - **src/config/mod.rs**
   - `pub struct Config`
@@ -51,7 +51,7 @@ _Generated 2026-06-02. Public items by module:_
   - `pub enum SlideshowError`
 - **src/ffmpeg/mod.rs**
   - `pub struct FfmpegEncoder`
-  - `pub fn start(output: &Path, width: u32, height: u32, fps: u32, crf: u32) -> Result<Self>`
+  - `pub fn start(`
   - `pub fn write_frame(&mut self, data: &[u8]) -> Result<()>`
   - `pub fn finish(mut self) -> Result<()>`
 - **src/image/mod.rs**
@@ -111,6 +111,11 @@ _Generated 2026-06-02. Public items by module:_
   - `pub fn open(path: &Path, width: u32, height: u32, fps: u32) -> Result<Self>`
   - `pub fn read_frame(&mut self) -> Result<Option<Vec<u8>>>`
 <!-- END GENERATED MODULE MAP -->
+
+
+
+
+
 
 
 

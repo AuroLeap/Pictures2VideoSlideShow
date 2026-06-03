@@ -66,7 +66,6 @@ impl BuildSummary {
 pub struct FrameGenerationPipeline {
     album: Album,
     outputs: Vec<OutputDef>,
-    #[allow(dead_code)]
     processing: ProcessingConfig,
     output_dir: PathBuf,
     /// Inputs skipped across all outputs (deduped by path) for the summary.
@@ -184,6 +183,9 @@ impl FrameGenerationPipeline {
             height,
             output_def.fps,
             output_def.quality_crf,
+            // Inactivity watchdog: abort a wedged ffmpeg after this many seconds
+            // of no frame writes (0 disables). SR-013 / LLR-008.
+            self.processing.ffmpeg_timeout_secs,
         )?;
 
         let mut mixer = CrossfadeMixer::new(encoder, output_def.fade_frames() as usize);
