@@ -10,12 +10,14 @@ mod logging;
 mod media;
 mod pipeline;
 mod preflight;
+mod setup;
 mod transform;
 mod util;
 mod video;
 
 use config::Config;
 use logging::init_logging;
+use std::io::IsTerminal;
 use util::estimate::human_bytes;
 
 #[derive(Parser, Debug)]
@@ -37,6 +39,11 @@ struct Args {
     /// Dry run (plan without executing)
     #[arg(long)]
     dry_run: bool,
+
+    /// Never prompt or open the setup GUI; fail fast instead of waiting for
+    /// input. For automation, CI, and scheduled runs. (SR-028)
+    #[arg(long)]
+    non_interactive: bool,
 
     /// Verbose logging
     #[arg(short, long)]
@@ -76,6 +83,22 @@ async fn main() -> Result<()> {
     log::info!("Slideshow Engine v0.1.0 starting...");
     log::debug!("Arguments: {:?}", args);
 
+    let non_interactive = args.non_interactive;
+
+    // First-run gating (SR-028): only offer the setup wizard when there is no
+    // config AND this is a genuine interactive session. Automation/CI never
+    // blocks here. (The wizard body lands in a later slice.)
+    if setup::interaction::should_prompt(
+        args.config.exists(),
+        non_interactive,
+        std::io::stdin().is_terminal(),
+    ) {
+        log::info!(
+            "No config at {} and interactive session — the first-run setup wizard will run here (coming soon).",
+            args.config.display()
+        );
+    }
+
     // Load configuration
     let config = Config::from_file(&args.config)?;
     log::info!("Configuration loaded from: {}", args.config.display());
@@ -96,7 +119,7 @@ async fn main() -> Result<()> {
     match args.command {
         None | Some(Commands::Build { .. }) => {
             log::info!("Starting slideshow generation pipeline...");
-            run_build(&config).await?;
+            run_build(&config, non_interactive).await?;
         }
         Some(Commands::Validate) => {
             log::info!("Validating runtime prerequisites...");
@@ -122,6 +145,12 @@ async fn main() -> Result<()> {
 fn run_validate(config: &Config) {
     let results = preflight::run_checks(config);
     print_check_results(&results);
+    // Report where the config is/will be stored (SR-030) so the user knows
+    // which file the wizard writes and subsequent runs read.
+    println!(
+        "Config location: {}",
+        config::location::resolve_config_path().display()
+    );
     let code = preflight::exit_code(&results);
     if code == 0 {
         println!("All prerequisites passed.");
@@ -140,7 +169,14 @@ fn print_check_results(results: &[preflight::CheckResult]) {
     }
 }
 
-async fn run_build(config: &Config) -> Result<()> {
+async fn run_build(config: &Config, non_interactive: bool) -> Result<()> {
+    // Resolve FFmpeg (configured path -> PATH -> per-user cache), with the
+    // offline/use-existing fallback and a gated auto-fetch. Fails fast with an
+    // actionable message in automation rather than blocking.
+    // Implements: SR-027, SR-028
+    let ffmpeg = setup::ensure_ffmpeg(config, non_interactive)?;
+    log::info!("Using FFmpeg: {}", ffmpeg.display());
+
     // Gate the build on the same runtime-prerequisite set as `validate`; refuse
     // to start (non-zero, no output) when any essential check fails.
     // Implements: LLR-005, SR-002, SR-012

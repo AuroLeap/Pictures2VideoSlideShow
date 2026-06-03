@@ -60,12 +60,27 @@ pub fn exit_code(results: &[CheckResult]) -> i32 {
 // Implements: LLR-004, LLR-006, SR-002, SR-012
 pub fn run_checks(config: &Config) -> Vec<CheckResult> {
     vec![
-        check_program("FFmpeg", "ffmpeg"),
+        check_ffmpeg(config),
         check_program("ffprobe", "ffprobe"),
         check_config_valid(config),
         check_media_root(&config.input.media_root),
         check_output_writable(&config.output.base_dir),
     ]
+}
+
+/// Resolve FFmpeg per the SR-027 order (configured `ffmpeg_path` → PATH →
+/// per-user cache) so the check reflects every place a usable FFmpeg may live.
+// Implements: LLR-006, LLR-032, SR-012, SR-027
+fn check_ffmpeg(config: &Config) -> CheckResult {
+    let cache = crate::setup::ffmpeg_fetch::cache_dir();
+    match crate::ffmpeg::resolve::resolve(config.processing.ffmpeg_path.as_deref(), &cache) {
+        Some(p) => CheckResult::pass("FFmpeg", format!("found ({})", p.display())),
+        None => CheckResult::fail(
+            "FFmpeg",
+            "not found on PATH, via config `ffmpeg_path`, or in the per-user cache — \
+             install it / add to PATH, or set `ffmpeg_path`",
+        ),
+    }
 }
 
 /// Probe an external program by spawning `<prog> -version`.

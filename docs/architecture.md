@@ -36,6 +36,9 @@ config (TOML)               media scan (rayon)            per clip
 <!-- BEGIN GENERATED MODULE MAP (scripts/trace.ps1) -->
 _Generated 2026-06-03. Public items by module:_
 
+- **src/config/location.rs**
+  - `pub fn choose_config_dir(`
+  - `pub fn resolve_config_path() -> PathBuf`
 - **src/config/mod.rs**
   - `pub struct Config`
   - `pub struct InputConfig`
@@ -54,6 +57,10 @@ _Generated 2026-06-03. Public items by module:_
   - `pub fn start(`
   - `pub fn write_frame(&mut self, data: &[u8]) -> Result<()>`
   - `pub fn finish(mut self) -> Result<()>`
+- **src/ffmpeg/resolve.rs**
+  - `pub enum Source`
+  - `pub fn pick(configured_ok: bool, on_path: bool, cached_ok: bool) -> Option<Source>`
+  - `pub fn resolve(configured: Option<&Path>, cache_dir: &Path) -> Option<PathBuf>`
 - **src/image/mod.rs**
   - `pub struct FrameRenderer`
   - `pub fn load(path: &Path, out: &OutputDef) -> Result<Self>`
@@ -85,6 +92,15 @@ _Generated 2026-06-03. Public items by module:_
   - `pub fn all_essential_passed(results: &[CheckResult]) -> bool`
   - `pub fn exit_code(results: &[CheckResult]) -> i32`
   - `pub fn run_checks(config: &Config) -> Vec<CheckResult>`
+- **src/setup/ffmpeg_fetch.rs**
+  - `pub fn cache_dir() -> PathBuf`
+  - `pub fn verify_checksum(path: &Path, expected_hex: &str) -> Result<()>`
+  - `pub fn fetch_ffmpeg(dest_dir: &Path) -> Result<PathBuf>`
+- **src/setup/interaction.rs**
+  - `pub fn should_prompt(config_present: bool, non_interactive: bool, stdin_is_tty: bool) -> bool`
+  - `pub fn is_interactive(non_interactive: bool) -> bool`
+- **src/setup/mod.rs**
+  - `pub fn ensure_ffmpeg(config: &Config, non_interactive: bool) -> Result<PathBuf>`
 - **src/transform/mod.rs**
   - `pub fn seed_from_str(s: &str) -> u64`
   - `pub struct CropWindow`
@@ -106,6 +122,7 @@ _Generated 2026-06-03. Public items by module:_
   - `pub fn open(path: &Path, width: u32, height: u32, fps: u32) -> Result<Self>`
   - `pub fn read_frame(&mut self) -> Result<Option<Vec<u8>>>`
 <!-- END GENERATED MODULE MAP -->
+
 
 
 

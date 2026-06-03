@@ -6,6 +6,8 @@
 //! successfully (LLR-015, SR-011). Any failure or early drop removes the temp
 //! so a killed run never leaves a complete-looking final file.
 
+pub mod resolve;
+
 use crate::error::{Result, SlideshowError};
 use crate::util::{disk_full_error, is_disk_full};
 use std::io::Write;

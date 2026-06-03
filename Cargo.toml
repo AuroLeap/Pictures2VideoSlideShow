@@ -21,6 +21,7 @@ once_cell = "1.19"
 walkdir = "2.4"
 regex = "1.10"
 lazy_static = "1.4"
+sha2 = "0.10"
 
 [[bin]]
 name = "make_video_slideshow"

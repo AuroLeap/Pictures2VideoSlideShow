@@ -1,3 +1,5 @@
+pub mod location;
+
 use crate::error::{Result, SlideshowError};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -37,6 +39,13 @@ pub struct ProcessingConfig {
     // Implements: LLR-008, SR-013
     #[serde(default = "default_ffmpeg_timeout_secs")]
     pub ffmpeg_timeout_secs: u64,
+
+    /// Optional explicit path to an FFmpeg executable. When set, it takes
+    /// priority over `PATH` and the per-user cache — the offline / use-existing
+    /// FFmpeg fallback so no download is needed. Unit: filesystem path.
+    // Implements: SR-027, LLR-032
+    #[serde(default)]
+    pub ffmpeg_path: Option<PathBuf>,
 }
 
 /// Default FFmpeg inactivity timeout (SR-013): 120s with no encoder progress.
