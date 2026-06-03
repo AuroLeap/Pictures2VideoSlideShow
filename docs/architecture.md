@@ -44,6 +44,7 @@ _Generated 2026-06-02. Public items by module:_
   - `pub struct OutputDef`
   - `pub fn total_frames(&self) -> u32`
   - `pub fn fade_frames(&self) -> u32`
+  - `pub fn even_dims(&self) -> (u32, u32)`
   - `pub fn from_file(path: &PathBuf) -> Result<Self>`
   - `pub fn validate(&self) -> Result<()>`
 - **src/error.rs**
@@ -67,6 +68,10 @@ _Generated 2026-06-02. Public items by module:_
   - `pub struct MediaLoader`
   - `pub fn new(config: InputConfig) -> Self`
 - **src/pipeline/mod.rs**
+  - `pub struct SkippedInput`
+  - `pub struct WrittenOutput`
+  - `pub struct BuildSummary`
+  - `pub fn oversize_outputs(&self) -> Vec<&WrittenOutput>`
   - `pub struct FrameGenerationPipeline`
   - `pub fn new(`
 - **src/pipeline/source.rs**
@@ -75,6 +80,11 @@ _Generated 2026-06-02. Public items by module:_
   - `pub fn new(renderer: FrameRenderer, batch: u32) -> Self`
   - `pub struct VideoFrameSource`
   - `pub fn new(reader: VideoFrameReader) -> Self`
+- **src/preflight.rs**
+  - `pub struct CheckResult`
+  - `pub fn all_essential_passed(results: &[CheckResult]) -> bool`
+  - `pub fn exit_code(results: &[CheckResult]) -> i32`
+  - `pub fn run_checks(config: &Config) -> Vec<CheckResult>`
 - **src/transform/mod.rs**
   - `pub fn seed_from_str(s: &str) -> u64`
   - `pub struct CropWindow`
@@ -82,8 +92,15 @@ _Generated 2026-06-02. Public items by module:_
   - `pub fn new(img_w: u32, img_h: u32, out: &OutputDef, seed: u64) -> Self`
   - `pub fn rotation_deg(&self, i: u32) -> f32`
   - `pub fn window(&self, i: u32) -> CropWindow`
+- **src/util/estimate.rs**
+  - `pub fn estimate_output_bytes(duration_secs: f64, crf: u32) -> u64`
+  - `pub fn is_oversize(bytes: u64) -> bool`
+  - `pub fn human_bytes(bytes: u64) -> String`
 - **src/util/file_utils.rs**
   - `pub fn ensure_dir_exists(path: &Path) -> Result<()>`
+  - `pub fn ensure_writable_dir(path: &Path) -> Result<()>`
+  - `pub fn disk_full_error(path: &Path) -> SlideshowError`
+  - `pub fn is_disk_full(err: &io::Error) -> bool`
 - **src/util/progress.rs**
   - `pub struct ProgressTracker`
   - `pub fn new(total: usize) -> Self`
@@ -94,6 +111,9 @@ _Generated 2026-06-02. Public items by module:_
   - `pub fn open(path: &Path, width: u32, height: u32, fps: u32) -> Result<Self>`
   - `pub fn read_frame(&mut self) -> Result<Option<Vec<u8>>>`
 <!-- END GENERATED MODULE MAP -->
+
+
+
 
 
 

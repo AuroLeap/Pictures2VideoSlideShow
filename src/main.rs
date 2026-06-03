@@ -9,12 +9,14 @@ mod image;
 mod logging;
 mod media;
 mod pipeline;
+mod preflight;
 mod transform;
 mod util;
 mod video;
 
 use config::Config;
 use logging::init_logging;
+use util::estimate::human_bytes;
 
 #[derive(Parser, Debug)]
 #[command(name = "slideshow")]
@@ -97,9 +99,8 @@ async fn main() -> Result<()> {
             run_build(&config).await?;
         }
         Some(Commands::Validate) => {
-            log::info!("Validating configuration...");
-            config.validate()?;
-            println!("✓ Configuration is valid");
+            log::info!("Validating runtime prerequisites...");
+            run_validate(&config);
         }
         Some(Commands::Stats) => {
             log::info!("Collecting project statistics...");
@@ -115,8 +116,42 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// Run the `validate` command: probe each runtime prerequisite, print one
+/// plain pass/fail line each, and exit non-zero if any essential check fails.
+// Implements: LLR-004, SR-002
+fn run_validate(config: &Config) {
+    let results = preflight::run_checks(config);
+    print_check_results(&results);
+    let code = preflight::exit_code(&results);
+    if code == 0 {
+        println!("All prerequisites passed.");
+    } else {
+        println!("One or more essential prerequisites failed; build cannot run.");
+    }
+    std::process::exit(code);
+}
+
+/// Print one labeled `[PASS]`/`[FAIL]` line per prerequisite.
+// Implements: LLR-004, SR-002
+fn print_check_results(results: &[preflight::CheckResult]) {
+    for r in results {
+        let tag = if r.passed { "PASS" } else { "FAIL" };
+        println!("[{}] {}: {}", tag, r.name, r.detail);
+    }
+}
+
 async fn run_build(config: &Config) -> Result<()> {
-    config.validate()?;
+    // Gate the build on the same runtime-prerequisite set as `validate`; refuse
+    // to start (non-zero, no output) when any essential check fails.
+    // Implements: LLR-005, SR-002, SR-012
+    let checks = preflight::run_checks(config);
+    if !preflight::all_essential_passed(&checks) {
+        eprintln!("Cannot start build — prerequisite check failed:");
+        for r in checks.iter().filter(|r| r.essential && !r.passed) {
+            eprintln!("  [FAIL] {}: {}", r.name, r.detail);
+        }
+        std::process::exit(1);
+    }
 
     // 1. Load media
     log::info!("Loading media files...");
@@ -135,10 +170,49 @@ async fn run_build(config: &Config) -> Result<()> {
         config.processing.clone(),
         config.output.base_dir.clone(),
     );
-    pipeline.execute().await?;
+    let summary = pipeline.execute().await?;
+
+    print_completion_summary(&summary);
+
+    // Exit semantics: zero when >=1 output produced, non-zero otherwise.
+    // Implements: LLR-017, SR-014
+    if summary.written.is_empty() {
+        eprintln!(
+            "no outputs produced — every input was skipped or no output could be written ({} skipped)",
+            summary.skipped.len()
+        );
+        std::process::exit(1);
+    }
 
     log::info!("All outputs processed successfully");
     Ok(())
+}
+
+/// Print the end-of-build summary: each written output + size, the skipped
+/// count, and any final file over the ~3.5 GB threshold.
+// Implements: LLR-023, LLR-024, LLR-013, SR-004, SR-009
+fn print_completion_summary(summary: &pipeline::BuildSummary) {
+    println!("\n=== Build Summary ===");
+    if summary.written.is_empty() {
+        println!("Outputs written: 0");
+    } else {
+        println!("Outputs written: {}", summary.written.len());
+        for o in &summary.written {
+            println!("  {} ({})", o.path.display(), human_bytes(o.size_bytes));
+        }
+    }
+    println!("Inputs skipped: {}", summary.skipped.len());
+    for s in &summary.skipped {
+        println!("  skipped {}: {}", s.path.display(), s.reason);
+    }
+
+    let oversize = summary.oversize_outputs();
+    if !oversize.is_empty() {
+        println!("WARNING: outputs exceeding ~3.5 GB FAT32 limit:");
+        for o in oversize {
+            println!("  {} ({})", o.path.display(), human_bytes(o.size_bytes));
+        }
+    }
 }
 
 async fn run_stats(config: &Config) -> Result<()> {

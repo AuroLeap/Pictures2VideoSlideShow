@@ -74,6 +74,16 @@ impl OutputDef {
     pub fn fade_frames(&self) -> u32 {
         (self.fade_time_secs * self.fps as f32).round() as u32
     }
+
+    /// Configured width/height normalized so both are even (rounded down via
+    /// `x & !1`), and never zero. yuv420p H.264 rejects odd dimensions, so odd
+    /// values must never reach ffmpeg.
+    // Implements: LLR-010, SR-006, SR-005
+    pub fn even_dims(&self) -> (u32, u32) {
+        let w = (self.width & !1).max(2);
+        let h = (self.height & !1).max(2);
+        (w, h)
+    }
 }
 
 impl Config {
@@ -128,5 +138,42 @@ impl Config {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_output(width: u32, height: u32) -> OutputDef {
+        OutputDef {
+            name: "t".into(),
+            width,
+            height,
+            fps: 30,
+            pic_display_time_secs: 6.0,
+            fade_time_secs: 0.5,
+            max_rotation_degrees: 15.0,
+            bulk_video_time_min: 20,
+            quality_crf: 28,
+            enable_audio: false,
+            zoom_amount: 0.12,
+            ken_burns: true,
+        }
+    }
+
+    // Verifies: LLR-010, SR-006
+    #[test]
+    fn even_dims_rounds_down_sr006() {
+        assert_eq!(sample_output(1441, 901).even_dims(), (1440, 900));
+        assert_eq!(sample_output(1920, 1080).even_dims(), (1920, 1080));
+        assert_eq!(sample_output(1025, 769).even_dims(), (1024, 768));
+    }
+
+    // Verifies: LLR-010, SR-006
+    #[test]
+    fn even_dims_never_zero_sr006() {
+        // Odd 1 rounds down to 0 naively; must be clamped up to the even minimum.
+        assert_eq!(sample_output(1, 1).even_dims(), (2, 2));
     }
 }

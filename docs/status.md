@@ -8,18 +8,19 @@ Back to [docs index](README.md) · [README](../README.md).
 
 ## Current state
 
-- **Active objective:** 1+2 AMENDMENT (Round 4) — **GATE MET, awaiting human approval** of the amended distribution & first-run setup model.
-- **Round:** 4 (amendment)
+- **Active objective:** 3 — Implementation, **Wave 1 (core robustness)**. Amended OBJ1+OBJ2 APPROVED by human 2026-06-02.
+- **Round:** 1
 - **Mode:** pause-at-each-gate
-- **Next action:** human approves the amended OBJ1+OBJ2 gate → orchestrator starts Objective 3 (implementation).
+- **Wave 1 scope (Planned LLRs):** LLR-004/005/006 (validate per-prereq + build gate + ffmpeg pre-flight, SR-002/012), LLR-010 (even-dim normalize, SR-006), LLR-013 (oversize estimate/warning, SR-009), LLR-015 (atomic temp→final finalize, SR-011/015), LLR-017 (skipped-count + exit semantics, SR-014), LLR-018 (disk-full classification, SR-015), LLR-019 (path-missing/unwritable naming, SR-016), LLR-023/024 (progress + completion summary, SR-004). **Wave 2 (deferred):** LLR-025/026/029-035 (rename+release CI, wizard, fetch/resolve/checksum, config location, interaction gating).
+- **Next action:** Software Engineer implements Wave 1 (build/clippy/test green) → Test Engineer automates the new TCs → System Engineer reviews → pause for human.
 
 ## Gate Sign-offs
 
 | Objective | End User | UX Designer | System Engineer | Test Engineer | Human |
 |---|---|---|---|---|---|
-| OBJ1 — Requirements/UX/Constraints | SIGNED(2026-06-02) | SIGNED(2026-06-02) | SIGNED(2026-06-02) | n/a | PENDING (re-approve amended) |
-| OBJ2 — LLR & Test Coverage | n/a | n/a | SIGNED(2026-06-02) | SIGNED(2026-06-02) | PENDING |
-| OBJ3 — Implementation | n/a | n/a | PENDING | PENDING | PENDING |
+| OBJ1 — Requirements/UX/Constraints | SIGNED(2026-06-02) | SIGNED(2026-06-02) | SIGNED(2026-06-02) | n/a | SIGNED(2026-06-02, amended) |
+| OBJ2 — LLR & Test Coverage | n/a | n/a | SIGNED(2026-06-02) | SIGNED(2026-06-02) | SIGNED(2026-06-02) |
+| OBJ3 — Implementation (Wave 1) | n/a | n/a | SIGNED(2026-06-02) | SIGNED(2026-06-02) | PENDING |
 | FINAL — Acceptance | PENDING | n/a | n/a | (evidence) | PENDING |
 
 ---
@@ -486,3 +487,106 @@ Verdict: APPROVE. 45 TCs; trace.ps1 -Strict orphans=0 (SR=30 LLR=35 TC=45); carg
 ### ORCHESTRATOR — Amendment R4 — Combined gate decision — 2026-06-02
 Amendment fully rippled UN→SR→LLR→TC→docs. Independently re-verified: `Scripts/trace.ps1 -Strict` → SR=30 LLR=35 TC=45 **orphans=0**, exit 0; `cargo test --all` → **5 passed**. System Engineer = SIGNED recorded for amended OBJ1 & OBJ2 on the basis of its R4 APPROVE (it authored/approved the amended SRs and its sole gate criterion — coverage orphans=0 — is orchestrator-verified). End User + UX = SIGNED (OBJ1); System + Test = SIGNED (OBJ2).
 **Amended OBJ1+OBJ2 gate: MET.** Implemented vs Planned now: 14 Implemented / 21 Planned LLRs (the new setup/distribution items SR-023/024/026/027/028/029/030 are all Planned OBJ3 work). **PAUSED for human approval** before Objective 3.
+
+### HUMAN — Amended OBJ1+OBJ2 — Gate approval — 2026-06-02
+Verdict: APPROVED. Amended distribution & first-run setup model accepted. Start Objective 3 with Wave 1 (core robustness); defer Wave 2 (distribution/setup) to a later pass.
+
+### ORCHESTRATOR — OBJ3 Wave 1 — Round 1 — 2026-06-02
+Starting implementation of the Wave-1 Planned LLRs (robustness; Wave 2 distribution/setup deferred). Software Engineer implements with build/clippy/test kept green and unit tests for the testable helpers; updates LLR Status Implemented + code annotations. Then Test Engineer flips the corresponding TCs to Automated=Yes and System Engineer reviews. Gate: run-tests green for Wave-1 scope, then pause for human.
+
+### SOFTWARE-ENGINEER — OBJ3 Wave 1 — Round 1 — 2026-06-02
+Verdict: APPROVE (Wave-1 core-robustness LLRs implemented; build/clippy/test/run all green).
+
+Now Implemented (LLR → code symbol):
+- LLR-010 / SR-005,SR-006 — `OutputDef::even_dims()` (`src/config/mod.rs`); pipeline uses it for encoder dims, frame_bytes, and the video reader so odd dims never reach yuv420p ffmpeg.
+- LLR-004 / SR-002 — `preflight::run_checks` + `exit_code` + `all_essential_passed` (`src/preflight.rs`); `main::run_validate` prints one `[PASS]/[FAIL]` line per prereq (FFmpeg, ffprobe, config, media_root, output dir). No Rust/toolchain check.
+- LLR-005 / SR-002,SR-012 — `run_build` (`src/main.rs`) runs the same check set and `std::process::exit(1)` with no output on essential failure.
+- LLR-006 / SR-012 — `preflight::check_program` spawns `ffmpeg -version` / `ffprobe -version`; `FfmpegEncoder::start` named-error backstop retained.
+- LLR-015 / SR-011,SR-015 — `FfmpegEncoder` (`src/ffmpeg/mod.rs`) encodes to `<name>.mp4.part` (forced `-f mp4`) and `std::fs::rename`s to `<name>.mp4` only on success; failure/early `Drop` kills ffmpeg and removes the temp.
+- LLR-017 / SR-014 — `FrameGenerationPipeline::record_skip` + `BuildSummary` (`src/pipeline/mod.rs`); `run_build` exits 0 when ≥1 output, else exit 1 with a plain "no outputs produced" message.
+- LLR-023/024 / SR-004,SR-009 — `main::print_completion_summary` lists each written output path + size, skipped count + reasons, and any final file > 3.5 GB.
+- LLR-013 / SR-009 — `estimate_output_bytes`/`is_oversize` (`src/util/estimate.rs`) + `warn_if_estimated_oversize` + `BuildSummary::oversize_outputs`. CRF→bitrate approximation: anchor 8 Mbps @ CRF 23, ×0.88 per CRF step (documented; ignores resolution/motion). Threshold 3.5 GB.
+- LLR-018 / SR-015 — `is_disk_full(&io::Error)` (Windows OS err 112 / ENOSPC 28) + `disk_full_error` ("out of disk space writing <path>"), called from `write_frame`, finalize-rename, and dir checks.
+- LLR-019 / SR-016 — `ensure_dir_exists`/`ensure_writable_dir` (`src/util/file_utils.rs`) + `preflight::check_media_root` name the exact path + problem (missing/not-a-dir/unwritable) with no panic.
+
+Remaining Planned (out of Wave-1 scope): LLR-008 (FFmpeg inactivity-timeout / bounded wait) left Planned — it is the timeout half of SR-013, not in the Wave-1 set. All Wave-2 LLRs (025–035: rename, release CI, GUI wizard, ffmpeg fetch/resolve/checksum, config-location resolver) remain Planned.
+
+New unit tests (requirement id in name):
+- `even_dims_rounds_down_sr006`, `even_dims_never_zero_sr006`
+- `estimate_scales_with_duration_sr009`, `lower_crf_estimates_larger_sr009`, `oversize_threshold_at_3_5gb_sr009`, `long_high_quality_run_flags_oversize_sr009`
+- `is_disk_full_detects_platform_code_sr015`, `is_disk_full_rejects_other_errors_sr015`
+- `exit_zero_when_all_essential_pass_sr002`, `exit_nonzero_when_essential_fails_sr002`, `nonessential_failure_does_not_block_sr002`
+
+Results:
+- `cargo fmt --check`: clean (exit 0).
+- `cargo clippy --all-targets -- -D warnings`: clean (Finished, no warnings).
+- `cargo test --all`: `test result: ok. 16 passed; 0 failed; 0 ignored` (lib) + doc-tests `0 passed; 0 failed`.
+- `cargo run --release -- --config test_config.toml build`: succeeded — 10 items, 2021 frames in 33.8s; Build Summary: `Outputs written: 1` `TestOut/RustOut\test-1440x900.mp4 (6.4 MB)`, `Inputs skipped: 0`; no `.part` leftover. `validate` prints 5 `[PASS]` lines, exit 0.
+
+### TEST-ENGINEER — OBJ3 Wave 1 — Round 1 — 2026-06-02
+Verdict: APPROVE (Wave-1 scope only — see scope caveat below; gate NOT self-signed, System Engineer reviews next)
+
+Reconciled [test-cases.csv](test/test-cases.csv) with the now-Implemented Wave-1 robustness LLRs and the 11 new passing unit tests. Edited test-cases.csv only; header + stable TC ids preserved; coverage unchanged (orphans still 0). Did NOT touch SRs, LLRs, source, or the quick-reference.
+
+Split unit-vs-integration honestly (added 4 new unit TCs at the next free ids; left the System/Integration permutations as Automated=No with a one-line justification so no system behavior is falsely claimed automated):
+- **SR-006 even-dims** → new **TC-046** (Unit, Verified) = `config::tests::even_dims_rounds_down_sr006` + `even_dims_never_zero_sr006`. TC-011 (System/ffprobe encode permutation) stays Automated=No/Draft.
+- **SR-009 estimate/oversize** → new **TC-047** (Unit, Verified) = the four `util::estimate::tests::{estimate_scales_with_duration,lower_crf_estimates_larger,oversize_threshold_at_3_5gb,long_high_quality_run_flags_oversize}_sr009`. TC-015 (pre-run estimate Integration) + TC-016 (post-run surfacing Integration) stay Automated=No/Draft.
+- **SR-015 disk-full** → new **TC-048** (Unit, Verified) = `util::file_utils::tests::is_disk_full_detects_platform_code_sr015` + `is_disk_full_rejects_other_errors_sr015`. TC-024 (real-ENOSPC end-to-end Integration) stays Automated=No/Draft.
+- **SR-002 validate aggregation** → new **TC-049** (Unit, Verified) = `preflight::tests::{exit_zero_when_all_essential_pass,exit_nonzero_when_essential_fails,nonessential_failure_does_not_block}_sr002`. TC-002/TC-003 (full validate Integration permutations) stay Automated=No/Draft.
+
+Also flipped the 4 pre-existing Automated=Yes TCs (TC-012/029/030/031) from Status=Draft to Verified now that this run re-confirms their tests pass. `Expected` still cites the AcceptanceCriteria by SR id and names the exact `cargo test ...::<fn>`; DRY kept (one parameterized unit TC per helper, integration permutations reference the unit TC by id rather than duplicating).
+
+**Automated=Yes / Status=Verified: 8 TCs** (TC-012, TC-029, TC-030, TC-031, TC-046, TC-047, TC-048, TC-049). **Still Draft: 41 TCs** (Automated=No or Planned) — the honest not-yet-automated set: atomic finalize end-to-end kill test (TC-018/025), full `validate`/`build` integration (TC-002/003/004/019), real disk-full ENOSPC (TC-024), FFmpeg-error/timeout (TC-020/021), ffprobe-profile System cases (TC-010/011/013/014/027), source read-only hash (TC-017), the four Inspection doc-SRs (TC-034..037), and all Wave-2 setup/distribution TCs (TC-032/033/038..045). Each carries a one-line justification.
+
+Machine checks (re-run by me after the edits):
+- `Scripts/trace.ps1 -Strict` → `Traceability: SR=30 LLR=35 TC=49 orphans=0`, exit 0. (TC count 45→49 with the 4 new unit TCs; all reference existing SR/LLR ids so coverage is unchanged.)
+- `cargo test --all` → lib `test result: ok. 16 passed; 0 failed; 0 ignored`; main binary `test result: ok. 16 passed; 0 failed; 0 ignored`; doc-tests `0 passed; 0 failed`. All 11 new Wave-1 unit tests (+5 pre-existing) green.
+
+Verdict: The Wave-1 testable-helper behavior (even-dims rounding, oversize estimate math, disk-full classification, validate pass/fail aggregation) is now automated and Verified by passing unit tests, with the System/Integration permutations honestly left manual/Draft. From the Test Engineer side the **Wave-1 scope** is met.
+
+**SCOPE CAVEAT (explicit):** This is a **Wave-1 milestone only**. Wave-2 distribution/setup TCs (TC-032/033 + TC-038..045 for SR-023/024/026/027/028/029/030) remain Automated=No/Planned, Status=Draft. Therefore the **full OBJ3 coverage-threshold gate (process.md §2: every TC Automated=Yes/Manual + all SR/LLR Status=Verified + coverage ≥ COVERAGE_THRESHOLD) is NOT yet claimed.** Deferring the gate sign-off to the System Engineer's Wave-1 review.
+
+### SYSTEM-ENGINEER — OBJ3 Wave 1 — 2026-06-02
+Verdict: APPROVE (Wave-1 core-robustness milestone — NOT full OBJ3 closure)
+
+Reviewed the Software Engineer's and Test Engineer's Wave-1 work against the SR acceptance criteria. Edited `system-requirements.csv` Status column only (everything else stable; CSV re-parses to 30 rows, header unchanged).
+
+**SR Status changes (Wave-1 SRs only):**
+- **→ Verified** (acceptance met AND backed by a passing automated unit test):
+  - SR-006 even-dims → TC-046 (`config::tests::even_dims_rounds_down_sr006`, `even_dims_never_zero_sr006`).
+  - SR-009 estimate/oversize threshold math → TC-047 (`util::estimate::tests::{estimate_scales_with_duration,lower_crf_estimates_larger,oversize_threshold_at_3_5gb,long_high_quality_run_flags_oversize}_sr009`).
+  - SR-002 validate aggregation/exit codes → TC-049 (`preflight::tests::{exit_zero_when_all_essential_pass,exit_nonzero_when_essential_fails,nonessential_failure_does_not_block}_sr002`).
+  - SR-015 disk-full classification helper → TC-048 (`util::file_utils::tests::{is_disk_full_detects_platform_code,is_disk_full_rejects_other_errors}_sr015`).
+- **→ Implemented** (done in code; full acceptance only manually/Demonstration/Integration-verified so far — integration tests owed later):
+  - SR-011 atomic temp→final finalize end-to-end (`FfmpegEncoder` `.part`→rename + Drop cleanup). Owes the kill-mid-encode integration test (TC-018/025).
+  - SR-004 build progress + completion summary (`print_completion_summary` + per-stage progress). Owes TC-008/009 integration.
+  - SR-014 skip-count + exit semantics (`record_skip` dedup; exit 0 when ≥1 output else exit 1 "no outputs produced"). Owes TC-022/023 integration.
+  - SR-016 path missing/unwritable naming (`ensure_dir_exists`/`ensure_writable_dir`/`check_media_root`, no panic). Owes TC-026 integration.
+  - SR-012 FFmpeg-missing detection (`preflight::check_program` spawns `ffmpeg -version` + named backstop). Owes TC-019/004 integration.
+- **Left at current Status (untouched):** Wave-2 SRs (SR-023/024/025/026/027/028/029/030) and all other not-this-wave SRs (incl. SR-013 — only the no-false-success leg is coded; the configurable inactivity-timeout half LLR-008 is still Planned, so SR-013 stays Draft).
+
+**Spot-check (source vs. Implemented/Verified claims) — nothing claimed is missing:**
+- SR-006 `OutputDef::even_dims()` = `(w & !1).max(2)` / `(h & !1).max(2)`, called in `pipeline::encode_output` for encoder dims + `frame_bytes` before ffmpeg. ✓
+- SR-009 `estimate_output_bytes`/`is_oversize` (`OVERSIZE_THRESHOLD_BYTES = 3_758_096_384`, anchor 8 Mbps @ CRF 23 ×0.88/step), `warn_if_estimated_oversize` uses duration = Σ(clip) − transitions×fade, `BuildSummary::oversize_outputs` surfaces final >3.5 GB. ✓
+- SR-002 `preflight::run_checks` (5 prereqs incl. ffmpeg+ffprobe via `check_program`, no Rust/toolchain check), `all_essential_passed`/`exit_code`; `run_validate` prints `[PASS]/[FAIL]` per line; `run_build` gates and `std::process::exit(1)` on essential failure before any media work. ✓
+- SR-015 `is_disk_full` maps Win ERROR_DISK_FULL (112)/POSIX ENOSPC (28); `disk_full_error` names the path; called from `write_frame`, finalize-rename, and dir checks. ✓
+- SR-011 `FfmpegEncoder` encodes to `<name>.mp4.part` (forced `-f mp4`), `finish()` renames only on ffmpeg success, `Drop` kills + removes temp when `!finished`; stale `.part` removed on start (safe re-run). ✓
+- SR-004 `print_completion_summary` lists each written path+size, skipped count+reasons, oversize warnings. ✓
+- SR-014 `record_skip` dedupes by path; `run_build` exits 0 when `!written.is_empty()` else prints "no outputs produced …" and exits 1. ✓
+- SR-016/SR-012 confirmed in `file_utils.rs`/`preflight.rs` as above. ✓
+
+**Harness results (I re-ran all four myself; cargo via `%USERPROFILE%\.cargo\bin`):**
+- `cargo fmt --all -- --check` → clean, exit 0.
+- `cargo clippy --all-targets -- -D warnings` → Finished, no warnings, exit 0.
+- `cargo test --all` → lib `16 passed; 0 failed; 0 ignored`; main binary `16 passed; 0 failed; 0 ignored`; doc-tests `0 passed; 0 failed`; exit 0.
+- `pwsh -File Scripts/trace.ps1 -Strict` → `SR=30 LLR=35 TC=49 orphans=0`, exit 0.
+
+**Decision:** Wave-1 core-robustness is **sound**. The four testable-helper SRs are Verified by green unit tests; the five integration-side SRs are correctly Implemented with their integration TCs honestly left Draft/Automated=No. Coverage stays orphans=0, harness fully green. Setting **System Engineer = SIGNED(2026-06-02)** for the `OBJ3 — Implementation (Wave 1)` gate row.
+
+**Test Engineer sign-off (recorded by me):** The Test Engineer completed its Wave-1 reconciliation — 4 new unit TCs (TC-046..049), 8 TCs now Automated=Yes/Verified, `trace.ps1 -Strict` orphans=0, `cargo test` green — and explicitly deferred the gate sign-off to this review with an honest unit-vs-integration split and Wave-1 scope caveat. On that basis I record **Test Engineer = SIGNED(2026-06-02)** for the Wave-1 gate row, noting I (System Engineer) recorded it on its behalf per its deferral.
+
+**EXPLICIT: the FULL OBJ3 gate remains OPEN.** This is a Wave-1 milestone only. Still required before full OBJ3 closure (process.md §2): **Wave 2** (distribution/setup SR-023/024/026/027/028/029/030 + LLR-025/026/029–035, TC-032/033/038–045); the **integration tests** owed by the Implemented SRs above (TC-002/003/004/008/009/018/019/022/023/025/026) plus the FFmpeg-error/timeout SR-013 and source-read-only SR-010 cases; and **line coverage ≥ COVERAGE_THRESHOLD (80%)** measured by the harness — not yet collected. Human gate approval for Wave 1 is PENDING.
+
+### ORCHESTRATOR — OBJ3 Wave 1 — Milestone decision — 2026-06-02
+Independently verified: cargo fmt clean, clippy -D warnings clean, cargo test 16 passed, trace.ps1 -Strict orphans=0 (SR=30 LLR=35 TC=49); behavior spot-checks: `validate` good=5 PASS/exit 0, bad media_root=FAIL naming path/exit 1; real build green with completion summary + no .part leftover.
+**Wave 1 (core robustness) milestone: MET.** LLR-004/005/006/010/013/015/017/018/019/023/024 Implemented; SR-002/006/009/015 Verified, SR-004/011/012/014/016 Implemented (integration tests owed). System Engineer + Test Engineer SIGNED the OBJ3-Wave-1 row. **FULL OBJ3 gate remains OPEN**: Wave 2 (distribution/setup LLR-025/026/029-035), owed integration tests, SR-013 timeout (LLR-008), SR-010 read-only test, and ≥80% line coverage. **PAUSED for human review of Wave 1.**

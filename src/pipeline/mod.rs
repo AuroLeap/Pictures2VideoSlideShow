@@ -14,8 +14,12 @@ use crate::ffmpeg::FfmpegEncoder;
 use crate::image::FrameRenderer;
 use crate::media::{Album, MediaFile, MediaType};
 use crate::util::ensure_dir_exists;
+use crate::util::estimate::{
+    estimate_output_bytes, human_bytes, is_oversize, OVERSIZE_THRESHOLD_BYTES,
+};
 use crate::video::VideoFrameReader;
 use source::{FrameSource, ImageFrameSource, VideoFrameSource};
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -23,12 +27,50 @@ use std::time::Instant;
 /// Soft cap on in-flight frame bytes for image render batches.
 const RANGE_MEMORY_BUDGET: usize = 64 * 1024 * 1024;
 
+/// One input that could not be turned into frames, with the reason.
+// Implements: LLR-017, SR-014
+#[derive(Debug, Clone)]
+pub struct SkippedInput {
+    pub path: PathBuf,
+    pub reason: String,
+}
+
+/// One successfully written output and its final on-disk size.
+// Implements: LLR-023, LLR-024, SR-004
+#[derive(Debug, Clone)]
+pub struct WrittenOutput {
+    pub path: PathBuf,
+    pub size_bytes: u64,
+}
+
+/// Aggregated result of a build, used to drive the completion summary and the
+/// process exit status.
+// Implements: LLR-017, LLR-023, LLR-024, SR-004, SR-014
+#[derive(Debug, Default)]
+pub struct BuildSummary {
+    pub written: Vec<WrittenOutput>,
+    pub skipped: Vec<SkippedInput>,
+}
+
+impl BuildSummary {
+    /// Final outputs whose size exceeds the ~3.5 GB FAT32 threshold.
+    // Implements: LLR-013, SR-009
+    pub fn oversize_outputs(&self) -> Vec<&WrittenOutput> {
+        self.written
+            .iter()
+            .filter(|o| is_oversize(o.size_bytes))
+            .collect()
+    }
+}
+
 pub struct FrameGenerationPipeline {
     album: Album,
     outputs: Vec<OutputDef>,
     #[allow(dead_code)]
     processing: ProcessingConfig,
     output_dir: PathBuf,
+    /// Inputs skipped across all outputs (deduped by path) for the summary.
+    skipped: RefCell<Vec<SkippedInput>>,
 }
 
 impl FrameGenerationPipeline {
@@ -43,29 +85,84 @@ impl FrameGenerationPipeline {
             outputs,
             processing,
             output_dir,
+            skipped: RefCell::new(Vec::new()),
         }
     }
 
-    pub async fn execute(&self) -> Result<()> {
+    /// Run every output definition, returning a [`BuildSummary`] of written
+    /// files and skipped inputs. The directory check names the exact path on
+    /// failure (LLR-019).
+    // Implements: LLR-017, LLR-023, LLR-024, SR-004, SR-014
+    pub async fn execute(&self) -> Result<BuildSummary> {
         ensure_dir_exists(&self.output_dir)?;
 
         let media: Vec<_> = self.album.media_files.iter().collect();
 
+        let mut written = Vec::new();
         for output_def in &self.outputs {
-            self.encode_output(output_def, &media)?;
+            if let Some(out) = self.encode_output(output_def, &media)? {
+                written.push(out);
+            }
         }
 
-        Ok(())
+        Ok(BuildSummary {
+            written,
+            skipped: self.skipped.borrow().clone(),
+        })
     }
 
-    fn encode_output(&self, output_def: &OutputDef, media: &[&MediaFile]) -> Result<()> {
+    /// Record a skipped input once (deduped by path) for the summary.
+    // Implements: LLR-017, SR-014
+    fn record_skip(&self, path: &std::path::Path, reason: String) {
+        let mut skips = self.skipped.borrow_mut();
+        if !skips.iter().any(|s| s.path == path) {
+            skips.push(SkippedInput {
+                path: path.to_path_buf(),
+                reason,
+            });
+        }
+    }
+
+    /// Pre-run oversize warning for this output, using the documented duration
+    /// formula (sum of clip durations minus transition overlaps).
+    // Implements: LLR-013, SR-009
+    fn warn_if_estimated_oversize(&self, output_def: &OutputDef, media: &[&MediaFile]) {
+        let fade = output_def.fade_time_secs.max(0.0) as f64;
+        let transitions = media.len().saturating_sub(1) as f64;
+        let raw: f64 = media
+            .iter()
+            .map(|m| match m.file_type {
+                MediaType::Image => output_def.pic_display_time_secs as f64,
+                MediaType::Video => m.duration_secs.unwrap_or(0.0) as f64,
+            })
+            .sum();
+        let duration = (raw - transitions * fade).max(0.0);
+        let est = estimate_output_bytes(duration, output_def.quality_crf);
+        if is_oversize(est) {
+            log::warn!(
+                "Output '{}' estimated at ~{} (> {} FAT32 limit); consider splitting, fewer/shorter clips, or a higher CRF",
+                output_def.name,
+                human_bytes(est),
+                human_bytes(OVERSIZE_THRESHOLD_BYTES),
+            );
+        }
+    }
+
+    fn encode_output(
+        &self,
+        output_def: &OutputDef,
+        media: &[&MediaFile],
+    ) -> Result<Option<WrittenOutput>> {
         let out_path = self.output_dir.join(format!("{}.mp4", output_def.name));
+        // Normalize to even dimensions before anything reaches ffmpeg.
+        // Implements: LLR-010, SR-006
+        let (width, height) = output_def.even_dims();
         log::info!(
             "Encoding '{}' -> {} ({}x{} @ {}fps, crf {}, {}-frame crossfade)",
             output_def.name,
             out_path.display(),
-            output_def.width,
-            output_def.height,
+            width,
+            height,
             output_def.fps,
             output_def.quality_crf,
             output_def.fade_frames(),
@@ -73,16 +170,18 @@ impl FrameGenerationPipeline {
 
         if media.is_empty() {
             log::warn!("No media to process for output '{}'", output_def.name);
-            return Ok(());
+            return Ok(None);
         }
 
-        let frame_bytes = (output_def.width * output_def.height * 3) as usize;
+        self.warn_if_estimated_oversize(output_def, media);
+
+        let frame_bytes = (width * height * 3) as usize;
         let batch = (RANGE_MEMORY_BUDGET / frame_bytes.max(1)).max(1) as u32;
 
         let encoder = FfmpegEncoder::start(
             &out_path,
-            output_def.width,
-            output_def.height,
+            width,
+            height,
             output_def.fps,
             output_def.quality_crf,
         )?;
@@ -104,21 +203,20 @@ impl FrameGenerationPipeline {
                     Ok(r) => Box::new(ImageFrameSource::new(r, batch)),
                     Err(e) => {
                         log::warn!("Skipping image {}: {}", item.path.display(), e);
+                        self.record_skip(&item.path, e.to_string());
                         continue;
                     }
                 },
-                MediaType::Video => match VideoFrameReader::open(
-                    &item.path,
-                    output_def.width,
-                    output_def.height,
-                    output_def.fps,
-                ) {
-                    Ok(rd) => Box::new(VideoFrameSource::new(rd)),
-                    Err(e) => {
-                        log::warn!("Skipping video {}: {}", item.path.display(), e);
-                        continue;
+                MediaType::Video => {
+                    match VideoFrameReader::open(&item.path, width, height, output_def.fps) {
+                        Ok(rd) => Box::new(VideoFrameSource::new(rd)),
+                        Err(e) => {
+                            log::warn!("Skipping video {}: {}", item.path.display(), e);
+                            self.record_skip(&item.path, e.to_string());
+                            continue;
+                        }
                     }
-                },
+                }
             };
 
             let clip_frames = mixer.add_clip(src.as_mut())?;
@@ -147,7 +245,11 @@ impl FrameGenerationPipeline {
             emitted as f64 / elapsed.as_secs_f64().max(0.001),
         );
 
-        Ok(())
+        let size_bytes = std::fs::metadata(&out_path).map(|m| m.len()).unwrap_or(0);
+        Ok(Some(WrittenOutput {
+            path: out_path,
+            size_bytes,
+        }))
     }
 }
 
