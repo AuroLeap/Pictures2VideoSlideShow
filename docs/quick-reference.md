@@ -1,24 +1,26 @@
 # Quick Reference — Rust Slideshow Engine
 
-The one-page cheat-sheet for the Rust slideshow engine (`rust-rewrite` branch): the end-user setup, the commands, the recommended frame settings, every config field, and what is **not implemented yet**. This is the **single source of truth** for these facts — other docs link here instead of restating them (per [anti-duplication](process.md#4-traceability--anti-duplication-read-this-carefully)).
+The one-page cheat-sheet for the slideshow engine: the end-user setup, the commands, the recommended frame settings, every config field, and what is **not implemented yet**. This is the **single source of truth** for these facts — other docs link here instead of restating them (per [anti-duplication](process.md#4-traceability--anti-duplication-read-this-carefully)).
 
-The setup path is split by audience (UN-021 / SR-025): **§1 End user** (run a prebuilt `slideshow.exe` — no Rust) and **§1a Developer** (build from source — Rust). Rust appears only in §1a.
+The binary is **`make_video_slideshow.exe`**. The setup path is split by audience (UN-021 / SR-025): **§1 End user** (download and run the prebuilt exe — no Rust, no manual config editing) and **§1a Developer** (build from source — Rust). **§1b** documents the non-interactive/automation path. Rust appears only in §1a.
 
-Back to the [project README](../README.md) · docs index: [docs/README.md](README.md). Engineering acceptance for these facts: SR-001/SR-002, SR-019/SR-020/SR-021, SR-023/SR-024/SR-025 in [system-requirements.csv](requirements/system-requirements.csv).
+Back to the [project README](../README.md) · docs index: [docs/README.md](README.md). Engineering acceptance for these facts: SR-001/SR-002, SR-019/SR-020/SR-021, SR-023/SR-024/SR-025/SR-026/SR-027/SR-028/SR-029/SR-030 in [system-requirements.csv](requirements/system-requirements.csv).
 
 ---
 
-## 1. End-user setup in three steps (no Rust, no compiler)
+## 1. End-user setup — download, run, done (no Rust, no manual config editing)
 
-You do **not** install Rust or compile anything to run this tool. The product is a prebuilt `slideshow.exe` whose only runtime dependency is FFmpeg. No source-code edits required (UN-001 / SR-001; audience split UN-021 / SR-025).
+You do **not** install Rust, compile anything, or hand-edit a config file for a basic run. The product is a single prebuilt `make_video_slideshow.exe`; its only runtime dependency is FFmpeg, which the exe fetches for you on first run (UN-001 / SR-001; audience split UN-021 / SR-025).
 
-1. **Run the setup script** — one script installs/locates FFmpeg and fetches/places the prebuilt `slideshow.exe`, self-elevating to administrator when an action needs it, then reports success or what to fix (UN-020 / SR-024). After it finishes you have `slideshow.exe` and FFmpeg ready — no manual download/copy/PATH steps.
-2. **Edit one config file** — copy the example config (`test_config.toml`), point `media_root` at your photos and `base_dir` at where the MP4s should go. Leave everything else at the recommended defaults (§3). Every field is documented in §4.
-3. **Run one command** — `slideshow.exe --config your_config.toml build`.
+1. **Download `make_video_slideshow.exe`** from the project's [GitHub Releases](../README.md#rust-engine-high-performance-rewrite) (UN-019 / SR-023). It is one self-contained file — no installer, no Rust, no source checkout. FFmpeg is **not** bundled inside it (see step 3).
+2. **Run it.** On first run with **no config**, the exe opens a **GUI wizard** (PowerShell/WinForms) that asks you, in plain terms, for: your **source/media path** (photos & videos), an **intermediary/temp path** (scratch space), **frame defaults** (resolution / fps / quality), and whether you want **one or multiple frames**. When you finish, the wizard writes a valid config for you (UN-022 / SR-026) and the run can proceed — no manual TOML editing. The config is saved **beside the exe** if that folder is writable, otherwise in **`%APPDATA%`**; the chosen location is reported and re-used on later runs (UN-025 / SR-030).
+3. **It gets FFmpeg and builds.** On every startup the exe runs a **dependency self-check** (UN-020 / SR-024). If FFmpeg is missing it **auto-fetches** it to a per-user folder (no administrator/elevation needed) and **integrity-checks** the download against a pinned checksum before ever running it (UN-026 / SR-029). You can also **work offline** or **point it at an FFmpeg you already have** instead of downloading (UN-023 / SR-027). It then produces your slideshow MP4(s).
 
-Always run `validate` before a long `build` (UN-002 / SR-002): `slideshow.exe --config your_config.toml validate`. It checks the **runtime** prerequisites only — FFmpeg present, config valid, media folder readable, output folder writable — before committing to a multi-hour run. It never checks for Rust; Rust is not a runtime prerequisite.
+Subsequent runs reuse the config the wizard wrote, so you can re-run with a single command: `make_video_slideshow.exe --config your_config.toml build` (the config path is the one reported in step 2). Advanced users can hand-edit that config — every field is documented in §4.
 
-> ⚠️ **Availability today (interim path).** The prebuilt `slideshow.exe` on GitHub Releases (SR-023) and the setup script (SR-024) are **planned / TARGET state** — they are not published yet. Until they ship, an end user gets the same result by following the **Developer (build from source)** path in §1a once to produce `slideshow.exe`, *or* by using the feature-complete **PowerShell pipeline** on `main` (see the README [Project Status](../README.md#project-status)). The three steps above are how the end-user path will read once SR-023/SR-024 land; do not assume a release or setup script exists before then.
+Always run `validate` before a long `build` (UN-002 / SR-002): `make_video_slideshow.exe --config your_config.toml validate`. It checks the **runtime** prerequisites only — FFmpeg locatable (on PATH, configured, or auto-fetched), config valid, media folder readable, output folder writable — before committing to a multi-hour run. It never checks for Rust; Rust is not a runtime prerequisite.
+
+> ⚠️ **Availability today (interim path).** The prebuilt `make_video_slideshow.exe` on GitHub Releases (SR-023), the first-run GUI wizard (SR-026), and the FFmpeg auto-fetch/self-check (SR-024/SR-027) are **planned / TARGET state** — not shipped yet. CI is intended to build the exe and publish it to GitHub Releases on tag; the wizard, self-check, and auto-fetch are designed but not yet built. Until they ship, an end user gets the same result by following the **Developer (build from source)** path in §1a once to produce the binary and supplying a config + FFmpeg manually, *or* by using the feature-complete **PowerShell pipeline** on `main` (see the README [Project Status](../README.md#project-status)). The steps above are how the end-user path will read once those SRs land; do not assume a release, wizard, or auto-fetch exists before then.
 
 ---
 
@@ -29,27 +31,33 @@ This section is **for developers only** — the audience that builds the binary 
 Prerequisites: [Rust](https://rustup.rs/) (gives you `cargo`) and [FFmpeg](https://www.ffmpeg.org/download.html) on your `PATH`. Verify: `cargo --version` and `ffmpeg -version` both print a version.
 
 ```bash
-cargo build --release        # produces target/release/slideshow.exe
+cargo build --release        # produces target/release/make_video_slideshow.exe
 ```
 
-The resulting `target/release/slideshow.exe` is the same binary an end user would otherwise get from the setup script (§1) — copy it somewhere on your `PATH` and the §2 commands work as written. Until the prebuilt release ships, this is also the interim way to obtain `slideshow.exe`.
+The resulting `target/release/make_video_slideshow.exe` is the same binary an end user would otherwise download from GitHub Releases (§1) — copy it somewhere on your `PATH` and the §2 commands work as written. Until the prebuilt release ships, this is also the interim way to obtain the binary.
+
+---
+
+## 1b. Automation / non-interactive use (never blocks)
+
+The GUI wizard and the dependency-fetch prompts appear **only in interactive use** (UN-024 / SR-028). When you run the exe non-interactively — passing `--config` / `--non-interactive`, from a scheduled task, script, or CI — it **never shows a GUI and never blocks on input**: it either runs to completion or exits with a clear non-zero status. Supply a ready config (one the wizard wrote earlier, or a hand-edited copy of `test_config.toml` — §4) and a locatable FFmpeg (on PATH, configured in the config, or already auto-fetched), and the run is fully unattended.
 
 ---
 
 ## 2. Commands
 
-These work for both audiences once you have `slideshow.exe` (end user: from the setup script per §1; developer: from `cargo build --release` per §1a).
+These work for both audiences once you have `make_video_slideshow.exe` (end user: downloaded from GitHub Releases per §1; developer: from `cargo build --release` per §1a).
 
 ```bash
-slideshow.exe --config your_config.toml validate        # check config + media root + runtime prerequisites
-slideshow.exe --config your_config.toml stats           # list media found + output definitions
-slideshow.exe --config your_config.toml bench -i 2000   # frame-generation throughput (i = image count to project)
-slideshow.exe --config your_config.toml build           # produce the slideshow MP4(s)
+make_video_slideshow.exe --config your_config.toml validate        # check config + media root + runtime prerequisites
+make_video_slideshow.exe --config your_config.toml stats           # list media found + output definitions
+make_video_slideshow.exe --config your_config.toml bench -i 2000   # frame-generation throughput (i = image count to project)
+make_video_slideshow.exe --config your_config.toml build           # produce the slideshow MP4(s)
 ```
 
-Useful flags: `--input <dir>` and `--output <dir>` override the config paths; `--dry-run` plans without encoding; `-v`/`--verbose` (or `RUST_LOG=debug`) increases logging. `build` accepts `--output <name>` to build only one output definition.
+Useful flags: `--input <dir>` and `--output <dir>` override the config paths; `--dry-run` plans without encoding; `--non-interactive` forces the never-block automation path (§1b); `-v`/`--verbose` (or `RUST_LOG=debug`) increases logging. `build` accepts `--output <name>` to build only one output definition.
 
-> **Developers running from a source checkout** can use `cargo run --release -- --config your_config.toml <command>` instead of invoking the built `slideshow.exe` directly — it is the same engine. `--release` is strongly recommended for `build`/`bench` (10-15x faster than debug).
+> **Developers running from a source checkout** can use `cargo run --release -- --config your_config.toml <command>` instead of invoking the built `make_video_slideshow.exe` directly — it is the same engine. `--release` is strongly recommended for `build`/`bench` (10-15x faster than debug).
 
 ---
 
@@ -63,7 +71,7 @@ This is the only copy of the recommended values; the README and constraints sect
 
 ## 4. Config fields (TOML) — unit + default
 
-Every user-facing field, its unit, and its default. The schema is defined in `src/config/mod.rs`; `test_config.toml` is a ready-to-edit example.
+For a basic end-user run you do **not** edit this file by hand — the first-run GUI wizard (§1) collects the basics and writes a valid config for you (UN-022 / SR-026). This table is for **advanced users and automation** who want to locate, inspect, back up, or hand-edit that config (it is written beside the exe or in `%APPDATA%` per §1 / SR-030), and for the non-interactive path (§1b). Every user-facing field, its unit, and its default is below. The schema is defined in `src/config/mod.rs`; `test_config.toml` is a ready-to-edit example.
 
 ### `[input]`
 | Field | Unit / type | Default | Meaning |

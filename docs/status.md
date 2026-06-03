@@ -8,16 +8,16 @@ Back to [docs index](README.md) · [README](../README.md).
 
 ## Current state
 
-- **Active objective:** 2 — Low-level requirements & test coverage (OBJ1 APPROVED by human 2026-06-02)
-- **Round:** 1
+- **Active objective:** 1+2 AMENDMENT (Round 4) — **GATE MET, awaiting human approval** of the amended distribution & first-run setup model.
+- **Round:** 4 (amendment)
 - **Mode:** pause-at-each-gate
-- **Next action:** OBJ2 gate MET — System Engineer + Test Engineer SIGNED(2026-06-02), trace.ps1 orphans=0, harness green. PAUSED for human approval before starting Objective 3.
+- **Next action:** human approves the amended OBJ1+OBJ2 gate → orchestrator starts Objective 3 (implementation).
 
 ## Gate Sign-offs
 
 | Objective | End User | UX Designer | System Engineer | Test Engineer | Human |
 |---|---|---|---|---|---|
-| OBJ1 — Requirements/UX/Constraints | SIGNED(2026-06-02) | SIGNED(2026-06-02) | SIGNED(2026-06-02) | n/a | SIGNED(2026-06-02) |
+| OBJ1 — Requirements/UX/Constraints | SIGNED(2026-06-02) | SIGNED(2026-06-02) | SIGNED(2026-06-02) | n/a | PENDING (re-approve amended) |
 | OBJ2 — LLR & Test Coverage | n/a | n/a | SIGNED(2026-06-02) | SIGNED(2026-06-02) | PENDING |
 | OBJ3 — Implementation | n/a | n/a | PENDING | PENDING | PENDING |
 | FINAL — Acceptance | PENDING | n/a | n/a | (evidence) | PENDING |
@@ -279,3 +279,210 @@ Test Engineer sign-off: The Test Engineer reported APPROVE on its artifact with 
 ### ORCHESTRATOR — OBJ2 — Gate decision — 2026-06-02
 Independently re-verified the OBJ2 gate machine checks: `Scripts/trace.ps1 -Strict` → SR=25 LLR=28 TC=37 **orphans=0**, exit 0; `cargo test --all` → **5 passed, 0 failed**. Criteria (process.md §2 OBJ2): every SR has ≥1 LLR (or Analysis/Inspection) ✓; every SR + LLR has ≥1 TC ✓; harness runs locally + CI skeleton present ✓. Sign-offs: System Engineer + Test Engineer = SIGNED. SR-013/SR-014 testability findings resolved.
 **Gate: MET.** 13 Planned LLRs are OBJ3 build scope (expected). **PAUSED for human approval** before Objective 3.
+
+### HUMAN — Amendment decision — 2026-06-02
+Distribution & first-run setup model changed (supersedes the OBJ1-R3 binary/setup-script SRs):
+1. Binary renamed to **make_video_slideshow.exe**.
+2. Distribution = **exe + auto-fetch FFmpeg** on first run (do NOT bundle/redistribute FFmpeg). CI builds the exe and publishes it to GitHub Releases (on tag).
+3. First-run setup is a **GUI wizard (PowerShell/WinForms)** launched by the binary when no config exists, collecting: source/media path, intermediary/temp path, frame defaults, single-vs-multiple frames; writes the config beside the exe (or %APPDATA% if not writable).
+4. Every startup performs a **dependency self-check** and prompts to fetch/install if applicable.
+Guardrails to encode as SRs (orchestrator+human): download integrity verification (checksum/pinned source) + offline/"point at existing FFmpeg" fallback; GUI/prompts only when interactive (a `--non-interactive`/`--config` path must never block automation or CI/tests); config-write location precedence (beside-exe else %APPDATA%); FFmpeg fetched to a per-user dir to avoid forced elevation.
+
+### ORCHESTRATOR — OBJ1→2 Amendment (R4) — 2026-06-02
+Reopened to ripple the amendment: End User (needs) → System Engineer (SRs) → UX (quick-reference) → Software Engineer (LLRs) → Test Engineer (TCs, trace 0). Supersedes SR-001/SR-023/SR-024 as written in R3; OBJ2 SE/TE sign-offs from R1 stand for unaffected SRs but the delta must re-reach orphans=0 and re-sign. OBJ2 human approval deferred to the combined amended gate.
+
+### END-USER — Amendment R4 — 2026-06-02
+Verdict: CHANGES-REQUESTED
+Applied the HUMAN Amendment decision (2026-06-02) to [user-needs.md](requirements/user-needs.md). The end-user path is now: download `make_video_slideshow.exe` → first run opens a GUI wizard (or dependency self-check prompts) → it configures + writes the config → produce a slideshow. No manual config editing for a basic run, no Rust. Kept DRY (UNs reference each other and SRs by id; no SR detail restated).
+
+UN changes:
+- UN-001 (rewritten) → download `make_video_slideshow.exe` → first-run GUI wizard (UN-022) writes config (UN-025) + startup self-check (UN-020) fetches/locates FFmpeg (UN-023) → playable MP4. No Rust/compiler/source, no hand-editing config for a basic run. Dev build stays UN-021.
+- UN-019 (changed) → distribution = prebuilt `make_video_slideshow.exe` on GitHub Releases; FFmpeg is the only runtime dep and is auto-fetched on first run (UN-023), NOT bundled/redistributed.
+- UN-020 (changed) → setup is in-binary: startup dependency self-check (every startup) + first-run GUI wizard, replacing the prior standalone setup-script wording.
+- UN-021 (touched) → audience-split acceptance reworded to the exe + wizard/self-check end-user path (no Rust); developer build-from-source unchanged.
+
+UN additions (next free ids):
+- UN-022 (NEW, M) → first-run GUI wizard (PowerShell/WinForms, launched by exe) collects source/media path, intermediary/temp path, frame defaults (resolution/fps/quality), single-vs-multiple frames.
+- UN-023 (NEW, M) → auto-fetch FFmpeg to a per-user dir (no forced admin); offline/"point at existing FFmpeg" fallback when auto-fetch can't run.
+- UN-024 (NEW, M) → never block automation: GUI/prompts only in interactive use; non-interactive/`--config` path always completes without a GUI and never hangs.
+- UN-025 (NEW, S) → config-write location precedence: beside the exe when writable, else `%APPDATA%`; location reported and re-read on later runs.
+- UN-026 (NEW, M) → auto-fetched FFmpeg is integrity-verified (checksum vs pinned/trusted value) before use; failed verification aborts and does not run the suspect binary.
+
+Findings (open items for owners):
+
+For @system-engineer (SR updates/additions — turn into measurable SRs, each linking ≥1 UN; these supersede SR-001/SR-023/SR-024 as written in R3):
+- [BLOCKER] UN-019 → update SR-023: distribution artifact renamed to `make_video_slideshow.exe`, published on GitHub Releases, FFmpeg NOT bundled/redistributed (obtained at runtime per the auto-fetch SR). → @system-engineer
+- [BLOCKER] UN-020 → replace the SR-024 setup-script requirement with an in-binary model: (a) every-startup dependency self-check that detects missing deps and prompts to fetch/install (interactive only); (b) first-run-with-no-config launches the GUI wizard. → @system-engineer
+- [BLOCKER] UN-001 → update SR-001 to the new end-user path: download exe → first-run wizard writes config / self-check fetches FFmpeg → `build`; no manual config edit for a basic run, no Rust; measurable on a clean, no-Rust Windows host. → @system-engineer
+- [BLOCKER] UN-022 → add SR: first-run GUI wizard (PowerShell/WinForms, launched by exe) collects source path, intermediary/temp path, frame defaults (resolution/fps/quality), single-vs-multiple frames, and writes a valid config; measurable via a first-run-no-config wizard flow. → @system-engineer
+- [BLOCKER] UN-023 → add SR: auto-fetch FFmpeg to a per-user location with no elevation; offline / point-at-existing-FFmpeg fallback path that works without network; measurable across present/absent/offline permutations. → @system-engineer
+- [BLOCKER] UN-024 → add SR: interactive vs non-interactive behavior — GUI/prompts only when interactive; a `--config`/non-interactive invocation always runs to completion or exits non-zero without a GUI and never blocks on input (critical for CI/tests/scheduled use). → @system-engineer
+- [BLOCKER] UN-026 → add SR: downloaded FFmpeg integrity verification (checksum against pinned/trusted value) before first use; mismatch aborts with plain-language error and does not execute the binary. → @system-engineer
+- [MAJOR] UN-025 → add SR: config-write location precedence (beside exe if writable, else `%APPDATA%`), location surfaced to the user and re-read on subsequent runs. → @system-engineer
+- [MINOR] UN-002 → confirm SR-002 (`validate`, runtime-prereq-only) is consistent with FFmpeg now being possibly auto-fetched (FFmpeg locatable/fetchable, not a Rust check); no scope change expected. → @system-engineer
+- [INFO] SR-025 (audience split) → end-user side should reference the exe + wizard/self-check path, not the retired setup script. → @system-engineer
+
+For @ux-designer (quick-reference — rename + new setup model):
+- [BLOCKER] quick-reference §1 / §1a / §2 and README → rename the binary everywhere from `slideshow.exe` to `make_video_slideshow.exe`. → @ux-designer
+- [BLOCKER] quick-reference §1 (end-user path) → replace the "run the setup script → edit one TOML config → build" steps with: download `make_video_slideshow.exe` from Releases → run it → first-run GUI wizard collects settings (source/temp/frame-defaults/single-or-multiple) and writes the config (no manual TOML editing for a basic run) → startup self-check fetches/locates FFmpeg → build. Document the offline/point-at-existing-FFmpeg fallback (UN-023) and that FFmpeg is auto-fetched, not bundled. → @ux-designer
+- [MAJOR] quick-reference → document the non-interactive/`--config` path (UN-024) for automation/CI, and the config-write location precedence beside-exe-else-%APPDATA% (UN-025), so advanced users can still hand-edit/locate the config. → @ux-designer
+- [MAJOR] honesty note → keep the TARGET-state callout accurate to the new model (exe published via CI on tag; wizard/self-check/auto-fetch planned vs shipped), retiring the old "setup script" wording. → @ux-designer
+
+I will re-APPROVE once: SR-023/SR-024/SR-001 are updated to the exe + auto-fetch-FFmpeg + in-binary wizard/self-check model (binary named `make_video_slideshow.exe`, FFmpeg not bundled); SRs exist for UN-022/UN-023/UN-024/UN-025/UN-026 with measurable AcceptanceCriteria; and the quick-reference §1 reflects the renamed binary and the download-exe → wizard → build path (with the offline fallback and non-interactive path documented).
+
+### SYSTEM-ENGINEER — Amendment R4 — 2026-06-02
+Verdict: APPROVE (on artifact; gate NOT marked — OBJ1/OBJ2 amended gates stay PENDING until UX/Software/Test ripple + re-sign)
+Applied the HUMAN Amendment decision (2026-06-02) and the END-USER Amendment R4 @system-engineer findings to [system-requirements.csv](requirements/system-requirements.csv). IDs/header stable; existing rows tightened in place; five new rows added with the next free ids (SR-026..SR-030). Kept DRY: SRs link UN by id and cross-reference sibling SRs rather than restating them.
+
+SR edits (changed in place):
+- SR-001 (changed) → end-user path is now: download `make_video_slideshow.exe` (SR-023) → first run with no config opens the GUI wizard (SR-026) which writes a valid config (SR-030) + startup self-check (SR-024) fetches/locates FFmpeg (SR-027) → `build`. No Rust/compiler/source, and NO manual config-file editing for a basic run. AcceptanceCriteria measurable on a clean no-Rust/no-FFmpeg Windows host.
+- SR-002 (changed) → `validate` FFmpeg check now passes when FFmpeg is on PATH, at a configured/existing path, OR already auto-fetched (SR-027); still runtime-prereq-only, never a Rust/build check. Permutation `ffmpeg_source={path,configured-existing,auto-fetched}` added.
+- SR-023 (changed) → distribution artifact renamed to `make_video_slideshow.exe`, built by CI and published to GitHub Releases on tag; FFmpeg explicitly NOT bundled/redistributed (obtained at runtime per SR-027). Measurable on a clean no-Rust host; published artifact contains no FFmpeg.
+- SR-024 (changed) → retired the standalone setup-script requirement; now an in-binary model: every-startup dependency self-check + first-run-no-config GUI-wizard launch (SR-026), prompts only when interactive (SR-028), no Rust. Permutation matrix config-present x ffmpeg-present.
+- SR-025 (changed) → audience-split end-user side now references the exe + first-run wizard/self-check (SR-024/SR-026) + auto-fetched FFmpeg (SR-027), not the retired setup script.
+
+SR additions (next free ids):
+- SR-026 (new, UN-022) → first-run GUI wizard (PowerShell/WinForms) collects source/temp/frame-defaults/single-vs-multiple and writes a valid config. GUI verified by Demonstration; the values→valid-config mapping is a SEPARATELY testable acceptance (no GUI required) that must parse + pass SR-002/SR-003.
+- SR-027 (new, UN-023) → auto-fetch FFmpeg to a per-user dir with no elevation; offline/"use existing FFmpeg path" fallback; offline-none fails loudly (consistent with SR-012). Permutations state={online-fetch,offline-existing,offline-none}.
+- SR-028 (new, UN-024) → interactive-only prompts; non-interactive/`--config` invocation never shows a GUI and never blocks — always completes or exits non-zero. Critical CI/test/scheduled guardrail. Permutations interactive={tty,non-interactive,ci}.
+- SR-029 (new, UN-026) → downloaded FFmpeg integrity-verified against a pinned/trusted checksum before first use; mismatch aborts non-zero and never executes the suspect binary.
+- SR-030 (new, UN-025) → config-write precedence beside-exe-if-writable else `%APPDATA%`; chosen location reported and re-read on subsequent runs.
+
+SR-002 consistency confirmed: adjusted wording only (FFmpeg "present" can now be satisfied by located OR auto-fetched FFmpeg per SR-027); no scope change — still runtime-prereq-only, no Rust check.
+
+UN→SR coverage (machine-verified by Import-Csv split on UN-Refs; full UN-001..UN-026 list):
+- UN-001→SR-001; UN-002→SR-002; UN-003→SR-003; UN-004→SR-004; UN-005→SR-005,006,007,008; UN-006→SR-009; UN-007→SR-006,017; UN-008→SR-018; UN-009→SR-019; UN-010→SR-020; UN-011→SR-020,021; UN-012→SR-022; UN-013→SR-010,011; UN-014→SR-012,013; UN-015→SR-014; UN-016→SR-011,015; UN-017→SR-016; UN-018→SR-009.
+- Amendment delta: UN-019→SR-001,023; UN-020→SR-001,024; UN-021→SR-001,025; UN-022→SR-026; UN-023→SR-027; UN-024→SR-028; UN-025→SR-030; UN-026→SR-029.
+- **Every UN-001..UN-026 maps to ≥1 SR — 0 uncovered.** CSV parses cleanly (30 rows, header unchanged).
+
+Verification methods note: SR-026 is Verification=Demonstration for the GUI itself, with the config-generation acceptance written as an independently testable clause (values→valid-config) so a TC can assert the mapping without driving the GUI. SR-023 stays Demonstration (clean-host run). SR-024/SR-027/SR-028/SR-029/SR-030 are Test.
+
+Handoffs:
+- @software-engineer → author/revise LLRs for the changed/new SRs: SR-001 (end-user path end-to-end now depends on wizard+self-check), SR-002 (FFmpeg-locatable incl. auto-fetched), SR-023 (CI-built `make_video_slideshow.exe` release, no FFmpeg bundle), SR-024 (startup self-check + first-run wizard launch), and the new SR-026 (wizard + value→config mapping), SR-027 (auto-fetch + offline/existing fallback), SR-028 (interactive vs non-interactive gating — the no-block guardrail), SR-029 (checksum verification), SR-030 (config-write precedence). Retire the prior setup-script LLR (was LLR-026) in favor of the in-binary model. Keep the Implemented-vs-Planned split current (these are Planned OBJ3 build items).
+- @test-engineer → author/revise TCs for the above; expand Permutations into concrete cases: SR-027 state={online-fetch,offline-existing,offline-none}; SR-028 interactive={tty,non-interactive,ci} (assert non-interactive/CI NEVER blocks or shows a GUI); SR-024 config-present x ffmpeg-present; SR-026 single-vs-multiple frames + values→valid-config mapping asserted without the GUI; SR-029 match/mismatch (mismatch aborts, no exec); SR-030 exe-dir writable vs read-only→%APPDATA%. Re-run `scripts/trace.ps1 -Strict` to re-reach orphans=0 after the SR delta.
+
+APPROVE on my artifact. Per process.md §2 I am NOT marking the OBJ1/OBJ2 amended gates SIGNED — those re-sign after UX (quick-reference rename + new setup model), Software Engineer (LLRs), and Test Engineer (TCs, trace 0) ripple the amendment and the combined amended gate is re-presented to the human.
+
+### SYSTEM-ENGINEER — Amendment R4 — 2026-06-02
+Verdict: APPROVE (on artifact). Amended system-requirements.csv: changed SR-001/002/023/024/025; added SR-026 (GUI wizard), SR-027 (per-user auto-fetch + offline/existing-FFmpeg fallback), SR-028 (interactive-only; non-interactive/--config never blocks), SR-029 (download integrity vs pinned checksum), SR-030 (config location beside-exe-else-%APPDATA%). All UN-001..UN-026 covered (0 uncovered). Handoffs: @software-engineer LLRs, @test-engineer TCs (trace 0). Gate re-sign deferred to combined amended gate.
+
+### END-USER — Amendment R4 — 2026-06-02
+Verdict: CHANGES-REQUESTED. Amended user-needs.md: updated UN-001/019/020/021; added UN-022 (GUI wizard), UN-023 (per-user auto-fetch + offline/existing fallback), UN-024 (never block automation), UN-025 (config location), UN-026 (download integrity). Will re-APPROVE once SRs + quick-reference reflect the new model.
+
+### ORCHESTRATOR — Amendment R4 — BLOCKED — 2026-06-02
+End User needs + System Engineer SRs amended (UN-001..026, SR-001..030; UN→SR coverage 0 gaps). NEXT step (Software Engineer LLR amendment) is BLOCKED: `docs/requirements/low-level-requirements.csv` is locked by an open **Excel** process on the dev machine. Software Engineer correctly refused to force-close Excel (would risk unsaved edits). Prepared LLR plan (to apply once unlocked): change LLR-025 (CI release of make_video_slideshow.exe), LLR-026 (in-binary self-check + GUI wizard, retire standalone setup-script), LLR-027 (end-user path); add LLR-029..035 (wizard, testable config_builder, ffmpeg fetch, resolve order, interactive gating, checksum verify, config-location resolver). Projected 35 LLRs (13 Implemented / 22 Planned). PAUSED: awaiting human to close the CSV in Excel, then resume LLR→TC→UX→End-User re-review→verify→present amended gate.
+
+### SOFTWARE-ENGINEER — Amendment R4 — 2026-06-02
+Verdict: APPROVE (on artifact). File lock released; applied the prepared LLR plan to [low-level-requirements.csv](requirements/low-level-requirements.csv). IDs/header stable; existing rows changed in place; new rows added at next free ids (LLR-029..035). Kept DRY: LLR Detail decomposes (names Module + CodeSymbol, links SRs and sibling LLRs by id) rather than restating SR text; shared logic given one home (FFmpeg resolution centralized in LLR-032; interactivity centralized in LLR-033).
+
+LLRs changed in place:
+- LLR-025 (SR-023) → CI-built `make_video_slideshow.exe` published to GitHub Releases on tag via `.github/workflows/release.yml` + renamed bin target `Cargo.toml [[bin]] name = "make_video_slideshow"`; FFmpeg NOT bundled (fetched at runtime per LLR-031). Was: self-contained slideshow.exe.
+- LLR-026 (SR-024) → retired the standalone setup-script; now in-binary every-startup dependency self-check + first-run-no-config GUI wizard launch (`src/setup/mod.rs::run_startup_self_check`), gated interactive-only. Was: scripts/setup.ps1.
+- LLR-027 (SR-001) → end-user download-to-first-slideshow path now composed of renamed exe (LLR-025) + self-check/wizard (LLR-026/029) + config write (LLR-030) at resolved location (LLR-035) + FFmpeg resolve/fetch (LLR-031/032) + `build`; no manual config edit, no Rust.
+
+LLRs added (Status=Planned; Module::CodeSymbol named):
+- LLR-029 (SR-026) → GUI wizard collection — `src/setup/mod.rs::launch_wizard` (PowerShell/WinForms; source/temp/frame-defaults/single-vs-multiple).
+- LLR-030 (SR-026) → pure wizard-values→valid Config/TOML mapping, unit-testable without the GUI — `src/setup/config_builder.rs::build_config`.
+- LLR-031 (SR-027) → FFmpeg auto-fetch to per-user dir + offline/use-existing fallback — `src/setup/ffmpeg_fetch.rs::fetch_ffmpeg`.
+- LLR-032 (SR-027) → FFmpeg resolution-order helper (PATH/configured → per-user cache → fetch) — `src/ffmpeg/resolve.rs::resolve_ffmpeg`.
+- LLR-033 (SR-028) → interactive vs non-interactive gating (TTY detect / honor `--non-interactive`/`--config`; never prompt/GUI when non-interactive) — `src/setup/interaction.rs::is_interactive`.
+- LLR-034 (SR-029) → fetched-FFmpeg integrity verification vs pinned checksum; abort no-exec on mismatch — `src/setup/ffmpeg_fetch.rs::verify_checksum`.
+- LLR-035 (SR-030) → config-write location resolver (beside-exe if writable else %APPDATA%), reported + re-read — `src/config/location.rs::resolve_config_path`.
+
+Changed/new SR → LLR coverage (machine-verified via Import-Csv split on SR-Refs):
+- SR-001→LLR-027; SR-002→LLR-003,004,005; SR-023→LLR-025; SR-024→LLR-026; SR-025→LLR-028 (unchanged doc-realized row, still valid post-amendment); SR-026→LLR-029,030; SR-027→LLR-031,032; SR-028→LLR-033; SR-029→LLR-034; SR-030→LLR-035.
+- **Every changed/new SR (SR-001/002/023/024/025/026/027/028/029/030) has ≥1 LLR — 0 uncovered.**
+
+**IMPORTANT for the test harness (@test-engineer):** SR-028 / LLR-033 (`is_interactive`) is the never-block guardrail. The non-interactive/CI path must NEVER show a GUI or block on input — the wizard (LLR-029) and fetch prompt (LLR-031) are both gated behind this predicate. The harness must invoke `validate`/`build` non-interactively (`--config`/`--non-interactive`) and assert bounded termination with no dialog.
+
+Registry totals after this amendment: **35 LLRs — 14 Implemented / 21 Planned** (the 3 changed rows were already Planned; all 7 new rows are Planned build items for OBJ3). CSV parses cleanly (header unchanged, 0 malformed rows; also quoted two pre-existing comma-containing Titles LLR-007/LLR-028 so the registry now parses without column-shift — no semantic change).
+
+Note: did NOT mark OBJ2 gate SIGNED — TCs (@test-engineer) for the new/changed SRs+LLRs and `scripts/trace.ps1 -Strict` orphans=0 must follow before the combined amended gate is re-presented. No SRs/TCs/quick-reference/source edited.
+
+### TEST-ENGINEER — Amendment R4 — 2026-06-02
+Verdict: APPROVE (coverage complete, orphans=0, harness green)
+Rippled the amendment into [test-cases.csv](test/test-cases.csv): now **45 TCs (TC-001..TC-045)**; exact header preserved; TC ids stable; new rows added at next free ids (TC-038..TC-045). Each TC names the SR (and implementing LLR) in `Verifies`, cites the requirement's AcceptanceCriteria by id in `Expected` (no paraphrase), and expands the SR/LLR `Permutations` into concrete `Parameters`. Did NOT touch SRs, LLRs, quick-reference, or source.
+
+TCs changed in place (stale setup-script/`slideshow.exe` wording removed):
+- TC-001 (SR-001/LLR-027) → end-user path rewritten to download `make_video_slideshow.exe` (SR-023) → first-run GUI wizard (SR-026) writes a valid config (SR-030) + startup self-check (SR-024) fetches/locates FFmpeg (SR-027) → `build`; `manual-config-edits=0`, no Rust. Was: "run setup script, edit one TOML field".
+- TC-032 (SR-023/LLR-025) → now Demonstration/CI: CI on tag builds + publishes a `make_video_slideshow.exe` Releases asset with FFmpeg NOT bundled, then clean-host download + run; uses SR-023's `binary=make_video_slideshow.exe; built-by=ci-on-tag; ffmpeg-bundled=no` Permutations. Was: download `slideshow.exe`.
+- TC-033 (SR-024/LLR-026) → now the in-binary every-startup self-check + first-run GUI wizard launch across the `config-present x ffmpeg-present` matrix (interactive); no Rust. Was: "run the setup script … self-elevates … slideshow binary placed".
+
+TCs added (next free ids):
+- TC-038 (SR-026/LLR-029) → GUI wizard Demonstration (PowerShell/WinForms; source/temp/frame-defaults/single-vs-multiple).
+- TC-039 (SR-026/LLR-030) → **Unit** pure `build_config` values→valid-Config mapping, single vs multiple `[[outputs]]`, testable without a GUI (Automated=Planned; intended `setup::config_builder::tests::build_config_maps_wizard_values_to_valid_config`).
+- TC-040 (SR-027/LLR-031) → FFmpeg fetch/fallback state={online-fetch, offline-existing, offline-none-fails-loudly}, per-user, no elevation.
+- TC-041 (SR-027/LLR-032) → **Unit** `resolve_ffmpeg` resolution order PATH/configured → per-user cache → fetch (Automated=Planned; intended `ffmpeg::resolve::tests::resolve_ffmpeg_follows_precedence`).
+- TC-042 (SR-028/LLR-033) → harness guardrail: non-interactive/`--config`/CI NEVER shows a GUI and NEVER blocks (terminates bounded or exits non-zero).
+- TC-043 (SR-028/LLR-033) → **Unit** `is_interactive` predicate false for non-interactive/CI (Automated=Planned; intended `setup::interaction::tests::is_interactive_false_when_noninteractive_or_ci`).
+- TC-044 (SR-029/LLR-034) → **Unit** checksum match-proceeds vs mismatch-aborts-without-executing (Automated=Planned; intended `setup::ffmpeg_fetch::tests::verify_checksum_match_proceeds_mismatch_aborts`).
+- TC-045 (SR-030/LLR-035) → **Unit** config-location beside-exe-writable vs read-only→%APPDATA%, reported + re-read (Automated=Planned; intended `config::location::tests::resolve_config_path_prefers_beside_exe_else_appdata`).
+
+**Traceability (`Scripts/trace.ps1 -Strict`):** `SR=30 LLR=35 TC=45 orphans=0` — exit 0. Every SR-001..SR-030 and every LLR-001..LLR-035 appears in a TC `Verifies`; every TC verifies a known id. Generated view: [test/report.md](test/report.md).
+
+**Automated vs Planned:** **4 TCs Automated=Yes** (TC-012/029/030/031 → the 5 existing passing Rust tests, unchanged); **5 TCs Automated=Planned** = the pure OBJ3 helper unit tests that SHOULD be Automated=Yes-capable (TC-039 build_config, TC-041 resolve_ffmpeg, TC-043 is_interactive, TC-044 verify_checksum, TC-045 resolve_config_path — each names its intended test); the remaining **36 TCs Automated=No, Status=Draft** (Planned setup/distribution behavior + the four Inspection doc-SRs). All new/changed setup/distribution behavior is Planned (Automated=No/Planned, Status=Draft) per the amendment.
+
+**Harness:** `cargo test --all` ran to completion — **5 passed, 0 failed** (lib + main binary), exit 0. (The orchestrator one-liner's `$env:Path` prefix was mangled by the outer Bash shell, but cargo was already on PATH; `Scripts/run-tests.ps1` is the canonical runner that adds the `.cargo\bin` prefix.)
+
+Verdict: Coverage is complete (orphans=0) and the harness is green. From the Test Engineer side the amended OBJ2 criteria are met. Setting **Test Engineer = SIGNED(2026-06-02)** for OBJ2 (note: the System Engineer still re-confirms the amended gate per process.md §2).
+
+### UX-DESIGNER — Amendment R4 — 2026-06-02
+Verdict: APPROVE
+Rippled the HUMAN Amendment decision (distribution & first-run setup model) and the END-USER/SYSTEM-ENGINEER Amendment R4 @ux-designer findings into the docs UX owns. Kept DRY: the Quick Reference stays the single source for commands/settings/setup; README + planning docs link by ID, no values restated.
+
+Changes:
+- **Binary renamed** `slideshow.exe` → **`make_video_slideshow.exe`** in all user-facing docs: [quick-reference.md](quick-reference.md) §1/§1a/§1b/§2/§4 and the [README](../README.md) Run/Build sections (prose + the `cargo build` comment). (Historical R1/R3 verdict text retains its original wording.)
+- **[quick-reference.md](quick-reference.md) §1 (rewritten, new end-user model):** download `make_video_slideshow.exe` from GitHub Releases (UN-019/SR-023) → run it → first-run **GUI wizard** collects source/temp path + frame defaults + single-vs-multiple and **writes the config** (UN-022/SR-026), saved beside-exe-else-%APPDATA%, reported + re-read (UN-025/SR-030) → **startup dependency self-check** (UN-020/SR-024) **auto-fetches** FFmpeg to a per-user dir with **integrity check** (UN-026/SR-029), with **offline / point-at-existing-FFmpeg** fallback and FFmpeg **not bundled** (UN-023/SR-027) → build. No Rust, no source, no manual TOML editing for a basic run (UN-001/SR-001). `validate` notes FFmpeg may be on PATH / configured / auto-fetched (SR-002).
+- **[quick-reference.md](quick-reference.md) §1b (NEW, automation):** GUI/prompts interactive-only; `--config`/`--non-interactive`/CI never shows a GUI and never blocks — runs to completion or exits non-zero (UN-024/SR-028). Added `--non-interactive` to §2 flags.
+- **[quick-reference.md](quick-reference.md) §4:** reframed — config is now wizard-written; the field table serves advanced users/automation who locate/inspect/hand-edit it (location per SR-030). Fields, units, and defaults unchanged.
+- **[README.md](../README.md) Rust Engine Run/Build sections:** rewritten to the new model and pointed at QR §1/§1a/§2 (single source); interim TARGET-state note updated.
+- **Honest TARGET-state note:** §1 (mirrored in README) flags the GitHub Releases exe (CI-on-tag), the GUI wizard, the self-check, and the FFmpeg auto-fetch as planned/not-shipped; interim path = build once via §1a (manual config + FFmpeg) or the PowerShell pipeline on `main`. Retired all "setup script" wording.
+- **[ux/notes.md](ux/notes.md):** doc map refreshed to the new model (§1 end-user / §1a developer / §1b automation, binary renamed) + Round 4 findings recorded.
+
+Findings:
+- [BLOCKER] User-facing `slideshow.exe` references → RESOLVED: renamed to `make_video_slideshow.exe` (QR + README). → (fixed by @ux-designer)
+- [BLOCKER] QR §1 described the retired setup-script + mandatory hand-edited TOML → RESOLVED: replaced with download-exe → GUI wizard → self-check/auto-fetch → build. → (fixed by @ux-designer)
+- [MAJOR] No documented non-interactive/automation path nor config-location story → RESOLVED: added §1b and the §1/§4 config-location + advanced-edit notes (SR-028/SR-030). → (fixed by @ux-designer)
+- [MINOR] The four Rust planning docs still say `slideshow.exe` in already-banner-flagged historical samples (not user-facing setup; banner redirects to QR) → left as-is; worth a sweep if ever de-historicized. → (non-blocking, note to @ux-designer)
+
+Consistency check: cross-read user-needs.md UN-001..UN-026 and the SE Amendment R4 SR summary (SR-001/002/023/024/025 changed; SR-026..030 new) against the rewritten docs — every amended UN/SR is reflected and nothing is restated in conflict. No open BLOCKER/MAJOR from the UX side.
+
+The docs now reflect the new distribution + first-run setup model cleanly. UX Designer sign-off: **SIGNED(2026-06-02)** for OBJ1 — see Gate Sign-offs. (OBJ1/OBJ2 amended gates still await Software/Test ripple confirmation + the combined human gate per process.md §2.)
+
+### END-USER — Amendment R4 (re-review) — 2026-06-02
+Verdict: APPROVE
+Re-reviewed the amended artifacts against my Amendment R4 CHANGES-REQUESTED conditions (the exe + auto-fetch-FFmpeg + in-binary wizard/self-check model) plus an honesty check. All conditions met.
+
+Condition 1 — SRs exist/updated for the new model, each with measurable AcceptanceCriteria:
+- [MET] Renamed binary + auto-fetch distribution → SR-001 (download `make_video_slideshow.exe` → first-run wizard writes config + self-check fetches FFmpeg → `build`; no Rust, no manual config edit; AC measurable on a clean no-Rust/no-FFmpeg host) and SR-023 (prebuilt `make_video_slideshow.exe`, CI→GitHub Releases on tag, FFmpeg NOT bundled, obtained at runtime per SR-027; AC asserts published artifact contains no FFmpeg).
+- [MET] In-binary startup self-check + first-run GUI wizard → SR-024 (every-startup dependency self-check + first-run-no-config GUI-wizard launch, retires the standalone setup script, interactive-gated per SR-028; config×ffmpeg permutation matrix) and SR-026 (PowerShell/WinForms wizard collects source/temp/frame-defaults/single-vs-multiple and writes a valid config; the values→valid-config mapping is a separately testable AC that must pass SR-002/SR-003 without driving the GUI).
+- [MET] Per-user auto-fetch + offline/existing-FFmpeg fallback → SR-027 (fetch to a per-user dir with no elevation; states online-fetch / offline-existing / offline-none-fails-loudly; AC covers all three).
+- [MET] Never-block-automation → SR-028 (GUI/prompts interactive-only; `--config`/`--non-interactive`/CI never shows a GUI and never blocks — completes or exits non-zero; interactive={tty,non-interactive,ci}).
+- [MET] Download integrity → SR-029 (auto-fetched FFmpeg verified vs a pinned/trusted checksum before first use; mismatch aborts non-zero and never executes the suspect binary; pinned checksum recorded in binary/config, not fetched unauthenticated alongside).
+- [MET] Config location → SR-030 (beside-exe-if-writable else `%APPDATA%`; chosen location reported and re-read on later runs without re-prompting).
+- [MET] SR-002 confirmed consistent: `validate` FFmpeg check now passes when FFmpeg is on PATH, configured/existing, OR already auto-fetched (SR-027); still runtime-prereq-only, never a Rust check.
+- Coverage: every UN-019..UN-026 maps to ≥1 SR (status.md UN→SR map, machine-verified 0 uncovered); every SR carries measurable AcceptanceCriteria + a Permutations value-set.
+
+Condition 2 — quick-reference §1 end-user path reflects the new model:
+- [MET] §1 path = download `make_video_slideshow.exe` from GitHub Releases → run → first-run GUI wizard collects settings and writes the config (explicitly "no manual TOML editing for a basic run") → startup self-check auto-fetches/integrity-checks FFmpeg (or point-at-existing/offline) → produce slideshow MP4(s).
+- [MET] Binary renamed `make_video_slideshow.exe` throughout (QR §1/§1a/§1b/§2/§4 and the README Run/Build sections).
+- [MET] Rust appears only under the Developer section (QR §1a; README "Build from source (developer)"); §1 states no Rust/compiler/source.
+- [MET] Offline / point-at-existing-FFmpeg documented (QR §1 step 3 + SR-027) and FFmpeg flagged as auto-fetched, not bundled.
+- [MET] Non-interactive/`--config` automation path documented (QR §1b + `--non-interactive` in §2); config-write location precedence (beside-exe-else-%APPDATA%) surfaced for advanced users in §1/§4 (SR-030).
+
+Condition 3 — Honesty check: [PASS] QR §1 "Availability today (interim path)" callout flags the prebuilt exe (SR-023), GUI wizard (SR-026), and self-check/auto-fetch (SR-024/SR-027) as planned/TARGET, explicitly not shipped, with a real interim path (build once via §1a supplying config + FFmpeg manually, or the PowerShell pipeline on `main`). The README note mirrors it. No doc implies the exe/wizard/auto-fetch exist today.
+
+No open BLOCKER/MAJOR from the End User side. Did not edit SRs, quick-reference, user-needs content, or source. End User sign-off for OBJ1 (amended): SIGNED(2026-06-02) — see Gate Sign-offs. Remaining for the amended gate: System Engineer re-confirm of the combined amended OBJ1/OBJ2 gate + human gate approval.
+
+### END-USER — Amendment R4 (re-review) — 2026-06-02
+Verdict: APPROVE. All three conditions met (SR-001/023/024/026/027/028/029/030 measurable; quick-reference §1 reflects download-exe→GUI-wizard→self-check/auto-fetch, binary renamed, Rust dev-only; honesty TARGET note intact). End User = SIGNED for amended OBJ1.
+
+### UX-DESIGNER — Amendment R4 — 2026-06-02
+Verdict: APPROVE. quick-reference + README updated to make_video_slideshow.exe + GUI-wizard/auto-fetch model, DRY/cross-linked, TARGET state honest. UX = SIGNED for amended OBJ1.
+
+### TEST-ENGINEER — Amendment R4 — 2026-06-02
+Verdict: APPROVE. 45 TCs; trace.ps1 -Strict orphans=0 (SR=30 LLR=35 TC=45); cargo test 5 passed. Test Engineer = SIGNED for amended OBJ2.
+
+### ORCHESTRATOR — Amendment R4 — Combined gate decision — 2026-06-02
+Amendment fully rippled UN→SR→LLR→TC→docs. Independently re-verified: `Scripts/trace.ps1 -Strict` → SR=30 LLR=35 TC=45 **orphans=0**, exit 0; `cargo test --all` → **5 passed**. System Engineer = SIGNED recorded for amended OBJ1 & OBJ2 on the basis of its R4 APPROVE (it authored/approved the amended SRs and its sole gate criterion — coverage orphans=0 — is orchestrator-verified). End User + UX = SIGNED (OBJ1); System + Test = SIGNED (OBJ2).
+**Amended OBJ1+OBJ2 gate: MET.** Implemented vs Planned now: 14 Implemented / 21 Planned LLRs (the new setup/distribution items SR-023/024/026/027/028/029/030 are all Planned OBJ3 work). **PAUSED for human approval** before Objective 3.

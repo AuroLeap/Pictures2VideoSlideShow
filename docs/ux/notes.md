@@ -10,7 +10,7 @@ Back to [docs index](../README.md) · [project README](../../README.md).
 
 | Topic | Owner doc | Notes |
 |---|---|---|
-| End-user setup (no Rust) vs Developer build-from-source (Rust); commands, recommended frame settings, config fields (unit+default), current gaps | **[quick-reference.md](../quick-reference.md)** | Canonical. §1 = end-user (setup script + prebuilt `slideshow.exe`, no Rust); §1a = developer build (Rust only here). README + all Rust planning docs link here; values appear nowhere else. |
+| End-user setup (no Rust, no manual config edit) vs Developer build-from-source (Rust) vs automation; commands, recommended frame settings, config fields (unit+default), current gaps | **[quick-reference.md](../quick-reference.md)** | Canonical. Binary = `make_video_slideshow.exe`. §1 = end-user (download exe → first-run GUI wizard writes config → startup self-check auto-fetches/locates+integrity-checks FFmpeg → build; no Rust); §1a = developer build (Rust only here); §1b = non-interactive/automation (never blocks). README + all Rust planning docs link here; values appear nowhere else. |
 | Why each frame constraint exists (4 GB FAT32, codec/fps/CRF, audio) | [README → Output Constraints](../../README.md#output-constraints--limitations-digital-picture-frames) | Explains *why*; defers the *what to set* values to the Quick Reference. |
 | Project status / which engine to use | [README → Project Status](../../README.md#project-status) | PowerShell (feature-complete, `main`) vs Rust (fast, `rust-rewrite`). |
 | PowerShell pipeline config + optimization | [README → Configuration Guide / Performance Optimization](../../README.md#configuration-guide) | PowerShell-specific; CRF table now labeled general guidance, defers default to Quick Reference. |
@@ -52,6 +52,28 @@ Human gate feedback reopened OBJ1: end users were being told to install Rust. Ru
 ### Notes
 - The PowerShell pipeline's [Quick Start → Install Dependencies](../../README.md#windows-setup) (`InstallDependencies.ps1`, ImageMagick + FFmpeg) is a *separate engine* and never mentioned Rust — left as-is; it is the cited precedent for the planned Rust setup script (SR-024).
 - SR references in the Quick Reference header updated to include SR-001/SR-002 and SR-023/SR-024/SR-025.
+
+## Findings (Round 4 — distribution & first-run setup model)
+
+The human amendment (status.md, HUMAN — Amendment decision) replaced the standalone setup-script model with: a CI-published exe, a first-run GUI wizard, an in-binary startup dependency self-check, and FFmpeg auto-fetch. Rippled into the docs UX owns (UN-001/019–026, SR-001/023/024/025 changed; SR-026..030 new).
+
+### Done / satisfied
+- **Binary renamed (BLOCKER):** `slideshow.exe` → **`make_video_slideshow.exe`** everywhere in the user-facing docs — Quick Reference §1/§1a/§1b/§2/§4 and the README Run/Build sections. (Historical Round 1/3 verdict blocks in status.md and the Round 1/3 finding text in these notes keep their original wording as a record.)
+- **New end-user §1 (BLOCKER):** rewrote [Quick Reference §1](../quick-reference.md#1-end-user-setup--download-run-done-no-rust-no-manual-config-editing) to *download `make_video_slideshow.exe` from GitHub Releases → run it → first-run GUI wizard collects source/temp/frame-defaults/single-vs-multiple and writes the config (no manual TOML editing) → startup self-check auto-fetches + integrity-checks FFmpeg (or use existing / offline) → build*. No Rust, no source, no hand-editing for a basic run. (UN-001/019/020/022/023/025/026 → SR-001/023/024/026/027/029/030.)
+- **Automation path documented (MAJOR):** new **[§1b](../quick-reference.md#1b-automation--non-interactive-use-never-blocks)** — GUI/prompts only when interactive; `--config`/`--non-interactive`/CI never shows a GUI and never blocks (UN-024 / SR-028). Added `--non-interactive` to the §2 flags.
+- **Config-write precedence & advanced editing (MAJOR):** §1 states the config is written beside the exe if writable else `%APPDATA%`, reported and re-read (UN-025 / SR-030). §4 reframed: the config is now wizard-written; the field table is for advanced users/automation who want to locate/inspect/hand-edit it (fields + units/defaults unchanged).
+- **Offline / existing-FFmpeg fallback + integrity (BLOCKER/part):** §1 step 3 documents auto-fetch to a per-user dir (no elevation), the offline / point-at-existing-FFmpeg fallback, and that the download is integrity-checked before use, and that FFmpeg is **not** bundled (UN-023/026 → SR-027/029). `validate` (§1) now notes FFmpeg may be located on PATH, configured, or auto-fetched (SR-002).
+- **Honest TARGET-state note (MAJOR):** §1 interim callout (mirrored in the README) now flags the exe (CI-published on tag), GUI wizard, self-check, and auto-fetch as planned/not-shipped, with a real interim path (build once via §1a + manual config/FFmpeg, or the PowerShell pipeline on `main`). Retired all "setup script" wording.
+- **README de-duplicated and redirected (DRY / SR-020):** README Run/Build sections describe the new model in one paragraph each and link to the Quick Reference (single source); no command/config/setting values restated. Binary renamed in both the prose and the `cargo build` comment.
+
+### Findings
+- [BLOCKER → fixed by @ux-designer] `slideshow.exe` user-facing references → renamed to `make_video_slideshow.exe` in Quick Reference + README.
+- [BLOCKER → fixed by @ux-designer] §1 still described the retired setup-script + mandatory TOML edit → replaced with the download-exe → wizard → self-check/auto-fetch → build model.
+- [MAJOR → fixed by @ux-designer] No documented automation path or config-location story → added §1b and the §1/§4 config-location + advanced-edit notes.
+- [MINOR] The four Rust planning docs (SPEC/ROADMAP/NEXT_STEPS/PROJECT_SUMMARY) still say `slideshow.exe` in historical/design samples already banner-flagged as superseded by the Quick Reference; left as-is (not user-facing setup, and the banner already redirects). Worth a sweep if those docs are ever de-historicized. → (note to @ux-designer, non-blocking)
+
+### Consistency check
+Cross-checked the new §1 against user-needs.md (UN-001..UN-026) and the SE Amendment R4 SR summary (SR-001/002/023/024/025 changed; SR-026 wizard, SR-027 auto-fetch+offline/existing, SR-028 interactive-only/non-block, SR-029 checksum, SR-030 config location): every UN/SR in the amendment is now reflected in the docs UX owns, with no value or claim restated in conflict. No open BLOCKER/MAJOR from the UX side.
 
 ## Recommendations (not blocking)
 - Consider trimming/merging the four overlapping Rust planning docs (SPEC/ROADMAP/NEXT_STEPS/PROJECT_SUMMARY) into one historical "design notes" doc post-OBJ1; they overlap heavily and are now superseded by the README + Quick Reference. Banners are a stopgap.

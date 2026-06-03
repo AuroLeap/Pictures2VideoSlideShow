@@ -191,19 +191,19 @@ A native Rust reimplementation that renders frames directly in-process (no per-f
 
 ### Run it (end user) — no Rust required
 
-End users do **not** install Rust or compile anything. The product is a prebuilt `slideshow.exe` whose only runtime dependency is FFmpeg; a setup script installs/locates FFmpeg and places the binary for you. The end-user steps (run setup script → edit one config → one `build`), the commands, the example TOML config, and **every config field with its unit and default** live in one place: the **[Quick Reference §1](docs/quick-reference.md#1-end-user-setup-in-three-steps-no-rust-no-compiler)** (single source of truth; UN-001/UN-019/UN-020 → SR-001/SR-023/SR-024). `test_config.toml` in the repo root is a ready-to-edit starting point.
+End users do **not** install Rust, compile anything, or hand-edit a config file. The product is a single prebuilt **`make_video_slideshow.exe`** downloaded from GitHub Releases: on first run with no config it opens a **GUI wizard** that collects your media/temp paths and frame defaults and writes the config for you, and a **startup dependency self-check** auto-fetches (and integrity-checks) FFmpeg to a per-user folder — or lets you point at an existing FFmpeg / work offline. FFmpeg is **not** bundled in the download. The full end-user steps, the automation/non-interactive path, the commands, the example TOML config, and **every config field with its unit and default** live in one place: the **[Quick Reference §1](docs/quick-reference.md#1-end-user-setup--download-run-done-no-rust-no-manual-config-editing)** (single source of truth; UN-001/UN-019/UN-020/UN-022/UN-023 → SR-001/SR-023/SR-024/SR-026/SR-027). `test_config.toml` in the repo root is a ready-to-edit starting point for advanced/automated use.
 
-> The prebuilt release and setup script are **planned / TARGET state** (SR-023/SR-024) and not published yet. Until they ship, see the [Quick Reference §1 interim note](docs/quick-reference.md#1-end-user-setup-in-three-steps-no-rust-no-compiler) — build the binary once via the Developer path below, or use the PowerShell pipeline on `main`.
+> The prebuilt release, the first-run GUI wizard, and the FFmpeg auto-fetch/self-check are **planned / TARGET state** (SR-023/SR-024/SR-026/SR-027) and not shipped yet (CI is intended to build and publish the exe on tag). Until they ship, see the [Quick Reference §1 interim note](docs/quick-reference.md#1-end-user-setup--download-run-done-no-rust-no-manual-config-editing) — build the binary once via the Developer path below (supplying a config + FFmpeg manually), or use the PowerShell pipeline on `main`.
 
 ### Build from source (developer) — Rust
 
 This is the **developer** path (audience split UN-021 / SR-025); end users skip it. Prerequisites: [Rust](https://rustup.rs/) (cargo) and FFmpeg on `PATH`. Full steps are in the **[Quick Reference §1a](docs/quick-reference.md#1a-developer-setup--build-from-source-rust)**. In short:
 
 ```bash
-cargo build --release        # produces target/release/slideshow.exe
+cargo build --release        # produces target/release/make_video_slideshow.exe
 ```
 
-Then run the built binary (or `cargo run --release -- ...`) per [Quick Reference §2](docs/quick-reference.md#2-commands) — e.g. `slideshow.exe --config test_config.toml validate` then `build`.
+Then run the built binary (or `cargo run --release -- ...`) per [Quick Reference §2](docs/quick-reference.md#2-commands) — e.g. `make_video_slideshow.exe --config test_config.toml validate` then `build`.
 
 ### Not yet implemented in the Rust engine
 
