@@ -20,7 +20,7 @@ Back to [docs index](README.md) · [README](../README.md).
 |---|---|---|---|---|---|
 | OBJ1 — Requirements/UX/Constraints | SIGNED(2026-06-02) | SIGNED(2026-06-02) | SIGNED(2026-06-02) | n/a | SIGNED(2026-06-02, amended) |
 | OBJ2 — LLR & Test Coverage | n/a | n/a | SIGNED(2026-06-02) | SIGNED(2026-06-02) | SIGNED(2026-06-02) |
-| OBJ3 — Implementation (Wave 1, hardened) | n/a | n/a | SIGNED(2026-06-02, hardening) | SIGNED(2026-06-02, hardening) | PENDING |
+| OBJ3 — Implementation (Wave 1, hardened) | n/a | n/a | SIGNED(2026-06-03, coverage-close) | SIGNED(2026-06-03, coverage-close) | PENDING | <!-- Wave-1 fully closed: line coverage 84.27% ≥80%; SR-004 & SR-014 Verified; SR-014 all-skipped bug fixed (empty-MP4-on-exit-0) + all-bad test un-ignored/passing. FULL OBJ3 gate still requires Wave 2 (distribution/setup LLR-025/026/029-035). -->|
 | FINAL — Acceptance | PENDING | n/a | n/a | (evidence) | PENDING |
 
 ---
@@ -696,3 +696,75 @@ Judged the owed integration tests + the SR-013 inactivity timeout against the SR
 
 ### ORCHESTRATOR — OBJ3 Wave 1 Hardening — Decision — 2026-06-03
 Independently re-verified: fmt clean, clippy -D warnings clean, cargo test green (lib 17, bin 17, integration 9), trace.ps1 -Strict orphans=0 (SR=30 LLR=35 TC=49). SE set SR Status (SR-002/010/011/015/016 Verified; SR-004/013/014 Implemented) and ACCEPTED 69.77% coverage for the milestone with the 80% gate kept binding for full OBJ3 (plan recorded). **Wave 1 (hardened) milestone: MET.** SE+TE SIGNED; **PAUSED for human**. FULL OBJ3 gate remains OPEN (Wave 2 + ≥80% coverage + owed SR-004/014 integration asserts).
+
+### TEST-ENGINEER — OBJ3 Coverage Close — 2026-06-03
+Verdict: APPROVE (≥80% line-coverage gate now MET; harness green; orphans=0). One BLOCKER finding raised against SR-014 (does not block this coverage milestone; tracked).
+
+**Objective:** raise line coverage to ≥80% and add the owed SR-004 / SR-014 integration assertions, closing the gap from the Wave-1 plan above. Coverage measured with `cargo llvm-cov --all --summary-only` (cargo via `%USERPROFILE%\.cargo\bin`).
+
+**New integration tests added (under `tests/`, self-cleaning, deterministic, FFmpeg/ffprobe on PATH):**
+- `tests/video_build.rs::build_decodes_video_and_emits_summary_sr004` — synthesizes a tiny video (`ffmpeg testsrc=duration=1:size=320x240:rate=10 -pix_fmt yuv420p`) alongside a synthesized PNG, runs the built binary's `build` over the mixed album, and asserts a non-empty output MP4 plus the SR-004 completion summary (block header, `Outputs written: 1`, the written path **with a size**, and the `Inputs skipped: 0` count line). This is the ONLY test that actually decodes a video → exercises `VideoFrameReader::open`/`read_frame` (`src/video`). (TC-008, TC-009, TC-050.)
+- `tests/skip_and_continue.rs::build_skips_bad_and_continues_exit_zero_sr014` — some-bad: a header-valid-but-truncated PNG (scans OK via `image_dimensions`, fails full `image::open` at render) next to a valid PNG; asserts the bad file is skipped, the summary states `Inputs skipped: 1` naming the file + reason, the valid file still produces a non-empty output, and the run exits **zero**. (TC-022, TC-023 some-bad leg.)
+- `tests/skip_and_continue.rs::build_all_bad_exits_nonzero_no_outputs_sr014` — all-bad: only corrupt inputs; asserts non-zero exit + the plain "no outputs produced" message + no MP4. **`#[ignore]`d** pending the SR-014 fix below (see BLOCKER). (TC-023 all-bad leg, authored.)
+- `tests/cli_arms.rs::stats_reports_album_statistics`, `bench_renders_and_reports_throughput` — drive the built binary's `stats` and `bench --images 1`; assert exit 0 + key output blocks. Covers `main.rs::run_stats`/`run_bench`. (TC-051.)
+
+**Coverage: 70.57% → 84.41% line** (TOTAL, `cargo llvm-cov --all`). ≥80% gate **MET**. (Pre-existing 69.77% figure in the Wave-1 block reflected the state before `util/progress.rs` was removed; the measured pre-close baseline this round was 70.57%.) Per-module highlights (line %):
+- `video/mod.rs`: **0% → 76.74%** (was the biggest gap; the new video-decode test covers `open`/`read_frame`/`read_full`; remaining misses are the spawn-failure / non-zero-exit / Drop-kill error arms, not deterministically inducible with FFmpeg present).
+- `main.rs`: **35.58% → 75.46%** (validate/build/stats/bench arms + exit paths now driven via the binary by the integration crates; remaining misses are the verbose-logging + arg-override branches).
+- `media/mod.rs`: **66.02% → 93.20%** (video probe + scan exercised by the video test).
+- `pipeline/mod.rs`: 85.22% → **93.60%**; `pipeline/source.rs`: 75% → **100%** (video frame source now driven).
+- Lowest remaining: `util/file_utils.rs` **47.17%** — uncovered lines are the real ENOSPC/disk-full mapping (TC-024/TC-048 Manual; cannot induce ENOSPC deterministically in CI); `preflight.rs` 78.72% and `config/mod.rs` 70% (unreachable error/format arms). None block the 80% TOTAL gate.
+
+**TC updates (docs/test/test-cases.csv only; orphans stay 0):**
+- TC-008 (SR-004): Draft/No → **Verified/Yes** → `video_build::build_decodes_video_and_emits_summary_sr004` (summary-block + progress-reported leg).
+- TC-009 (SR-004;SR-009): Draft/No → **Verified/Yes** → same test (summary lists output path + size + skipped count; the no-output failure leg cross-refs TC-023).
+- TC-022 (SR-014): Draft/No → **Verified/Yes** → `skip_and_continue::build_skips_bad_and_continues_exit_zero_sr014`.
+- TC-023 (SR-014): Draft/No → **Implemented/Partial** — some-bad leg Verified (above); all-bad leg authored (`build_all_bad_exits_nonzero_no_outputs_sr014`) but `#[ignore]`d pending the SR-014 fix (BLOCKER). Flip to Verified + unignore once fixed.
+- TC-050 (SR-004;SR-005;SR-017) **NEW**: video decode path integration → `video_build::build_decodes_video_and_emits_summary_sr004`. Verified/Yes.
+- TC-051 (SR-004) **NEW**: CLI `stats`/`bench` arms → `cli_arms::{stats_reports_album_statistics,bench_renders_and_reports_throughput}`. Verified/Yes.
+
+**For the System Engineer:** SR-004 and SR-014 now HAVE integration assertions (previously owed). **SR-004** is fully integration-backed (completion summary: per-output path + size + skipped-count line, success path) → eligible to flip to **Verified**. **SR-014** is integration-backed for the some-bad path (skip logged with reason, skipped-count surfaced, exit-zero-with-valid-output); the all-bad exit-semantics leg is BLOCKED by the defect below → recommend SR-014 stays **Implemented** until the fix lands, then flip to Verified (unignore the all-bad test).
+
+**Findings:**
+- [BLOCKER] SR-014 / `pipeline::encode_output` → When EVERY input for an output is skipped, the pipeline still opens an FFmpeg encoder, feeds it 0 frames, and `finish()` succeeds — producing an empty `<name>.mp4` that is pushed into `summary.written`. So `build` exits **zero** and prints `Outputs written: 1`, instead of the SR-014-mandated non-zero exit + plain "no outputs produced" message. (Reproduced: all-bad run logs both skips, "Finished 'show': 2 items, **0 frames**", then `Outputs written: 1  …show.mp4 (0.0 MB)`.) → Treat a 0-frame encode as not-written (skip it / return `Ok(None)` from `encode_output`, or fail the output) so `summary.written` is empty and `main::run_build` emits the existing "no outputs produced" branch. → @software-engineer. The owed test is written and `#[ignore]`d with a pointer here; unignore + flip TC-023 all-bad / SR-014 to Verified once fixed.
+
+**Harness results (re-run this round):**
+- `cargo fmt --all --check` → clean, exit 0.
+- `cargo clippy --all-targets` → Finished, 0 warnings, exit 0.
+- `cargo test --all` → lib **17 passed**; bin **17 passed**; `atomic_finalize` **4**; `cli_arms` **2**; `skip_and_continue` **1 passed, 1 ignored**; `source_readonly` **1**; `validate_build_checks` **4**; `video_build` **1**; 0 failed; all exit 0.
+- `pwsh -File Scripts/trace.ps1 -Strict` → `SR=30 LLR=35 TC=51 orphans=0`, exit 0.
+- `cargo llvm-cov --all --summary-only` → **TOTAL line 84.41%** (≥80% gate MET).
+
+**Verdict:** Coverage-close objective **MET** — line coverage **70.57% → 84.41% (≥80%)**, the owed SR-004/SR-014 integration assertions are in place, trace orphans=0, harness fully green. One BLOCKER (SR-014 all-skipped exit semantics) is raised to @software-engineer with the test pre-written and ignored; it does not block this coverage milestone but must be fixed before SR-014 → Verified and full OBJ3 closure.
+
+### SYSTEM-ENGINEER — OBJ3 Coverage Close — 2026-06-03
+Verdict: APPROVE (final review of the Wave-1 coverage-close increment; the SR-014 BLOCKER is FIXED and confirmed; Wave-1 now fully closed. FULL OBJ3 gate stays OPEN — Wave 2 owed.)
+
+Final gatekeeper review of the coverage-close increment: confirmed the SR-014 fix is real, set SR-004/SR-014 → Verified, flipped TC-023 → Automated=Yes/Verified, and re-ran the fast harness + trace myself. Edited only `system-requirements.csv` (Status column), `test-cases.csv` (TC-023 row), and this status log. Did NOT touch LLRs, source, tests, or the quick-reference.
+
+**SR-014 fix confirmation (spot-checked in source — the fix is real):**
+- `src/pipeline/mod.rs::encode_output` now tracks `produced_total` (source frames contributed across all clips). The guard at the top of the function's tail — `if produced_total == 0 { log::warn!("No frames produced …"); drop(mixer); return Ok(None); }` — drops the `CrossfadeMixer` (hence the `FfmpegEncoder`) **without calling `finish()`**, so the encoder is never finalized; its `Drop` kills ffmpeg and removes the `.part`, and the function returns `Ok(None)` so the output is NOT pushed into `summary.written`. `main::run_build` then sees an empty `written` set and emits the SR-014 "no outputs produced" branch with a non-zero exit. The previous defect (open encoder + 0 frames + `finish()` success → empty `<name>.mp4`, `Outputs written: 1`, exit 0) is gone.
+- Tests assert the full SR-014 matrix (`tests/skip_and_continue.rs`):
+  - **some-bad** `build_skips_bad_and_continues_exit_zero_sr014` → exit **zero**, summary states `Inputs skipped: 1` naming `bad.png` + reason, the valid file still produces a non-empty `show.mp4`. ✓
+  - **all-bad** `build_all_bad_exits_nonzero_no_outputs_sr014` → exit **non-zero**, the plain "no outputs produced" message (stdout or stderr), and **no** `show.mp4`. **Un-ignored** (no `#[ignore]` attribute remains in any file under `tests/` — grep-confirmed) and **PASSES**. ✓
+- SR-004 completion-summary contents are now integration-asserted by `tests/video_build.rs::build_decodes_video_and_emits_summary_sr004` (`=== Build Summary ===` block, `Outputs written: 1`, the written path **with a size** in parentheses, and the `Inputs skipped: 0` count line) — the previously-owed assertions are in place.
+
+**SR Status changes (Status column only; CSV re-parses to 30 rows, header stable):**
+- **SR-004** build progress + completion summary: Implemented → **Verified** (completion-summary contents — per-output path + size + skipped-count line — now asserted by `tests/video_build.rs`; TC-008/009/050).
+- **SR-014** corrupt/unsupported skip-and-continue: Implemented → **Verified** (skip-count surfaced + some-bad exit-zero + all-bad non-zero "no outputs produced" all asserted by `tests/skip_and_continue.rs`; TC-022/023). The all-skipped BLOCKER is resolved.
+- No other SR Status touched.
+
+**TC change (test-cases.csv only; orphans stay 0):**
+- **TC-023** SR-014 some-bad vs all-bad: Partial/Implemented → **Yes/Verified** — both legs now pass; `Expected` updated to cite both `build_skips_bad_and_continues_exit_zero_sr014` and `build_all_bad_exits_nonzero_no_outputs_sr014`; the stale `#[ignore]`/BLOCKER wording replaced with the fix note. Automated=Yes/Verified count: 16 → **17** (the new SR-004/050/051 + skip TCs from the close round already flipped; TC-023 is the last owed flip).
+
+**Harness + trace (re-run by me; cargo via `%USERPROFILE%\.cargo\bin`):**
+- `cargo test --all` → lib **17 passed**; bin **17 passed**; `atomic_finalize` **4**; `cli_arms` **2**; `skip_and_continue` **2 passed, 0 ignored** (the all-bad test passes); `source_readonly` **1**; `validate_build_checks` **4**; `video_build` **1**; doc-tests **0**; **0 failed, 0 ignored** across every crate; all exit 0.
+- `pwsh -File Scripts/trace.ps1 -Strict` → `SR=30 LLR=35 TC=51 orphans=0`, exit 0 (report regenerated).
+- Coverage: trusting the orchestrator's re-measured `cargo llvm-cov --all` = **84.27% line ≥ 80% → MET** (consistent with the Test Engineer's 84.41% from the close round; either way comfortably over the 80% threshold).
+
+**Decision:** The SR-014 all-skipped defect is **genuinely fixed** (verified in `pipeline::encode_output` and by the now-passing, un-ignored all-bad integration test), SR-004 and SR-014 are **Verified** with integration backing, coverage **84.27% ≥ 80% (MET)**, harness fully green (0 failed, **0 ignored**), trace orphans=0. **Wave-1 is now FULLY CLOSED** (coverage ≥80%, SR-004/SR-014 Verified, SR-014 bug fixed). Re-affirming **System Engineer = SIGNED(2026-06-03, coverage-close)** for the `OBJ3 — Implementation (Wave 1, hardened)` gate row; Test Engineer = SIGNED (its OBJ3 Coverage Close APPROVE above, with the one BLOCKER it raised now resolved); Human = PENDING.
+
+**EXPLICIT: the FULL OBJ3 gate still requires Wave 2.** Wave-1 closure does NOT close OBJ3. Still owed before full OBJ3 closure (process.md §2): **Wave 2 — distribution/setup** (SR-023/024/026/027/028/029/030; LLR-025/026/029–035; TC-032/033/038–045 — GUI wizard, FFmpeg auto-fetch/resolve/checksum, interactive gating, config-location resolver, CI release of `make_video_slideshow.exe`), plus the honestly-Manual demonstrations (end-to-end SR-013 inactivity timeout, real-ENOSPC SR-015). Human gate approval for the closed Wave-1 milestone is PENDING.
+
+### ORCHESTRATOR — OBJ3 Coverage Close — Decision — 2026-06-03
+Coverage gap closed. Removed dead `util/progress.rs`; Test Engineer added video-path + CLI + SR-004/SR-014 integration tests (coverage 69.77% → 84.27% line, ≥80% MET) and surfaced a real SR-014 defect (all-skipped build emitted an empty MP4 + exit 0). Orchestrator fixed it in pipeline (`produced_total==0` → drop encoder w/o finalize, no empty output); un-ignored the all-bad test (now passing). System Engineer flipped SR-004/SR-014 → Verified, TC-023 → Verified, signed. Independently green: fmt/clippy clean, cargo test (lib 17 + bin 17 + integration 14, 0 ignored), trace orphans=0. **Wave 1 fully closed.** FULL OBJ3 gate still requires Wave 2 (distribution/setup). PAUSED for human.

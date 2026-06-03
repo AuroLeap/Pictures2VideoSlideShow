@@ -101,16 +101,15 @@ _Generated 2026-06-03. Public items by module:_
   - `pub fn ensure_writable_dir(path: &Path) -> Result<()>`
   - `pub fn disk_full_error(path: &Path) -> SlideshowError`
   - `pub fn is_disk_full(err: &io::Error) -> bool`
-- **src/util/progress.rs**
-  - `pub struct ProgressTracker`
-  - `pub fn new(total: usize) -> Self`
-  - `pub fn increment(&mut self)`
-  - `pub fn set(&mut self, current: usize)`
 - **src/video/mod.rs**
   - `pub struct VideoFrameReader`
   - `pub fn open(path: &Path, width: u32, height: u32, fps: u32) -> Result<Self>`
   - `pub fn read_frame(&mut self) -> Result<Option<Vec<u8>>>`
 <!-- END GENERATED MODULE MAP -->
+
+
+
+
 
 
 

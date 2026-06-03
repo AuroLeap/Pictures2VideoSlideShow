@@ -192,6 +192,10 @@ impl FrameGenerationPipeline {
 
         let total = media.len();
         let start = Instant::now();
+        // Source frames contributed across all clips for this output; if zero
+        // (every input skipped/unusable) we must NOT finalize an empty file.
+        // Implements: LLR-017, SR-014
+        let mut produced_total: u64 = 0;
 
         for (idx, item) in media.iter().enumerate() {
             let name = item
@@ -222,6 +226,7 @@ impl FrameGenerationPipeline {
             };
 
             let clip_frames = mixer.add_clip(src.as_mut())?;
+            produced_total += clip_frames;
             log::info!(
                 "  [{}/{}] {} {} ({} frames)",
                 idx + 1,
@@ -233,6 +238,19 @@ impl FrameGenerationPipeline {
                 name,
                 clip_frames,
             );
+        }
+
+        // All inputs were skipped/unusable for this output: abort without
+        // finalizing so no complete-looking (empty) `<name>.mp4` is produced.
+        // Dropping the mixer drops the encoder, whose Drop removes the `.part`.
+        // Implements: LLR-017, SR-014
+        if produced_total == 0 {
+            log::warn!(
+                "No frames produced for '{}' (every input skipped/unusable); no output written",
+                output_def.name
+            );
+            drop(mixer);
+            return Ok(None);
         }
 
         let emitted = mixer.finish()?;
