@@ -59,9 +59,9 @@ pub fn write_png(path: &Path, w: u32, h: u32, rgb: [u8; 3]) {
 /// Absolute path to the integration-test target binary built by cargo.
 ///
 /// Cargo sets `CARGO_BIN_EXE_<name>` for integration tests; the bin is
-/// `slideshow` (see Cargo.toml `[[bin]] name = "slideshow"`).
+/// `make_video_slideshow` (see Cargo.toml `[[bin]] name = "make_video_slideshow"`).
 pub fn slideshow_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_slideshow"))
+    PathBuf::from(env!("CARGO_BIN_EXE_make_video_slideshow"))
 }
 
 /// Write a minimal valid TOML config with a single output definition.

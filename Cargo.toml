@@ -23,7 +23,7 @@ regex = "1.10"
 lazy_static = "1.4"
 
 [[bin]]
-name = "slideshow"
+name = "make_video_slideshow"
 path = "src/main.rs"
 
 [profile.release]

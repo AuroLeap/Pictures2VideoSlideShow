@@ -1,0 +1,47 @@
+name: Release
+
+# Build the prebuilt Windows binary and publish it to GitHub Releases on a tag.
+# Implements: SR-023, LLR-025 (FFmpeg is NOT bundled — fetched at runtime per SR-027).
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build/publish (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write # required to create/upload the GitHub Release
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binary
+        run: cargo build --release --bin make_video_slideshow
+
+      - name: Stage artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/release/make_video_slideshow.exe dist/
+          # Ship the license alongside the binary.
+          if (Test-Path LICENSE) { Copy-Item LICENSE dist/ }
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          # On a tag push the tag is inferred; workflow_dispatch supplies it explicitly.
+          tag_name: ${{ github.event.inputs.tag }}
+          files: |
+            dist/make_video_slideshow.exe
+            dist/LICENSE
+          fail_on_unmatched_files: true
+          generate_release_notes: true
