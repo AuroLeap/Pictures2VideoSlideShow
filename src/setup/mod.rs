@@ -39,15 +39,19 @@ pub fn run_first_run_setup(path: &Path) -> Result<()> {
 pub fn ensure_ffmpeg(config: &Config, non_interactive: bool) -> Result<PathBuf> {
     let cache = ffmpeg_fetch::cache_dir();
     if let Some(p) = resolve::resolve(config.processing.ffmpeg_path.as_deref(), &cache) {
+        prepend_dir_to_path(&p);
         return Ok(p);
     }
 
     if interaction::is_interactive(non_interactive) {
-        // Interactive: attempt the (pin-gated) auto-fetch into the per-user cache.
+        // Interactive: attempt the (pin-gated, integrity-verified) auto-fetch.
         match ffmpeg_fetch::fetch_ffmpeg(&cache) {
-            Ok(p) => Ok(p),
+            Ok(p) => {
+                prepend_dir_to_path(&p);
+                Ok(p)
+            }
             Err(e) => Err(SlideshowError::Processing(format!(
-                "FFmpeg not found and auto-fetch is unavailable: {} \
+                "FFmpeg not found and auto-fetch failed: {} \
                  Install FFmpeg and add it to PATH, or set `ffmpeg_path` in your config.",
                 e
             ))),
@@ -58,5 +62,23 @@ pub fn ensure_ffmpeg(config: &Config, non_interactive: bool) -> Result<PathBuf> 
              config. (Auto-fetch only runs in an interactive session.)"
                 .into(),
         ))
+    }
+}
+
+/// Prepend the resolved FFmpeg's directory to this process's `PATH` so the
+/// literal `ffmpeg`/`ffprobe` spawns in the encoder, video reader, and prober
+/// pick up a configured or auto-fetched build (not just one already on PATH).
+/// A bare `ffmpeg` (already-on-PATH source) has no parent dir and is skipped.
+// Implements: SR-027
+fn prepend_dir_to_path(ffmpeg: &Path) {
+    let Some(dir) = ffmpeg.parent() else { return };
+    if dir.as_os_str().is_empty() {
+        return; // resolved from PATH already
+    }
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let mut paths = vec![dir.to_path_buf()];
+    paths.extend(std::env::split_paths(&current));
+    if let Ok(joined) = std::env::join_paths(paths) {
+        std::env::set_var("PATH", joined);
     }
 }

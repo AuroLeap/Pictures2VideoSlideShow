@@ -8,14 +8,16 @@ use crate::error::{Result, SlideshowError};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
-/// Pinned FFmpeg download. These MUST be set to a specific, verified release
-/// (URL + its SHA-256) before auto-fetch is enabled. They are intentionally
-/// empty so the build never downloads or runs an *unverified* binary: until a
-/// maintainer pins a checksum, [`fetch_ffmpeg`] refuses and the user falls back
-/// to an existing FFmpeg (PATH or `ffmpeg_path` in config).
+/// Pinned FFmpeg download: a specific, immutable GitHub release asset (the
+/// gyan.dev Windows "essentials" build linked from ffmpeg.org) and its verified
+/// SHA-256 (computed from the downloaded asset). The integrity gate in
+/// [`fetch_ffmpeg`] runs BEFORE extraction so a tampered/corrupt download is
+/// never extracted or run. To bump the version: change both constants together
+/// (URL is immutable per tag; recompute the SHA-256 of the new asset).
 // Implements: SR-027, SR-029
-const PINNED_URL: &str = "";
-const PINNED_SHA256: &str = "";
+const PINNED_URL: &str =
+    "https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip";
+const PINNED_SHA256: &str = "fa7d4d7e795db0e2503f49f105f46ed5852386f0cfdd819899be3b65ebde24fc";
 
 /// Per-user cache directory for an auto-fetched FFmpeg (no admin/elevation):
 /// `%LOCALAPPDATA%\make_video_slideshow\ffmpeg` on Windows.
@@ -82,13 +84,76 @@ pub fn fetch_ffmpeg(dest_dir: &Path) -> Result<PathBuf> {
             e
         ))
     })?;
-    let archive = dest_dir.join("ffmpeg-download.bin");
+
+    // Reuse an already-fetched copy.
+    let target = dest_dir.join("ffmpeg.exe");
+    if target.exists() {
+        return Ok(target);
+    }
+
+    let archive = dest_dir.join("ffmpeg-pinned.zip");
     download_via_powershell(PINNED_URL, &archive)?;
-    // Integrity gate BEFORE any use/extraction.
+    // Integrity gate BEFORE extraction: a mismatch aborts, leaving nothing run.
     verify_checksum(&archive, PINNED_SHA256)?;
-    // NOTE: extraction of the verified archive to `ffmpeg.exe` is performed here
-    // once a real archive layout is pinned; returns the extracted binary path.
-    Ok(dest_dir.join("ffmpeg.exe"))
+
+    let extract_dir = dest_dir.join("extracted");
+    let _ = std::fs::remove_dir_all(&extract_dir);
+    extract_zip_via_powershell(&archive, &extract_dir)?;
+
+    // The build nests the binaries under `<pkg>/bin/`; locate them robustly.
+    let ffmpeg_src = find_file(&extract_dir, "ffmpeg.exe").ok_or_else(|| {
+        SlideshowError::Processing("ffmpeg.exe not found in the downloaded archive".into())
+    })?;
+    std::fs::copy(&ffmpeg_src, &target).map_err(|e| {
+        SlideshowError::Processing(format!("cannot place ffmpeg.exe in cache: {}", e))
+    })?;
+    // ffprobe travels with ffmpeg; place it beside so the cache dir is complete.
+    if let Some(ffprobe_src) = find_file(&extract_dir, "ffprobe.exe") {
+        let _ = std::fs::copy(&ffprobe_src, dest_dir.join("ffprobe.exe"));
+    }
+
+    // Best-effort cleanup of the archive + extraction scratch.
+    let _ = std::fs::remove_file(&archive);
+    let _ = std::fs::remove_dir_all(&extract_dir);
+
+    Ok(target)
+}
+
+/// Extract a zip via PowerShell `Expand-Archive` (no extra runtime deps).
+// Implements: LLR-031, SR-027
+fn extract_zip_via_powershell(archive: &Path, dest: &Path) -> Result<()> {
+    let status = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command"])
+        .arg(format!(
+            "Expand-Archive -LiteralPath '{}' -DestinationPath '{}' -Force",
+            archive.display(),
+            dest.display()
+        ))
+        .status()
+        .map_err(|e| SlideshowError::Processing(format!("failed to launch extractor: {}", e)))?;
+    if !status.success() {
+        return Err(SlideshowError::Processing(
+            "failed to extract the downloaded FFmpeg archive".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Recursively find a file by (case-insensitive) name under `root`.
+fn find_file(root: &Path, name: &str) -> Option<PathBuf> {
+    for entry in walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        if entry.file_type().is_file() {
+            if let Some(f) = entry.file_name().to_str() {
+                if f.eq_ignore_ascii_case(name) {
+                    return Some(entry.into_path());
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Download `url` to `dest` using PowerShell's `Invoke-WebRequest` (TLS via the
@@ -144,11 +209,19 @@ mod tests {
         let _ = std::fs::remove_file(&f);
     }
 
-    // Verifies: SR-027 — auto-fetch refuses (no unverified binary) until pinned.
+    // Verifies: SR-027/SR-029 — a verified pin is configured (https URL + 64-hex
+    // sha256) so auto-fetch is enabled and integrity-gated. (The actual network
+    // download is exercised by the #[ignore]d integration test.)
     #[test]
-    fn fetch_refuses_without_pinned_release_sr027() {
-        let dir = std::env::temp_dir().join("mvs_fetch_disabled");
-        let err = fetch_ffmpeg(&dir).unwrap_err();
-        assert!(err.to_string().contains("not yet enabled"));
+    fn pinned_release_is_configured_sr027() {
+        assert!(
+            PINNED_URL.starts_with("https://"),
+            "pinned URL must be https"
+        );
+        assert_eq!(PINNED_SHA256.len(), 64, "sha256 is 64 hex chars");
+        assert!(
+            PINNED_SHA256.chars().all(|c| c.is_ascii_hexdigit()),
+            "sha256 is hex"
+        );
     }
 }
