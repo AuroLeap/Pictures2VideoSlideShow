@@ -8,11 +8,12 @@ Back to [docs index](README.md) · [README](../README.md).
 
 ## Current state
 
-- **Active objective:** 3 — Implementation, **Wave 1 HARDENING** (Wave-1 milestone signed; now closing the owed gaps). Wave 2 still deferred.
+- **Active objective:** 3 — Implementation. **Wave 2 is code-complete** (release CI + rename, ffmpeg resolve/fetch/checksum, config-location, interaction-gating, and now the first-run GUI wizard). System Engineer signed the Wave-2c slice. FULL OBJ3 implementation closure is **one reconciliation round short**.
 - **Round:** 2
 - **Mode:** pause-at-each-gate
-- **Hardening scope:** (a) SR-013 timeout — LLR-008 configurable FFmpeg inactivity timeout; (b) integration tests for the Implemented-but-manual SRs: atomic finalize (SR-011/015), validate/build checks against temp dirs (SR-002/016), source read-only hash (SR-010); (c) measure line coverage (cargo-llvm-cov) and record the number. Disk-full end-to-end stays Demonstration/Manual (can't reliably induce ENOSPC in CI) — helper remains unit-tested.
-- **Next action:** Software Engineer implements SR-013 timeout → Test Engineer adds integration tests + measures coverage → System Engineer reviews/sets SR Status → pause for human.
+- **Open before full OBJ3 closure (Test Engineer):** reconcile SR status vs reality — flip SR-022 → Verified and SR-007 → Verified/Implemented (their TC-029/030 and TC-012 are already Automated=Yes/Verified); and either automate or honestly reclassify SR-005, SR-008, SR-012, SR-017, SR-018 (their only TCs are System/Integration ffprobe/FFmpeg-absent cases left Automated=No, or a Unit TC not yet wired to a passing test). After that, "all test-verifiable SRs Verified" holds and full OBJ3 is signable.
+- **Deferred to FINAL human-acceptance gate (Demonstration/Manual):** SR-001 (clean-machine end-to-end), SR-013 (end-to-end inactivity timeout), SR-015 (real ENOSPC), SR-023 (Releases publish on tag), SR-024 (interactive self-check/wizard launch), SR-026 (GUI dialog), SR-027 (online auto-fetch), plus the doc Inspections SR-003/019/020/021/025.
+- **Next action:** Test Engineer runs the SR reconciliation round → System Engineer re-reviews and (if clean) signs FULL OBJ3 closure → human reviews → FINAL end-user acceptance on real media.
 
 ## Gate Sign-offs
 
@@ -21,7 +22,9 @@ Back to [docs index](README.md) · [README](../README.md).
 | OBJ1 — Requirements/UX/Constraints | SIGNED(2026-06-02) | SIGNED(2026-06-02) | SIGNED(2026-06-02) | n/a | SIGNED(2026-06-02, amended) |
 | OBJ2 — LLR & Test Coverage | n/a | n/a | SIGNED(2026-06-02) | SIGNED(2026-06-02) | SIGNED(2026-06-02) |
 | OBJ3 — Implementation (Wave 1, hardened) | n/a | n/a | SIGNED(2026-06-03, coverage-close) | SIGNED(2026-06-03, coverage-close) | PENDING | <!-- Wave-1 fully closed: line coverage 84.27% ≥80%; SR-004 & SR-014 Verified; SR-014 all-skipped bug fixed (empty-MP4-on-exit-0) + all-bad test un-ignored/passing. FULL OBJ3 gate still requires Wave 2 (distribution/setup LLR-025/026/029-035). -->|
-| FINAL — Acceptance | PENDING | n/a | n/a | (evidence) | PENDING |
+| OBJ3 — Wave 2c (first-run GUI wizard) | n/a | n/a | SIGNED(2026-06-03, Wave 2c) | SIGNED(2026-06-03, Wave 2c) | PENDING | <!-- GUI-wizard slice sound: SR-026 Implemented (mapping Verified by unit tests, GUI Demonstration), SR-001 Implemented, LLR-029/030 Implemented, TC-039 Verified; coverage 80.49% ≥80%; harness green; orphans=0. -->|
+| OBJ3 — Implementation (FULL closure) | n/a | n/a | PENDING | PENDING | PENDING | <!-- NOT signable yet: registry reconciliation owed — SR-007/SR-022 status lags behind their passing Automated=Yes tests; SR-005/008/012/017/018 owe an automated test or honest Demonstration reclassification before "all test-verifiable SRs Verified" holds. One Test-Engineer round. Then the Demonstration/Manual set (SR-001/013/015/023/024/026/027 + doc Inspections) goes to the human at FINAL. -->|
+| FINAL — Acceptance | PENDING | n/a | n/a | (evidence) | PENDING | <!-- Not yet ready-for-human: full OBJ3 implementation closure is one reconciliation round short. Once SR-005/007/008/012/017/018/022 are reconciled, End User runs make_video_slideshow.exe + the first-run wizard on real media; the GUI dialog (SR-026), Releases publish on tag (SR-023), and online FFmpeg auto-fetch (SR-027) are Demonstration items the human verifies. -->|
 
 ---
 
@@ -806,3 +809,73 @@ No BLOCKER/MAJOR findings. Nothing routed to @software-engineer.
 
 ### ORCHESTRATOR — OBJ3 Wave 2b — Decision — 2026-06-03
 Independent System Engineer security review passed (no findings): checksum verified BEFORE use; fetch refuses without a pinned URL+SHA256 (no unverified binary ever runs); --non-interactive/no-TTY never prompts or hangs; resolve order configured->PATH->cache with no-network offline fallback; config beside-exe-else-%APPDATA%. Statuses: SR-028/029/030 Verified, SR-027 Implemented (auto-fetch Demonstration, pin-gated); LLR-031..035 Implemented; TC-041/043/044/045 Verified. Verified: cargo test 68 passed, clippy/fmt clean, trace orphans=0. SE+TE SIGNED Wave 2b. Remaining Wave 2: GUI wizard (SR-026). Auto-fetch online + Releases publish remain Demonstration. PAUSED for human.
+
+### SYSTEM-ENGINEER — OBJ3 Wave 2c + OBJ3 determination — 2026-06-03
+Verdict: APPROVE the committed Wave-2c slice (first-run GUI wizard, SR-026). Wave 2 is now code-complete. BUT the FULL OBJ3 implementation gate is **NOT yet signable** — a registry-vs-reality reconciliation gap remains (see the SR table + the BLOCKER below). Edited only `system-requirements.csv` (SR-001/SR-026 Status), `low-level-requirements.csv` (LLR-029/030 Status+Detail), `test-cases.csv` (TC-039 row), and this log. Did NOT touch source, tests, or the quick-reference.
+
+**Wave-2c review (verified against source, not claim-trusted):**
+1. **Never-block intact with optional `--config` (SR-028): CONFIRMED.** `main.rs` resolves the config path (explicit `--config` else `config::location::resolve_config_path`) and launches the wizard ONLY inside `if setup::interaction::should_prompt(config_path.exists(), non_interactive, stdin().is_terminal())` — i.e. no-config AND not `--non-interactive` AND a real TTY. `should_prompt = !config_present && !non_interactive && stdin_is_tty` (pure, unit-tested both true and across all three false cases). A no-config + `--non-interactive`/no-TTY run skips the wizard entirely and falls through to `Config::from_file`, which errors cleanly (orchestrator confirmed: exit 1, clean config error, no GUI, no hang). The `--non-interactive` flag is documented as the automation/CI/scheduled guardrail. No code path opens a dialog or reads stdin in a non-interactive session.
+2. **Valid config (SR-026/LLR-030): CONFIRMED + unit-tested.** `src/setup/config_builder.rs::build_config` is pure: even dims (`(w & !1).max(2)`), `frames.max(1)` → one `[[outputs]]` per frame (named `frame` when single, `frame-1..N` when multiple), sensible defaults for fields the wizard does not ask about; `ProcessingConfig.ffmpeg_timeout_secs` defaults to 120. `to_toml` serializes and the config round-trips through `toml::from_str`. `parse_wizard_output` reads the wizard `key=value` stdout, ignores unknown lines, and errors on missing required keys (`source`/`output_dir`/`width`/`height`/`fps`/`quality_crf`/`pic_display_time_secs`) with no silent default. Five passing unit tests: `single_frame_builds_one_output_even_dims_sr026` (1441→1440), `multiple_frames_build_distinct_outputs_sr026`, `build_config_roundtrips_through_toml_sr026`, `parse_wizard_output_reads_keys_sr026`, `parse_wizard_output_errors_on_missing_required_sr026`.
+3. **GUI is Demonstration (LLR-029): CONFIRMED + honestly isolated.** `src/setup/wizard.rs::run_wizard` stages the embedded WinForms script (`wizard.ps1`, `include_str!`) to a temp file, runs it under `powershell -STA`, captures `key=value` stdout, and delegates ALL mapping to the testable `config_builder` — the launcher contains no business logic. It needs a desktop session, is reached only via `should_prompt` (never in automation), and is correctly classified Demonstration-only (coverage shows `wizard.rs` 0% lines, as expected for Demonstration GUI code).
+
+No BLOCKER/MAJOR findings against the Wave-2c slice itself. Nothing routed to @software-engineer for the slice.
+
+**Status changes I made (Wave-2c):**
+- SR-026 first-run GUI wizard: Draft → **Implemented** (the value→config mapping is Verified by unit tests; the GUI dialog is Demonstration — Verification stays Demonstration).
+- SR-001 end-user download-to-first-slideshow path: Draft → **Implemented** (the end-user path is now code-complete — exe + first-run wizard + startup self-check + build all exist; remains Demonstration end-to-end on a clean host, so Verification stays Demonstration).
+- LLR-030 (pure wizard→config mapping): Planned → **Implemented** (unit-tested).
+- LLR-029 (GUI wizard collection): Planned → **Implemented** (GUI Demonstration; symbol now `wizard.rs::run_wizard`/`wizard.ps1`).
+- TC-039 (build_config/parse mapping): Planned/Draft → **Automated=Yes / Verified**, naming the five `setup::config_builder::tests::*_sr026` tests. TC-038 (GUI dialog) stays **Demonstration / No / Draft**.
+
+**Coverage (re-measured by me, `cargo llvm-cov --all --summary-only`, cargo via `%USERPROFILE%\.cargo\bin`):** TOTAL **line 80.49%** (1758 lines, 343 missed; region 81.39%, function 79.25%). ≥80% threshold **MET**. (Down from 84.27% because the new Demonstration-only `setup/mod.rs::run_first_run_setup`/`ensure_ffmpeg` and `wizard.rs` GUI launcher are not exercised by unit tests — expected for Demonstration code; the testable mapping `config_builder.rs` is 92.34% line.)
+
+**Harness + trace (re-run by me):**
+- `cargo test --all` → lib **32 passed**; bin **32 passed**; `atomic_finalize` 4; `cli_arms` 2; `skip_and_continue` 2; `source_readonly` 1; `validate_build_checks` 4; `video_build` 1; doc-tests 0; **0 failed, 0 ignored** across every crate; all exit 0.
+- `cargo clippy --all-targets -- -D warnings` → Finished, **0 warnings**, exit 0.
+- `cargo fmt --all -- --check` → clean, exit 0.
+- `pwsh -File Scripts/trace.ps1 -Strict` → `SR=30 LLR=35 TC=51 orphans=0`, exit 0 (report regenerated).
+
+**OVERALL OBJ3 STATUS — per-SR Verification method + Status (after my Wave-2c edits):**
+
+| SR | Verification | Status | Classification |
+|---|---|---|---|
+| SR-001 | Demonstration | Implemented | (a) Demonstration — clean-machine end-to-end (Final gate) |
+| SR-002 | Test | Verified | done |
+| SR-003 | Inspection | Draft | (b) owes Inspection sign-off (doc SR; human/UX at Final) |
+| SR-004 | Test | Verified | done |
+| SR-005 | Test | Draft | **(b) owes status reconciliation** — only System ffprobe TC-010 (Automated=No) |
+| SR-006 | Test | Verified | done |
+| SR-007 | Test | Draft | **(b) status lag** — TC-012 IS Automated=Yes/Verified (fps frame-math); ffprobe leg TC-013 Demonstration |
+| SR-008 | Test | Draft | **(b) owes test/reconciliation** — only System ffprobe TC-014 (Automated=No) |
+| SR-009 | Test | Verified | done |
+| SR-010 | Test | Verified | done |
+| SR-011 | Test | Verified | done |
+| SR-012 | Test | Implemented | **(b) owes integration test** — TC-019 (FFmpeg-absent) Automated=No |
+| SR-013 | Test | Implemented | (a) Demonstration — end-to-end inactivity timeout (decision unit-tested; abort Manual) |
+| SR-014 | Test | Verified | done |
+| SR-015 | Test | Verified | done (real-ENOSPC end-to-end is Manual — (a)) |
+| SR-016 | Test | Verified | done |
+| SR-017 | Test | Draft | **(b) owes test/reconciliation** — only System TC-027 (Automated=No) |
+| SR-018 | Test | Draft | **(b) owes test reconciliation** — TC-028 Unit but Automated=No |
+| SR-019 | Inspection | Draft | (b) owes Inspection sign-off (doc SR; Final) |
+| SR-020 | Inspection | Draft | (b) owes Inspection sign-off (doc SR; Final) |
+| SR-021 | Inspection | Draft | (b) owes Inspection sign-off (doc SR; Final) |
+| SR-022 | Analysis | Draft | **(b) status lag** — TC-029/030 ARE Automated=Yes/Verified (determinism); should be Verified |
+| SR-023 | Demonstration | Implemented | (a) Demonstration — Releases publish on tag + clean-host run (Final) |
+| SR-024 | Test | Draft | (a)/(b) self-check + first-run-wizard launch is interactive Demonstration; non-interactive leg covered by SR-028 |
+| SR-025 | Inspection | Draft | (b) owes Inspection sign-off (doc SR; Final) |
+| SR-026 | Demonstration | Implemented | (a) GUI dialog Demonstration; value→config mapping Verified by unit tests |
+| SR-027 | Test | Implemented | (a) auto-fetch online download Demonstration; resolve/offline-fallback unit-tested |
+| SR-028 | Test | Verified | done |
+| SR-029 | Test | Verified | done |
+| SR-030 | Test | Verified | done |
+
+**Determination — OBJ3 implementation is NOT yet complete (one round short).** Wave 2 is *code*-complete and the Wave-2c slice is sound, but the gate criteria (process.md §2: every TC Automated=Yes/Manual-with-justification AND all test-verifiable SR/LLR Status=Verified) are **not** met because of a registry reconciliation gap:
+- **[BLOCKER] SR status lag — SR-007 and SR-022 already have passing Automated=Yes/Verified tests (TC-012; TC-029/030) but are still Status=Draft.** → flip SR-022 → Verified and SR-007 → at least Implemented (Verified for the unit-tested frame-math leg; the ffprobe stream leg is Demonstration). → @system-engineer/@test-engineer (a 1-round cleanup; I did not flip them this run as they are outside the committed Wave-2c slice and warrant the Test Engineer re-confirming the runs).
+- **[MAJOR] Five Test-verifiable SRs owe an automated test or an honest Demonstration reclassification: SR-005, SR-008, SR-012, SR-017, SR-018.** Their only TCs are System/Integration ffprobe-or-FFmpeg-absent cases left Automated=No (TC-010/014/019/027) or a Unit TC not yet wired to a passing test (TC-028, SR-018). Either add the automated assertions (e.g. an ffprobe-of-output integration test for codec/container/pix_fmt/faststart/fps; a multi-output integration test; an `is_ignored` unit test; an FFmpeg-absent integration test) and flip to Verified, OR justify them as Demonstration. As written they are neither Verified nor declared Demonstration → @test-engineer.
+- **[INFO]** the doc-SRs SR-003/019/020/021/025 (Inspection) and the genuinely-Demonstration set (SR-001, SR-013 end-to-end, SR-015 real-ENOSPC, SR-023 publish, SR-024 interactive launch, SR-026 GUI, SR-027 online fetch) are correctly deferred to the human at the Final acceptance gate — these are NOT blockers to implementation closure, but they ARE the items the human must exercise.
+
+**Gate decision:** I **SIGN the Wave-2c slice** (GUI wizard sound; mapping unit-tested; never-block guardrail intact; coverage 80.49% ≥ 80%; harness green; orphans=0). I do **NOT** sign FULL OBJ3 implementation closure: SR-005/007/008/012/017/018/022 must first be reconciled (Verified-with-test or declared Demonstration) so that "all test-verifiable SRs Verified" actually holds. The legitimately-Demonstration/Manual items (SR-001, SR-013, SR-015, SR-023, SR-024, SR-026, SR-027 + the doc Inspections) are correctly queued for the Final end-user acceptance gate. Recommend ONE more Test-Engineer reconciliation round, after which full OBJ3 is signable. PAUSED for human.
+
+### ORCHESTRATOR — OBJ3 Wave 2c — Note — 2026-06-03
+System Engineer signed the committed Wave-2c GUI-wizard slice (SR-026 Implemented, value→config mapping Verified by unit tests, GUI Demonstration; SR-001 Implemented; LLR-029/030 Implemented; TC-039 Verified). Coverage 80.49% ≥80%; cargo test lib 32 + bin 32 + integration 14 (0 failed, 0 ignored); clippy/fmt clean; trace orphans=0. **Full OBJ3 implementation closure deferred one round:** SE raised a registry-reconciliation gap (SR-007/SR-022 status lags behind their passing Automated=Yes tests; SR-005/008/012/017/018 owe an automated test or an honest Demonstration reclassification) before "all test-verifiable SRs Verified" holds. Demonstration/Manual items (SR-001/013/015/023/024/026/027 + doc Inspections) deferred to the Final human-acceptance gate. PAUSED for human.
