@@ -92,6 +92,11 @@ _Generated 2026-06-03. Public items by module:_
   - `pub fn all_essential_passed(results: &[CheckResult]) -> bool`
   - `pub fn exit_code(results: &[CheckResult]) -> i32`
   - `pub fn run_checks(config: &Config) -> Vec<CheckResult>`
+- **src/setup/config_builder.rs**
+  - `pub struct WizardValues`
+  - `pub fn build_config(v: &WizardValues) -> Config`
+  - `pub fn to_toml(config: &Config) -> Result<String>`
+  - `pub fn parse_wizard_output(stdout: &str) -> Result<WizardValues>`
 - **src/setup/ffmpeg_fetch.rs**
   - `pub fn cache_dir() -> PathBuf`
   - `pub fn verify_checksum(path: &Path, expected_hex: &str) -> Result<()>`
@@ -100,7 +105,10 @@ _Generated 2026-06-03. Public items by module:_
   - `pub fn should_prompt(config_present: bool, non_interactive: bool, stdin_is_tty: bool) -> bool`
   - `pub fn is_interactive(non_interactive: bool) -> bool`
 - **src/setup/mod.rs**
+  - `pub fn run_first_run_setup(path: &Path) -> Result<()>`
   - `pub fn ensure_ffmpeg(config: &Config, non_interactive: bool) -> Result<PathBuf>`
+- **src/setup/wizard.rs**
+  - `pub fn run_wizard() -> Result<WizardValues>`
 - **src/transform/mod.rs**
   - `pub fn seed_from_str(s: &str) -> u64`
   - `pub struct CropWindow`
@@ -122,6 +130,7 @@ _Generated 2026-06-03. Public items by module:_
   - `pub fn open(path: &Path, width: u32, height: u32, fps: u32) -> Result<Self>`
   - `pub fn read_frame(&mut self) -> Result<Option<Vec<u8>>>`
 <!-- END GENERATED MODULE MAP -->
+
 
 
 

@@ -2,13 +2,33 @@
 //! offline fallback → gated auto-fetch) and interaction gating. The first-run
 //! GUI wizard (SR-026) builds on these.
 
+pub mod config_builder;
 pub mod ffmpeg_fetch;
 pub mod interaction;
+pub mod wizard;
 
 use crate::config::Config;
 use crate::error::{Result, SlideshowError};
 use crate::ffmpeg::resolve;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Run the first-run GUI wizard, build a valid config from the collected values,
+/// and write it to `path` (creating parent dirs). Used when there is no config
+/// and the session is interactive (gated by [`interaction::should_prompt`]).
+// Implements: LLR-029, LLR-030, SR-026, SR-030
+pub fn run_first_run_setup(path: &Path) -> Result<()> {
+    let values = wizard::run_wizard()?;
+    let config = config_builder::build_config(&values);
+    let toml = config_builder::to_toml(&config)?;
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(path, toml).map_err(|e| {
+        SlideshowError::Config(format!("cannot write config {}: {}", path.display(), e))
+    })?;
+    log::info!("Setup complete — wrote config to {}", path.display());
+    Ok(())
+}
 
 /// Ensure an FFmpeg executable is available, honoring the SR-027 resolution
 /// order and the offline / use-existing fallback. When FFmpeg is missing, a

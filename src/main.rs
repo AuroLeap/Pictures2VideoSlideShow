@@ -24,9 +24,11 @@ use util::estimate::human_bytes;
 #[command(name = "slideshow")]
 #[command(about = "Convert photos/videos to slideshow for digital frames", long_about = None)]
 struct Args {
-    /// Configuration file path (TOML/JSON)
+    /// Configuration file path (TOML/JSON). When omitted, defaults to the
+    /// location beside the exe (or %APPDATA%); a first run with no config there
+    /// opens the setup wizard. (SR-030)
     #[arg(short, long)]
-    config: PathBuf,
+    config: Option<PathBuf>,
 
     /// Input media directory
     #[arg(short, long)]
@@ -85,23 +87,31 @@ async fn main() -> Result<()> {
 
     let non_interactive = args.non_interactive;
 
-    // First-run gating (SR-028): only offer the setup wizard when there is no
+    // Resolve the config path: explicit --config, else the location beside the
+    // exe (or %APPDATA%). (SR-030)
+    let config_path = args
+        .config
+        .clone()
+        .unwrap_or_else(config::location::resolve_config_path);
+
+    // First-run gating (SR-028): only launch the setup wizard when there is no
     // config AND this is a genuine interactive session. Automation/CI never
-    // blocks here. (The wizard body lands in a later slice.)
+    // blocks here (it gets a clear "config not found" error from the load below).
     if setup::interaction::should_prompt(
-        args.config.exists(),
+        config_path.exists(),
         non_interactive,
         std::io::stdin().is_terminal(),
     ) {
         log::info!(
-            "No config at {} and interactive session — the first-run setup wizard will run here (coming soon).",
-            args.config.display()
+            "No config at {} — launching first-run setup...",
+            config_path.display()
         );
+        setup::run_first_run_setup(&config_path)?;
     }
 
     // Load configuration
-    let config = Config::from_file(&args.config)?;
-    log::info!("Configuration loaded from: {}", args.config.display());
+    let config = Config::from_file(&config_path)?;
+    log::info!("Configuration loaded from: {}", config_path.display());
 
     // Override with command-line args if provided
     let mut config = config;
