@@ -55,7 +55,7 @@ $outBtn.Add_Click({
 $form.Controls.Add($outBtn)
 
 $y += 35
-$form.Controls.Add((New-Label "Temp/intermediary folder (optional):" $y))
+$form.Controls.Add((New-Label "Temp folder (optional):" $y))
 $tmpBox = New-Text "" $y 230; $form.Controls.Add($tmpBox)
 
 $y += 35
