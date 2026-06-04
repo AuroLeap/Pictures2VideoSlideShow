@@ -163,3 +163,37 @@ fn probe_video(path: &Path) -> Result<((u32, u32), Option<f32>)> {
 
     Ok(((w.unwrap_or(0), h.unwrap_or(0)), dur))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn loader(patterns: &[&str]) -> MediaLoader {
+        MediaLoader::new(InputConfig {
+            media_root: PathBuf::from("."),
+            ignore_patterns: patterns.iter().map(|s| s.to_string()).collect(),
+            exception_pattern: None,
+            exception_threshold: None,
+        })
+    }
+
+    // Verifies: SR-018, LLR-021 — case-insensitive substring ignore match.
+    #[test]
+    fn ignore_pattern_matches_case_insensitively_sr018() {
+        let l = loader(&["DNP"]);
+        assert!(l.is_ignored(&PathBuf::from("/a/b/Family_DNP.jpg")));
+        assert!(l.is_ignored(&PathBuf::from("/a/b/family_dnp.jpg")));
+    }
+
+    // Verifies: SR-018, LLR-021 — non-matching files are not ignored; empty
+    // patterns never match.
+    #[test]
+    fn non_matching_files_kept_sr018() {
+        let l = loader(&["DNP"]);
+        assert!(!l.is_ignored(&PathBuf::from("/a/b/vacation.jpg")));
+        let none = loader(&[]);
+        assert!(!none.is_ignored(&PathBuf::from("/a/b/DNP.jpg")));
+        let empty = loader(&[""]);
+        assert!(!empty.is_ignored(&PathBuf::from("/a/b/anything.jpg")));
+    }
+}
