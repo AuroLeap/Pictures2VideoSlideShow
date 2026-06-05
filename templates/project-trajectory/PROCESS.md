@@ -109,3 +109,8 @@ format check · linter (warnings as errors) · unit + integration tests · cover
 (≥ threshold) · the traceability check (0 orphans for the active gate). Emit the
 coverage + traceability reports as artifacts. Prefer a generated architecture
 map step so `architecture.md` stays current.
+
+A ready reference traceability checker ships with this template:
+`scripts/trace.py` (Python 3, stdlib only) — joins the registries, writes
+`docs/test/report.md`, and exits nonzero on orphans with `--strict`. Call it
+from `scripts/check`. See `EXAMPLE.md` for a complete worked UN→SR→LLR→TC chain.

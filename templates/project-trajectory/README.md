@@ -22,6 +22,8 @@ audits.
 | `registries/system-requirements.template.csv` | SR-### with measurable acceptance criteria. |
 | `registries/low-level-requirements.template.csv` | LLR-### ↔ code. |
 | `registries/test-cases.template.csv` | TC-### ↔ requirements. |
+| `scripts/trace.py` | **Ready-to-use** traceability checker (Python 3, stdlib only): joins the registries, writes `test/report.md`, exits nonzero on orphans with `--strict`. Wire into the harness/CI. |
+| `EXAMPLE.md` | A fully worked UN→SR→LLR→TC chain to copy the pattern from. |
 
 ## How to use
 
