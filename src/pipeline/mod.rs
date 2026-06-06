@@ -13,6 +13,7 @@ use crate::error::Result;
 use crate::ffmpeg::FfmpegEncoder;
 use crate::image::FrameRenderer;
 use crate::media::{Album, MediaFile, MediaType};
+use crate::roi::RoiDb;
 use crate::util::ensure_dir_exists;
 use crate::util::estimate::{
     estimate_output_bytes, human_bytes, is_oversize, OVERSIZE_THRESHOLD_BYTES,
@@ -68,6 +69,11 @@ pub struct FrameGenerationPipeline {
     outputs: Vec<OutputDef>,
     processing: ProcessingConfig,
     output_dir: PathBuf,
+    /// Input media root, used to key ROI lookups by relative path.
+    media_root: PathBuf,
+    /// Optional region-of-interest database for per-image Ken Burns focus.
+    // Implements: SR-031, LLR-038
+    roi: Option<RoiDb>,
     /// Inputs skipped across all outputs (deduped by path) for the summary.
     skipped: RefCell<Vec<SkippedInput>>,
 }
@@ -78,14 +84,32 @@ impl FrameGenerationPipeline {
         outputs: Vec<OutputDef>,
         processing: ProcessingConfig,
         output_dir: PathBuf,
+        media_root: PathBuf,
+        roi: Option<RoiDb>,
     ) -> Self {
         Self {
             album,
             outputs,
             processing,
             output_dir,
+            media_root,
+            roi,
             skipped: RefCell::new(Vec::new()),
         }
+    }
+
+    /// Resolve the Ken Burns focus for an image: its ROI-database entry (keyed
+    /// by path relative to the media root) if present, else the configured
+    /// `default_focus`. `None` keeps the default two-point pan.
+    // Implements: SR-031, LLR-037, LLR-038
+    fn focus_for(&self, path: &std::path::Path) -> Option<(f32, f32)> {
+        if let Some(db) = &self.roi {
+            let rel = path.strip_prefix(&self.media_root).unwrap_or(path);
+            if let Some(f) = db.focus_for(rel) {
+                return Some(f);
+            }
+        }
+        self.processing.default_focus.map(|[x, y]| (x, y))
     }
 
     /// Run every output definition, returning a [`BuildSummary`] of written
@@ -205,7 +229,11 @@ impl FrameGenerationPipeline {
                 .unwrap_or_default();
 
             let mut src: Box<dyn FrameSource> = match item.file_type {
-                MediaType::Image => match FrameRenderer::load(&item.path, output_def) {
+                MediaType::Image => match FrameRenderer::load_with_focus(
+                    &item.path,
+                    output_def,
+                    self.focus_for(&item.path),
+                ) {
                     Ok(r) => Box::new(ImageFrameSource::new(r, batch)),
                     Err(e) => {
                         log::warn!("Skipping image {}: {}", item.path.display(), e);
@@ -390,4 +418,70 @@ fn scale(a: &[u8], t: f32) -> Vec<u8> {
     a.iter()
         .map(|&x| (x as f32 * t).round().clamp(0.0, 255.0) as u8)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::SystemTime;
+
+    fn processing(default_focus: Option<[f32; 2]>) -> ProcessingConfig {
+        ProcessingConfig {
+            temp_dir: None,
+            max_workers: None,
+            use_parallelism: false,
+            dry_run: false,
+            verbose: false,
+            ffmpeg_timeout_secs: 0,
+            ffmpeg_path: None,
+            default_focus,
+        }
+    }
+
+    fn pipeline(
+        media_root: &str,
+        roi: Option<RoiDb>,
+        default_focus: Option<[f32; 2]>,
+    ) -> FrameGenerationPipeline {
+        let album = Album {
+            media_files: Vec::new(),
+            total_size: 0,
+            created_at: SystemTime::UNIX_EPOCH,
+        };
+        FrameGenerationPipeline::new(
+            album,
+            Vec::new(),
+            processing(default_focus),
+            PathBuf::from("out"),
+            PathBuf::from(media_root),
+            roi,
+        )
+    }
+
+    // Verifies: SR-031, LLR-038 — an ROI entry (keyed by path relative to the
+    // media root) drives the focus and takes precedence over the default.
+    #[test]
+    fn roi_entry_overrides_default_focus() {
+        let db = RoiDb::from_json(r#"{ "a/img.jpg": { "x": 0.25, "y": 0.75 } }"#).unwrap();
+        let p = pipeline("root", Some(db), Some([0.5, 0.5]));
+        // Absolute path under the media root resolves via its relative key.
+        let f = p.focus_for(&PathBuf::from("root/a/img.jpg")).unwrap();
+        assert!((f.0 - 0.25).abs() < 1e-6 && (f.1 - 0.75).abs() < 1e-6);
+    }
+
+    // Verifies: SR-031, LLR-037 — images without an ROI entry fall back to the
+    // configured default focus, and `None` keeps the default pan.
+    #[test]
+    fn falls_back_to_default_then_none() {
+        let db = RoiDb::from_json(r#"{ "a/img.jpg": { "x": 0.1, "y": 0.1 } }"#).unwrap();
+        let p = pipeline("root", Some(db), Some([0.5, 0.5]));
+        // Miss -> default focus.
+        assert_eq!(
+            p.focus_for(&PathBuf::from("root/other.jpg")),
+            Some((0.5, 0.5))
+        );
+        // No ROI db and no default -> None (default pan).
+        let p2 = pipeline("root", None, None);
+        assert_eq!(p2.focus_for(&PathBuf::from("root/a/img.jpg")), None);
+    }
 }

@@ -34,7 +34,7 @@ config (TOML)               media scan (rayon)            per clip
 | `src/util` | dirs, progress |
 
 <!-- BEGIN GENERATED MODULE MAP (scripts/trace.ps1) -->
-_Generated 2026-06-03. Public items by module:_
+_Generated 2026-06-04. Public items by module:_
 
 - **src/config/location.rs**
   - `pub fn choose_config_dir(`
@@ -64,6 +64,7 @@ _Generated 2026-06-03. Public items by module:_
 - **src/image/mod.rs**
   - `pub struct FrameRenderer`
   - `pub fn load(path: &Path, out: &OutputDef) -> Result<Self>`
+  - `pub fn load_with_focus(`
   - `pub fn total_frames(&self) -> u32`
   - `pub fn render_range(&self, start: u32, end: u32) -> Vec<Vec<u8>>`
 - **src/logging.rs**
@@ -92,6 +93,13 @@ _Generated 2026-06-03. Public items by module:_
   - `pub fn all_essential_passed(results: &[CheckResult]) -> bool`
   - `pub fn exit_code(results: &[CheckResult]) -> i32`
   - `pub fn run_checks(config: &Config) -> Vec<CheckResult>`
+- **src/roi/mod.rs**
+  - `pub struct RoiDb`
+  - `pub fn load(path: &Path) -> Result<Self>`
+  - `pub fn from_json(json: &str) -> Result<Self>`
+  - `pub fn focus_for(&self, rel_path: &Path) -> Option<(f32, f32)>`
+  - `pub fn len(&self) -> usize`
+  - `pub fn is_empty(&self) -> bool`
 - **src/setup/config_builder.rs**
   - `pub struct WizardValues`
   - `pub fn build_config(v: &WizardValues) -> Config`
@@ -111,11 +119,11 @@ _Generated 2026-06-03. Public items by module:_
   - `pub fn run_wizard() -> Result<WizardValues>`
 - **src/transform/mod.rs**
   - `pub fn seed_from_str(s: &str) -> u64`
-  - `pub struct CropWindow`
   - `pub struct ClipPlan`
   - `pub fn new(img_w: u32, img_h: u32, out: &OutputDef, seed: u64) -> Self`
+  - `pub fn with_focus(`
   - `pub fn rotation_deg(&self, i: u32) -> f32`
-  - `pub fn window(&self, i: u32) -> CropWindow`
+  - `pub fn projection(&self, i: u32) -> Projection`
 - **src/util/estimate.rs**
   - `pub fn estimate_output_bytes(duration_secs: f64, crf: u32) -> u64`
   - `pub fn is_oversize(bytes: u64) -> bool`
@@ -130,6 +138,9 @@ _Generated 2026-06-03. Public items by module:_
   - `pub fn open(path: &Path, width: u32, height: u32, fps: u32) -> Result<Self>`
   - `pub fn read_frame(&mut self) -> Result<Option<Vec<u8>>>`
 <!-- END GENERATED MODULE MAP -->
+
+
+
 
 
 

@@ -6,6 +6,7 @@ pub mod logging;
 pub mod media;
 pub mod pipeline;
 pub mod preflight;
+pub mod roi;
 pub mod setup;
 pub mod transform;
 pub mod util;

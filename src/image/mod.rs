@@ -10,7 +10,7 @@ use crate::error::{Result, SlideshowError};
 use crate::transform::{seed_from_str, ClipPlan};
 use ::image::imageops::FilterType;
 use ::image::{GenericImageView, Rgb, RgbImage};
-use imageproc::geometric_transformations::{rotate_about_center, Interpolation};
+use imageproc::geometric_transformations::{warp_into, Interpolation};
 use rayon::prelude::*;
 use std::path::Path;
 use std::sync::Arc;
@@ -25,10 +25,22 @@ pub struct FrameRenderer {
 impl FrameRenderer {
     /// Load `path`, pre-scale it according to `plan`, and prepare to render.
     pub fn load(path: &Path, out: &OutputDef) -> Result<Self> {
+        Self::load_with_focus(path, out, None)
+    }
+
+    /// Like [`FrameRenderer::load`], but anchors the Ken Burns zoom on an
+    /// optional fixed focus point (normalized `[0,1]` image coordinates) — e.g.
+    /// a region of interest from prior recognition. `None` keeps the default pan.
+    // Implements: LLR-037, SR-031
+    pub fn load_with_focus(
+        path: &Path,
+        out: &OutputDef,
+        focus: Option<(f32, f32)>,
+    ) -> Result<Self> {
         let img = ::image::open(path).map_err(SlideshowError::Image)?;
         let (w, h) = img.dimensions();
         let seed = seed_from_str(&path.to_string_lossy());
-        let plan = ClipPlan::new(w, h, out, seed);
+        let plan = ClipPlan::with_focus(w, h, out, seed, focus);
 
         // Pre-scale once. Triangle is a good speed/quality trade-off for the
         // up/down-scale that follows per frame.
@@ -56,38 +68,29 @@ impl FrameRenderer {
 
     /// Render a single frame to a raw `rgb24` buffer (`out_w * out_h * 3`).
     fn render_frame(&self, i: u32) -> Vec<u8> {
-        let win = self.plan.window(i);
         let out_w = self.plan.out_w;
         let out_h = self.plan.out_h;
         let render_w = self.plan.render_w;
         let render_h = self.plan.render_h;
 
-        // Crop the window, then scale to the (margin-padded) render size.
-        let cropped =
-            ::image::imageops::crop_imm(self.prescaled.as_ref(), win.x, win.y, win.w, win.h)
-                .to_image();
-
-        let render = if cropped.width() == render_w && cropped.height() == render_h {
-            cropped
-        } else {
-            ::image::imageops::resize(&cropped, render_w, render_h, FilterType::Triangle)
-        };
-
-        // Rotate (if any) about center, then center-crop to the output size.
-        // The render margin guarantees the crop stays within real content.
+        // One sub-pixel warp does the whole pan/zoom/rotation in a single
+        // resample (smooth motion, no integer-crop jitter, no double-resample
+        // softening). The projection maps source -> render canvas; `warp_into`
+        // inverts it and samples the source at sub-pixel coordinates.
         // Fades/dissolves are applied later by the pipeline's transition mixer.
-        let angle = self.plan.rotation_deg(i);
-        let frame = if angle.abs() > f32::EPSILON {
-            let rotated = rotate_about_center(
-                &render,
-                angle.to_radians(),
-                Interpolation::Bilinear,
-                Rgb([0, 0, 0]),
-            );
-            let off_x = (render_w - out_w) / 2;
-            let off_y = (render_h - out_h) / 2;
-            ::image::imageops::crop_imm(&rotated, off_x, off_y, out_w, out_h).to_image()
-        } else if render_w == out_w && render_h == out_h {
+        let proj = self.plan.projection(i);
+        let mut render = RgbImage::new(render_w, render_h);
+        warp_into(
+            self.prescaled.as_ref(),
+            &proj,
+            Interpolation::Bilinear,
+            Rgb([0, 0, 0]),
+            &mut render,
+        );
+
+        // Center-crop the constant rotation margin to the output size. The crop
+        // offset is identical every frame, so it contributes no motion.
+        let frame = if render_w == out_w && render_h == out_h {
             render
         } else {
             let off_x = (render_w - out_w) / 2;

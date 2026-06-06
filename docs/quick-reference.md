@@ -80,6 +80,7 @@ For a basic end-user run you do **not** edit this file by hand — the first-run
 | `ignore_patterns` | list of strings | `[]` | Case-insensitive filename/path substrings to skip (e.g. `["DNP"]`). |
 | `exception_pattern` | string | *(none)* | Optional pattern that re-includes otherwise-ignored items. |
 | `exception_threshold` | integer | *(none)* | Optional numeric threshold paired with `exception_pattern`. |
+| `roi_db` | path | *(none)* | Optional JSON region-of-interest database that pins the Ken Burns zoom per image (e.g. a face). Keyed by each image's path **relative to `media_root`**; value `{"x":..,"y":..}` or `{"bbox":[x,y,w,h]}` (normalized 0-1; bbox center used). A missing/invalid file fails the run. See §6. |
 
 ### `[output]`
 | Field | Unit / type | Default | Meaning |
@@ -94,6 +95,9 @@ For a basic end-user run you do **not** edit this file by hand — the first-run
 | `use_parallelism` | bool | `true` | Use the rayon thread pool for frame generation. |
 | `dry_run` | bool | `false` | Plan without encoding. |
 | `verbose` | bool | `false` | Verbose logging. |
+| `ffmpeg_timeout_secs` | seconds | `120` | Abort a stalled FFmpeg after this many seconds with no encoder progress; `0` disables. |
+| `ffmpeg_path` | path | *(none)* | Explicit FFmpeg executable; takes priority over PATH / the per-user cache (offline / use-existing fallback). |
+| `default_focus` | `[x, y]` (normalized 0-1) | *(none)* | Default Ken Burns focus for images with **no** `roi_db` entry. Omit to keep the default two-point pan; ROI entries override it. See §6. |
 
 ### `[[outputs]]` (one block per frame/target; repeat for multiple frames — UN-007)
 | Field | Unit / type | Default | Meaning |
@@ -127,3 +131,28 @@ The Rust engine is fast but feature-incomplete. These gaps are stated **here onc
 | GPU acceleration | CPU-only encode. | None; CPU path is already 10-15x faster than PowerShell. |
 
 When the Rust engine falls short, the **PowerShell pipeline** (feature-complete reference on `main`) is the documented fallback — see the README [Project Status](../README.md#project-status) for which implementation to choose.
+
+## 6. Ken Burns focus — smooth motion + pinning the zoom (SR-031)
+
+The pan/zoom is rendered with a single sub-pixel warp, so motion glides instead of
+stepping. By default each image gets a varied (but smooth) pan. To **pin the zoom**
+on a chosen point (so it stays on a subject instead of drifting):
+
+- **Whole run / per output:** set `default_focus = [x, y]` under `[processing]`
+  (normalized `0-1`, e.g. `[0.5, 0.4]` slightly above center).
+- **Per image:** point `input.roi_db` at a JSON file mapping each image's path
+  **relative to `media_root`** to a focus. A per-image entry overrides
+  `default_focus`; images with neither keep the default pan.
+
+```json
+{
+  "2015/Trip/beach.jpg": { "x": 0.42, "y": 0.55 },
+  "2016/Party/cake.jpg": { "bbox": [0.30, 0.20, 0.25, 0.25] }
+}
+```
+
+Use `{"x":..,"y":..}` for a point or `{"bbox":[x,y,w,h]}` for a box (its center is
+used) — all values are fractions of image width/height, clamped to `0-1`. This is
+the hook for feeding **face/feature-recognition** output: emit one entry per image
+and the zoom holds that region. Paths match case-insensitively and accept either
+`/` or `\` separators.

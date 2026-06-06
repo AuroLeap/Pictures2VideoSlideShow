@@ -1,6 +1,11 @@
 [input]
 media_root = "TestInput"
 ignore_patterns = ["DNP"]
+# Optional region-of-interest database (JSON) that anchors the Ken Burns zoom
+# per image. Keyed by each image's path relative to media_root; each value is a
+# normalized point {"x":0.5,"y":0.4} or bounding box {"bbox":[x,y,w,h]} (its
+# center is used). Without an entry an image keeps the default smooth pan.
+# roi_db = "focus.json"
 
 [output]
 base_dir = "TestOut/RustOut"
@@ -9,6 +14,10 @@ base_dir = "TestOut/RustOut"
 use_parallelism = true
 dry_run = false
 verbose = false
+# Optional default Ken Burns focus [x, y] in normalized [0,1] image coords,
+# applied to images that have no ROI database entry. Omit to keep the default
+# two-point pan. ROI entries take precedence over this.
+# default_focus = [0.5, 0.4]
 
 [[outputs]]
 name = "test-1440x900"

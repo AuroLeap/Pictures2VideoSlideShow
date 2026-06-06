@@ -18,6 +18,13 @@ pub struct InputConfig {
     pub ignore_patterns: Vec<String>,
     pub exception_pattern: Option<String>,
     pub exception_threshold: Option<i32>,
+
+    /// Optional JSON region-of-interest database (see [`crate::roi`]). Maps an
+    /// image's path relative to `media_root` to a focus point that anchors the
+    /// Ken Burns zoom (e.g. a face from prior recognition). Unit: filesystem path.
+    // Implements: SR-031, LLR-038
+    #[serde(default)]
+    pub roi_db: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -46,6 +53,13 @@ pub struct ProcessingConfig {
     // Implements: SR-027, LLR-032
     #[serde(default)]
     pub ffmpeg_path: Option<PathBuf>,
+
+    /// Optional default Ken Burns focus point `[x, y]` in normalized `[0,1]`
+    /// image coordinates, applied to images that have no entry in the ROI
+    /// database. When unset, images use the default two-point pan.
+    // Implements: SR-031, LLR-037
+    #[serde(default)]
+    pub default_focus: Option<[f32; 2]>,
 }
 
 /// Default FFmpeg inactivity timeout (SR-013): 120s with no encoder progress.

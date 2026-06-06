@@ -10,6 +10,7 @@ mod logging;
 mod media;
 mod pipeline;
 mod preflight;
+mod roi;
 mod setup;
 mod transform;
 mod util;
@@ -209,12 +210,30 @@ async fn run_build(config: &Config, non_interactive: bool) -> Result<()> {
         album.total_size / (1024 * 1024)
     );
 
-    // 2. Process all output definitions in one pipeline.
+    // 2. Load the optional region-of-interest database (per-image Ken Burns
+    //    focus). A missing/invalid file is a hard error so a typo'd path is
+    //    not silently ignored.
+    let roi = match &config.input.roi_db {
+        Some(path) => {
+            let db = roi::RoiDb::load(path)?;
+            log::info!(
+                "Loaded {} ROI focus entries from {}",
+                db.len(),
+                path.display()
+            );
+            Some(db)
+        }
+        None => None,
+    };
+
+    // 3. Process all output definitions in one pipeline.
     let pipeline = pipeline::FrameGenerationPipeline::new(
         album,
         config.outputs.clone(),
         config.processing.clone(),
         config.output.base_dir.clone(),
+        config.input.media_root.clone(),
+        roi,
     );
     let summary = pipeline.execute().await?;
 

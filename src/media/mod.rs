@@ -174,6 +174,7 @@ mod tests {
             ignore_patterns: patterns.iter().map(|s| s.to_string()).collect(),
             exception_pattern: None,
             exception_threshold: None,
+            roi_db: None,
         })
     }
 

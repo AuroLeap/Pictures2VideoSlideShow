@@ -61,6 +61,7 @@ pub fn build_config(v: &WizardValues) -> Config {
             ignore_patterns: vec!["DNP".to_string()],
             exception_pattern: None,
             exception_threshold: None,
+            roi_db: None,
         },
         output: OutputConfig {
             base_dir: v.output_dir.clone(),
@@ -73,6 +74,7 @@ pub fn build_config(v: &WizardValues) -> Config {
             verbose: false,
             ffmpeg_timeout_secs: DEFAULT_FFMPEG_TIMEOUT_SECS,
             ffmpeg_path: None,
+            default_focus: None,
         },
         outputs,
     }
