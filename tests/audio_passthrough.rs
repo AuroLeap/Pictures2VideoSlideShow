@@ -41,6 +41,31 @@ fn synth_video_with_audio(path: &Path, secs: u32) {
     assert!(status.success(), "ffmpeg synth should succeed");
 }
 
+/// Synthesize a tiny H.264 video (`secs` long) with **no** audio stream, to
+/// exercise the `has_audio` gating when mixed with audio-bearing clips.
+fn synth_video_no_audio(path: &Path, secs: u32) {
+    let dur = secs.to_string();
+    let status = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            &format!("testsrc=duration={dur}:size=320x240:rate=24"),
+            "-an",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+        ])
+        .arg(path)
+        .status()
+        .expect("spawn ffmpeg to synth silent video");
+    assert!(status.success(), "ffmpeg silent synth should succeed");
+}
+
 fn write_audio_cfg(cfg: &Path, media: &Path, out: &Path, enable_audio: bool) {
     let media_s = media.display().to_string().replace('\\', "/");
     let base_s = out.display().to_string().replace('\\', "/");
@@ -155,6 +180,37 @@ fn build_passes_through_video_audio_sr032() {
     assert!(
         (1.5..4.0).contains(&dur),
         "audio output duration {dur}s should track the crossfaded timeline"
+    );
+}
+
+// Verifies: SR-032, LLR-039, LLR-041 — when a video WITHOUT audio is mixed with
+// one that HAS audio, the silent video is excluded from the mux (so ffmpeg never
+// errors mapping a missing audio stream) and the output still carries the AAC
+// audio from the audio-bearing clip.
+#[test]
+fn mixed_silent_and_audio_videos_still_yield_audio_sr032() {
+    let tmp = common::TempDir::new("audio_mixed");
+    let media = tmp.join("media");
+    let out = tmp.join("out");
+    std::fs::create_dir_all(&media).unwrap();
+    std::fs::create_dir_all(&out).unwrap();
+    // Sorted by name: the silent video first, then the audio-bearing one, plus
+    // an image — a realistic mix of non-audio and audio media in one album.
+    synth_video_no_audio(&media.join("a_silent.mp4"), 2);
+    common::write_png(&media.join("b_image.png"), 320, 240, [120, 120, 200]);
+    synth_video_with_audio(&media.join("c_sound.mp4"), 2);
+
+    let cfg = tmp.join("config.toml");
+    write_audio_cfg(&cfg, &media, &out, true);
+    run_build(&cfg);
+
+    let mp4 = out.join("frame.mp4");
+    assert!(mp4.exists(), "output should exist");
+    // The audio-bearing clip's track survives; the silent video did not break it.
+    assert_eq!(
+        probe_audio_codec(&mp4),
+        "aac",
+        "mixing a silent video with an audio video should still yield an AAC track"
     );
 }
 
