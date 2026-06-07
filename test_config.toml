@@ -29,4 +29,8 @@ fade_time_secs = 0.5
 max_rotation_degrees = 15.0
 bulk_video_time_min = 20
 quality_crf = 28
+# Set true to carry source-video audio into the output (images stay silent),
+# synced per clip across the dissolves. AAC; bitrate/sample-rate optional below.
 enable_audio = false
+# audio_bitrate_kbps = 192
+# audio_sample_rate = 48000

@@ -10,6 +10,7 @@ mod source;
 
 use crate::config::{OutputDef, ProcessingConfig};
 use crate::error::Result;
+use crate::ffmpeg::audio::{AudioClip, AudioParams};
 use crate::ffmpeg::FfmpegEncoder;
 use crate::image::FrameRenderer;
 use crate::media::{Album, MediaFile, MediaType};
@@ -221,6 +222,11 @@ impl FrameGenerationPipeline {
         // Implements: LLR-017, SR-014
         let mut produced_total: u64 = 0;
 
+        // Audio-bearing video clips and their output start frames, for the
+        // optional audio passthrough mux after the silent video is built.
+        // Implements: SR-032, LLR-040
+        let mut audio_clips: Vec<AudioClip> = Vec::new();
+
         for (idx, item) in media.iter().enumerate() {
             let name = item
                 .path
@@ -253,7 +259,16 @@ impl FrameGenerationPipeline {
                 }
             };
 
+            // Capture this clip's output start frame BEFORE mixing it in; for an
+            // audio-bearing video that frame is the clip's audio delay (LLR-040).
+            let start_frame = mixer.emitted();
             let clip_frames = mixer.add_clip(src.as_mut())?;
+            if output_def.enable_audio && item.file_type == MediaType::Video && item.has_audio {
+                audio_clips.push(AudioClip {
+                    source: item.path.clone(),
+                    start_frame,
+                });
+            }
             produced_total += clip_frames;
             log::info!(
                 "  [{}/{}] {} {} ({} frames)",
@@ -281,7 +296,39 @@ impl FrameGenerationPipeline {
             return Ok(None);
         }
 
-        let emitted = mixer.finish()?;
+        let (emitted, part) = mixer.finish()?;
+
+        // Finalize: mux source-video audio onto the silent video when enabled and
+        // there is audio to add, otherwise atomically promote the silent video.
+        // Both paths make `<name>.mp4` appear atomically (SR-011).
+        // Implements: SR-032, LLR-041
+        if output_def.enable_audio && !audio_clips.is_empty() {
+            let params = AudioParams {
+                bitrate_kbps: output_def.audio_bitrate_kbps,
+                sample_rate: output_def.audio_sample_rate,
+            };
+            log::info!(
+                "Muxing audio from {} video clip(s) into '{}'",
+                audio_clips.len(),
+                output_def.name
+            );
+            crate::ffmpeg::audio::mux_audio(
+                &part,
+                &out_path,
+                &audio_clips,
+                output_def.fps,
+                emitted,
+                &params,
+            )?;
+        } else {
+            if output_def.enable_audio {
+                log::info!(
+                    "Audio enabled for '{}' but no audio-bearing video clips found; output is silent",
+                    output_def.name
+                );
+            }
+            crate::ffmpeg::promote(&part, &out_path)?;
+        }
 
         let elapsed = start.elapsed();
         log::info!(
@@ -381,9 +428,18 @@ impl CrossfadeMixer {
         Ok(produced)
     }
 
-    /// Fade out the final clip's tail to black, flush the encoder, and return
-    /// the total number of frames emitted.
-    fn finish(mut self) -> Result<u64> {
+    /// Output frames emitted so far. Read before each `add_clip` to learn the
+    /// clip's output start frame (its audio delay for passthrough).
+    // Implements: LLR-040, SR-032
+    fn emitted(&self) -> u64 {
+        self.emitted
+    }
+
+    /// Fade out the final clip's tail to black, flush the encoder to its
+    /// validated `.part`, and return `(emitted_frames, part_path)`. The pipeline
+    /// finalizes — promoting the silent part directly, or muxing audio first.
+    // Implements: LLR-041, SR-011
+    fn finish(mut self) -> Result<(u64, PathBuf)> {
         let prev = std::mem::take(&mut self.prev_tail);
         let len = prev.len();
         for (k, f) in prev.iter().enumerate() {
@@ -391,8 +447,8 @@ impl CrossfadeMixer {
             self.emit(scale(f, t))?;
         }
         let emitted = self.emitted;
-        self.encoder.finish()?;
-        Ok(emitted)
+        let part = self.encoder.finish_to_part()?;
+        Ok((emitted, part))
     }
 
     fn emit(&mut self, frame: Vec<u8>) -> Result<()> {

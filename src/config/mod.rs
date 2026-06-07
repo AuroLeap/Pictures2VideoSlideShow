@@ -79,7 +79,21 @@ pub struct OutputDef {
     pub max_rotation_degrees: f32,
     pub bulk_video_time_min: u32,
     pub quality_crf: u32,
+
+    /// Preserve audio from source **video** clips in this output (images are
+    /// silent). When false the output has no audio track.
+    // Implements: SR-032, LLR-042
     pub enable_audio: bool,
+
+    /// AAC bitrate (kbps) for the muxed audio track when `enable_audio` is set.
+    // Implements: SR-032, LLR-042
+    #[serde(default = "default_audio_bitrate_kbps")]
+    pub audio_bitrate_kbps: u32,
+
+    /// Audio sample rate (Hz) for the muxed audio track when `enable_audio` is set.
+    // Implements: SR-032, LLR-042
+    #[serde(default = "default_audio_sample_rate")]
+    pub audio_sample_rate: u32,
 
     /// Ken Burns zoom amount as a fraction (e.g. 0.12 = up to 12% zoom over the
     /// clip). Direction (zoom in vs out) is randomized per image.
@@ -94,6 +108,14 @@ pub struct OutputDef {
 
 fn default_zoom_amount() -> f32 {
     0.12
+}
+
+fn default_audio_bitrate_kbps() -> u32 {
+    192
+}
+
+fn default_audio_sample_rate() -> u32 {
+    48_000
 }
 
 fn default_true() -> bool {
@@ -193,6 +215,8 @@ mod tests {
             bulk_video_time_min: 20,
             quality_crf: 28,
             enable_audio: false,
+            audio_bitrate_kbps: 192,
+            audio_sample_rate: 48_000,
             zoom_amount: 0.12,
             ken_burns: true,
         }
@@ -211,5 +235,35 @@ mod tests {
     fn even_dims_never_zero_sr006() {
         // Odd 1 rounds down to 0 naively; must be clamped up to the even minimum.
         assert_eq!(sample_output(1, 1).even_dims(), (2, 2));
+    }
+
+    // Verifies: SR-032, LLR-042 — audio config fields default when omitted from
+    // the TOML and explicit values round-trip through serialize/deserialize.
+    #[test]
+    fn audio_fields_default_and_roundtrip_sr032() {
+        let toml_in = r#"
+name = "f"
+width = 320
+height = 240
+fps = 24
+pic_display_time_secs = 1.0
+fade_time_secs = 0.2
+max_rotation_degrees = 0.0
+bulk_video_time_min = 20
+quality_crf = 28
+enable_audio = true
+"#;
+        let od: OutputDef = toml::from_str(toml_in).expect("parse");
+        assert!(od.enable_audio);
+        assert_eq!(od.audio_bitrate_kbps, 192);
+        assert_eq!(od.audio_sample_rate, 48_000);
+
+        let mut od2 = od.clone();
+        od2.audio_bitrate_kbps = 128;
+        od2.audio_sample_rate = 44_100;
+        let s = toml::to_string(&od2).expect("serialize");
+        let back: OutputDef = toml::from_str(&s).expect("reparse");
+        assert_eq!(back.audio_bitrate_kbps, 128);
+        assert_eq!(back.audio_sample_rate, 44_100);
     }
 }

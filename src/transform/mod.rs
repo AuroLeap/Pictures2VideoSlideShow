@@ -282,6 +282,8 @@ mod tests {
             bulk_video_time_min: 20,
             quality_crf: 28,
             enable_audio: false,
+            audio_bitrate_kbps: 192,
+            audio_sample_rate: 48_000,
             zoom_amount: 0.12,
             ken_burns: true,
         }

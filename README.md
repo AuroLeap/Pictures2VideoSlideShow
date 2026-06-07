@@ -177,7 +177,7 @@ Output will be in: `AlbumOut1440x900q30/` (or your configured folder)
 
 ## Rust Engine (High-Performance Rewrite)
 
-> **Status:** Active development on the `rust-rewrite` branch. It produces complete slideshow videos end-to-end and is roughly **10-15x faster** than the PowerShell pipeline. The PowerShell scripts remain the feature-complete reference (audio, multi-part splitting); the Rust engine is the recommended path when speed matters.
+> **Status:** Active development on the `rust-rewrite` branch. It produces complete slideshow videos end-to-end and is roughly **10-15x faster** than the PowerShell pipeline. The PowerShell scripts remain the reference for multi-part splitting; the Rust engine now also does source-video audio passthrough and is the recommended path when speed matters.
 
 A native Rust reimplementation that renders frames directly in-process (no per-frame ImageMagick spawn) and streams them to FFmpeg, using all CPU cores via [rayon](https://docs.rs/rayon/).
 
@@ -207,7 +207,7 @@ Then run the built binary (or `cargo run --release -- ...`) per [Quick Reference
 
 ### Not yet implemented in the Rust engine
 
-Audio and `bulk_video_time_min` part-splitting are **not implemented** in the Rust engine, plus some performance items. The authoritative gap list and the PowerShell workaround for each are in the [Quick Reference §5](docs/quick-reference.md#5-rust-engine--what-is-not-implemented-yet-and-the-workaround). See the constraints below for why the splitting gap matters.
+`bulk_video_time_min` part-splitting is **not implemented** in the Rust engine, plus some performance items. (Source-video **audio passthrough is now implemented** — set `enable_audio = true`; see [Quick Reference §7](docs/quick-reference.md).) The authoritative gap list and the PowerShell workaround for each are in the [Quick Reference §5](docs/quick-reference.md#5-rust-engine--what-is-not-implemented-yet-and-the-workaround). See the constraints below for why the splitting gap matters.
 
 ---
 
@@ -268,7 +268,7 @@ duration ≈ Σ(image clips) × (pic_display_time_secs)
 
 ### 8. Audio
 
-- Many frames ignore or cannot play audio. The **Rust engine output is silent by design** for now; the PowerShell pipeline has partial audio support.
+- Many frames ignore or cannot play audio, so output is **silent by default**. The Rust engine now supports **source-video audio passthrough** — set `enable_audio = true` to carry each video clip's audio into the slideshow, synced across dissolves (images stay silent); see [Quick Reference §7](docs/quick-reference.md).
 
 ### Recommended starting point for a typical frame
 
@@ -720,7 +720,7 @@ $env:PATH += ";C:\Program Files\ffmpeg\bin"
 - No CI/CD pipeline
 
 ### Future Improvements
-- [ ] Complete audio extraction (Phase 2)
+- [x] Source-video audio passthrough (Rust engine — `enable_audio`)
 - [ ] Add comprehensive error handling
 - [ ] Implement unit test framework
 - [ ] Create CI/CD pipeline
@@ -765,5 +765,5 @@ For questions or issues:
 ---
 
 **Last Updated**: 2026-06-02  
-**Status**: PowerShell pipeline stable on `main`; Rust engine working end-to-end on `rust-rewrite` (Ken Burns + rotation + cross-fade + inline video)  
-**Next Step (Rust)**: `bulk_video_time_min` splitting into part files, then audio
+**Status**: PowerShell pipeline stable on `main`; Rust engine working end-to-end on `rust-rewrite` (Ken Burns + rotation + cross-fade + inline video + source-video audio passthrough)  
+**Next Step (Rust)**: `bulk_video_time_min` splitting into part files

@@ -6,6 +6,7 @@
 //! successfully (LLR-015, SR-011). Any failure or early drop removes the temp
 //! so a killed run never leaves a complete-looking final file.
 
+pub mod audio;
 pub mod resolve;
 
 use crate::error::{Result, SlideshowError};
@@ -181,7 +182,23 @@ impl FfmpegEncoder {
     /// stalled ffmpeg, this returns a timeout error naming the output so the
     /// killed run never reports success.
     // Implements: LLR-015, LLR-008, SR-011, SR-013, SR-015
-    pub fn finish(mut self) -> Result<()> {
+    // Direct silent finalize: used by the lib/integration tests; the binary now
+    // finalizes via finish_to_part + promote/mux so audio can be muxed first.
+    #[allow(dead_code)]
+    pub fn finish(self) -> Result<()> {
+        let final_path = self.final_path.clone();
+        let part = self.finish_to_part()?;
+        // Atomic promote temp -> final on the same volume.
+        promote(&part, &final_path)
+    }
+
+    /// Like [`finish`], but stops at the validated `.part` file and returns its
+    /// path **without** renaming to the final name. Used when a second pass
+    /// (audio mux) must consume the silent video before the final output appears
+    /// atomically. The `.part` is left in place on success (the caller promotes
+    /// or consumes it) and removed on any ffmpeg failure/timeout.
+    // Implements: LLR-041, LLR-015, LLR-008, SR-011, SR-013
+    pub fn finish_to_part(mut self) -> Result<PathBuf> {
         self.finished = true;
         // Drop stdin to signal EOF.
         drop(self.stdin.take());
@@ -212,20 +229,7 @@ impl FfmpegEncoder {
             )));
         }
 
-        // Atomic promote temp -> final on the same volume.
-        std::fs::rename(&self.temp_path, &self.final_path).map_err(|e| {
-            let _ = std::fs::remove_file(&self.temp_path);
-            if is_disk_full(&e) {
-                disk_full_error(&self.final_path)
-            } else {
-                SlideshowError::Ffmpeg(format!(
-                    "Failed finalizing '{}': {}",
-                    self.final_path.display(),
-                    e
-                ))
-            }
-        })?;
-        Ok(())
+        Ok(self.temp_path.clone())
     }
 
     /// Signal the watchdog to stop, join it, and report whether it killed ffmpeg
@@ -303,6 +307,25 @@ impl Watchdog {
             killed,
         })
     }
+}
+
+/// Atomically promote an in-progress file (`.part`) to its final path on the
+/// same volume. On failure the source is removed and a disk-full error is mapped
+/// so a wedged finalize never leaves a complete-looking final file.
+// Implements: LLR-015, LLR-041, SR-011, SR-015
+pub fn promote(src: &Path, final_path: &Path) -> Result<()> {
+    std::fs::rename(src, final_path).map_err(|e| {
+        let _ = std::fs::remove_file(src);
+        if is_disk_full(&e) {
+            disk_full_error(final_path)
+        } else {
+            SlideshowError::Ffmpeg(format!(
+                "Failed finalizing '{}': {}",
+                final_path.display(),
+                e
+            ))
+        }
+    })
 }
 
 /// The distinguishable in-progress temp path for `output`: `<output>.part`.

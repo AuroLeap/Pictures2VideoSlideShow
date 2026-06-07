@@ -34,7 +34,7 @@ config (TOML)               media scan (rayon)            per clip
 | `src/util` | dirs, progress |
 
 <!-- BEGIN GENERATED MODULE MAP (scripts/trace.ps1) -->
-_Generated 2026-06-04. Public items by module:_
+_Generated 2026-06-07. Public items by module:_
 
 - **src/config/location.rs**
   - `pub fn choose_config_dir(`
@@ -52,11 +52,18 @@ _Generated 2026-06-04. Public items by module:_
   - `pub fn validate(&self) -> Result<()>`
 - **src/error.rs**
   - `pub enum SlideshowError`
+- **src/ffmpeg/audio.rs**
+  - `pub struct AudioClip`
+  - `pub struct AudioParams`
+  - `pub fn delay_ms(start_frame: u64, fps: u32) -> u64`
+  - `pub fn mux_audio(`
 - **src/ffmpeg/mod.rs**
   - `pub struct FfmpegEncoder`
   - `pub fn start(`
   - `pub fn write_frame(&mut self, data: &[u8]) -> Result<()>`
-  - `pub fn finish(mut self) -> Result<()>`
+  - `pub fn finish(self) -> Result<()>`
+  - `pub fn finish_to_part(mut self) -> Result<PathBuf>`
+  - `pub fn promote(src: &Path, final_path: &Path) -> Result<()>`
 - **src/ffmpeg/resolve.rs**
   - `pub enum Source`
   - `pub fn pick(configured_ok: bool, on_path: bool, cached_ok: bool) -> Option<Source>`
@@ -138,6 +145,8 @@ _Generated 2026-06-04. Public items by module:_
   - `pub fn open(path: &Path, width: u32, height: u32, fps: u32) -> Result<Self>`
   - `pub fn read_frame(&mut self) -> Result<Option<Vec<u8>>>`
 <!-- END GENERATED MODULE MAP -->
+
+
 
 
 

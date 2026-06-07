@@ -111,11 +111,13 @@ For a basic end-user run you do **not** edit this file by hand — the first-run
 | `max_rotation_degrees` | degrees | *(required)* | Subtle Ken Burns tilt; `0` disables rotation. |
 | `bulk_video_time_min` | minutes | *(required)* | Target length per file. **Splitting not implemented in Rust** (see §5) — currently one continuous MP4. |
 | `quality_crf` | CRF 0-51 (lower = better/larger) | *(required; recommend 28)* | H.264 quality. Validated to 0-51. |
-| `enable_audio` | bool | `false` | **Audio not implemented in Rust** (see §5) — leave `false`. |
+| `enable_audio` | bool | `false` | Preserve **source-video** audio in this output (images are silent). `true` carries each video clip's audio into the slideshow, in sync (see §7). |
+| `audio_bitrate_kbps` | kbps | `192` | AAC bitrate for the muxed audio track (used when `enable_audio = true`). |
+| `audio_sample_rate` | Hz | `48000` | Audio sample rate for the muxed track (used when `enable_audio = true`). |
 | `zoom_amount` | fraction | `0.12` | Ken Burns zoom (0.12 = up to 12% over the clip). Direction randomized per image. |
 | `ken_burns` | bool | `true` | `false` = static cover-fit (fade only, no pan/zoom). |
 
-> Note: fields marked *(required)* must be present in the TOML even though the recommended values are given in §3. `zoom_amount`/`ken_burns` have serde defaults and may be omitted.
+> Note: fields marked *(required)* must be present in the TOML even though the recommended values are given in §3. `zoom_amount`/`ken_burns`/`audio_bitrate_kbps`/`audio_sample_rate` have serde defaults and may be omitted.
 
 ---
 
@@ -125,7 +127,6 @@ The Rust engine is fast but feature-incomplete. These gaps are stated **here onc
 
 | Gap | Impact | What to do today |
 |---|---|---|
-| **Audio** | Output is silent (`enable_audio` is accepted but ignored). | Leave `enable_audio = false`. If you need audio, use the **PowerShell pipeline** on `main` (partial audio support). |
 | **`bulk_video_time_min` splitting** | Rust writes **one continuous MP4 per output**, no matter how long. A long album can cross the **4 GB FAT32 wall**. | Keep the album small, raise `quality_crf` (smaller file), use an **exFAT/NTFS** card, or use the **PowerShell pipeline** (which splits into ~20-min parts). |
 | Shared video-decode across multiple outputs | Each output re-decodes videos (slower with many outputs). | Cosmetic/perf only; no action needed. |
 | GPU acceleration | CPU-only encode. | None; CPU path is already 10-15x faster than PowerShell. |
@@ -156,3 +157,34 @@ used) — all values are fractions of image width/height, clamped to `0-1`. This
 the hook for feeding **face/feature-recognition** output: emit one entry per image
 and the zoom holds that region. Paths match case-insensitively and accept either
 `/` or `\` separators.
+
+## 7. Audio — source-video passthrough (SR-032)
+
+Photos are silent, but the audio of your **source video clips** can be carried into
+the slideshow. Set `enable_audio = true` on an output:
+
+```toml
+[[outputs]]
+# ...
+enable_audio = true
+audio_bitrate_kbps = 192   # AAC bitrate (default 192)
+audio_sample_rate  = 48000 # Hz (default 48000)
+```
+
+Each video clip's audio is delayed to **its own position on the final
+(cross-dissolved) timeline** — the engine uses the clip's output start frame, so the
+sound stays in sync even though dissolves overlap clips (this is what the original
+PowerShell tool got wrong). Image segments are silent; an album with no audio-bearing
+videos still produces a valid silent output. The track is AAC in the MP4.
+
+> Limitation (v1): during the brief (≤ `fade_time_secs`) dissolve where two video
+> clips overlap, their audio currently overlaps rather than crossfading. A per-clip
+> audio fade is a planned refinement.
+
+## 8. Multiple frames / sizes
+
+The config already supports **multiple `[[outputs]]`** (one MP4 per block, each with
+its own resolution/fps/quality) — see [SR-017]. The first-run GUI wizard only
+scaffolds identical frames, so for **different** sizes either edit the TOML directly
+(add `[[outputs]]` blocks) or see the options write-up in
+[multi-frame-gui-options.md](design/multi-frame-gui-options.md).

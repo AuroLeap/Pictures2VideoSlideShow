@@ -17,6 +17,12 @@ pub struct MediaFile {
     pub dimensions: (u32, u32),
     pub duration_secs: Option<f32>,
     pub size_bytes: u64,
+    /// Whether the file carries a decodable audio stream (always `false` for
+    /// images). Drives audio passthrough: only audio-bearing video clips
+    /// contribute sound to the slideshow.
+    // Implements: LLR-039, SR-032
+    #[serde(default)]
+    pub has_audio: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -120,9 +126,12 @@ fn process_file(path: &Path) -> Result<Option<MediaFile>> {
 
     let metadata = std::fs::metadata(path)?;
 
-    let (dimensions, duration_secs) = match file_type {
-        MediaType::Image => (image::image_dimensions(path)?, None),
-        MediaType::Video => probe_video(path)?,
+    let (dimensions, duration_secs, has_audio) = match file_type {
+        MediaType::Image => (image::image_dimensions(path)?, None, false),
+        MediaType::Video => {
+            let (dims, dur) = probe_video(path)?;
+            (dims, dur, probe_has_audio(path))
+        }
     };
 
     Ok(Some(MediaFile {
@@ -131,7 +140,33 @@ fn process_file(path: &Path) -> Result<Option<MediaFile>> {
         dimensions,
         duration_secs,
         size_bytes: metadata.len(),
+        has_audio,
     }))
+}
+
+/// Whether `path` has at least one audio stream, via `ffprobe`. Used to decide
+/// which video clips contribute audio (a probe failure is treated as no audio
+/// so a quirky file can never break the build).
+// Implements: LLR-039, SR-032
+fn probe_has_audio(path: &Path) -> bool {
+    let output = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=codec_type",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+        ])
+        .arg(path)
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().contains("audio"),
+        _ => false,
+    }
 }
 
 /// Probe a video's dimensions and duration via `ffprobe`.
