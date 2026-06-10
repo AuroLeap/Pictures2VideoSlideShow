@@ -11,7 +11,7 @@ Back to [docs index](README.md) · [README](../README.md).
 - **Active objective:** ✅ **PROJECT COMPLETE — in maintenance.** All objectives signed off; FINAL end-user acceptance APPROVED 2026-06-04. Post-acceptance maintenance has added smooth sub-pixel Ken Burns + fixed-focus/ROI (SR-031) and source-video audio passthrough (SR-032), each fully traced (LLR-036..042, TC-052..059) and Verified; the deferred doc Inspections (SR-003/019/020/021/025) were performed and closed 2026-06-09 (see the maintenance log entries below).
 - **Round:** maintenance
 - **Mode:** pause-at-each-gate (gates only for new objectives; maintenance changes ride the harness + registry discipline per [CLAUDE.md](../CLAUDE.md))
-- **Latest measurements (2026-06-09):** `Scripts/trace.ps1 -Strict` SR=32 LLR=42 TC=59 orphans=0; full harness run recorded in the maintenance entry below. Closure-time figures (2026-06-04): lib 34 + bin 34 + integration 17 tests, 0 failed; clippy/fmt clean; coverage 81.00% (≥80%).
+- **Latest measurements (2026-06-09, `Scripts/run-tests.ps1`):** `cargo fmt --check` clean; `cargo clippy -D warnings` clean; `cargo test --all` lib 44 + bin 44 + integration 21 — 0 failed, 1 ignored (network FFmpeg fetch); `cargo llvm-cov` line **81.07%** (≥80%); `Scripts/trace.ps1 -Strict` SR=32 LLR=42 TC=59 **orphans=0**.
 - **Still open for the human (optional):** SR-023 release publish on a `v*` tag; real-ENOSPC (SR-015) and end-to-end inactivity-timeout (SR-013) demonstrations if desired.
 - **Next action:** None required.
 
