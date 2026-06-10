@@ -1,3 +1,6 @@
+//! Filesystem helpers: directory creation/writability checks and the
+//! disk-full (ENOSPC) detection used to produce plain-language errors.
+
 use crate::error::{Result, SlideshowError};
 use std::io;
 use std::path::Path;

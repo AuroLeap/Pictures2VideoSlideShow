@@ -1,3 +1,7 @@
+//! Configuration schema of record: load and validate the TOML config
+//! (`Config` → input/output/processing + per-output `OutputDef`), including
+//! Ken Burns, focus/ROI, and audio fields with their serde defaults.
+
 pub mod location;
 
 use crate::error::{Result, SlideshowError};

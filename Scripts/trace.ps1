@@ -89,27 +89,104 @@ if ($orphans.Count -eq 0) { [void]$sb.AppendLine("None. Full coverage.") }
 else { foreach ($o in $orphans) { [void]$sb.AppendLine("- $o") } }
 Set-Content -Path $report -Value $sb.ToString() -Encoding UTF8
 
-# --- regenerate architecture module map ---
+# --- regenerate architecture module map + dependency diagram ---
+# Mirrors the project-trajectory kit's gen_arch_map.py conventions for Rust:
+# per-file summary (first `//!` line), internal `crate::` dependencies, public
+# items with `Implements:` back-links, and a Mermaid graph of the module deps.
 $arch = Join-Path $docs 'architecture.md'
 if (Test-Path $arch) {
+    $srcRoot = Join-Path $repo 'src'
+    $files = Get-ChildItem $srcRoot -Recurse -Filter *.rs | Sort-Object FullName
+
+    # Top-level module of a file: src/foo.rs and src/foo/*.rs both -> foo.
+    function TopModule($file) {
+        $rel = $file.FullName.Substring($srcRoot.Length + 1).Replace('\','/')
+        return ($rel.Split('/')[0] -replace '\.rs$','')
+    }
+    $modNames = @($files | ForEach-Object { TopModule $_ } | Sort-Object -Unique)
+
     $map = [System.Text.StringBuilder]::new()
     [void]$map.AppendLine("<!-- BEGIN GENERATED MODULE MAP (scripts/trace.ps1) -->")
-    [void]$map.AppendLine("_Generated $(Get-Date -Format 'yyyy-MM-dd'). Public items by module:_")
+    [void]$map.AppendLine("_Generated $(Get-Date -Format 'yyyy-MM-dd') by ``scripts/trace.ps1`` from the source tree — do not edit by hand. Each file's summary is its first ``//!`` line; ``<- SR/LLR`` are the ``Implements:`` back-links found at the item; ``uses:`` lists in-tree modules the file references (``crate::``)._")
     [void]$map.AppendLine("")
-    Get-ChildItem (Join-Path $repo 'src') -Recurse -Filter *.rs | Sort-Object FullName | ForEach-Object {
-        $rel = $_.FullName.Substring($repo.Length + 1).Replace('\','/')
-        $pubs = Select-String -Path $_.FullName -Pattern '^\s*pub\s+(fn|struct|enum|trait)\s+\w+' |
-                ForEach-Object { ($_.Line.Trim() -replace '\s*\{.*$','') } | Select-Object -First 12
-        if ($pubs) {
-            [void]$map.AppendLine("- **$rel**")
-            foreach ($p in $pubs) { [void]$map.AppendLine("  - ``$p``") }
+
+    $edges = @{}        # "from|to" between top-level modules, for the diagram
+    $modSummary = @{}   # top-level module -> first summary seen (its mod.rs sorts first)
+    foreach ($f in $files) {
+        $rel = $f.FullName.Substring($repo.Length + 1).Replace('\','/')
+        $lines = @(Get-Content $f.FullName)
+        $top = TopModule $f
+
+        $summary = ($lines | Where-Object { $_ -match '^\s*//!' } | Select-Object -First 1) -replace '^\s*//!\s?',''
+        # The module's diagram label prefers its root file (src/<top>/mod.rs or
+        # src/<top>.rs) over whichever child file happens to sort first.
+        $isModRoot = $rel -in @("src/$top/mod.rs", "src/$top.rs")
+        if ($summary -and ($isModRoot -or -not $modSummary.ContainsKey($top))) { $modSummary[$top] = $summary }
+
+        # Internal deps: any `crate::<mod>` path naming another scanned top module.
+        $uses = $lines | ForEach-Object {
+            foreach ($m in [regex]::Matches($_, 'crate::(\w+)')) { $m.Groups[1].Value }
+        } | Where-Object { $modNames -contains $_ -and $_ -ne $top } | Sort-Object -Unique
+        foreach ($u in $uses) { $edges["$top|$u"] = $true }
+
+        # Public items + the SR/LLR ids annotated in the few lines just above each.
+        $pubs = @()
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match '^\s*pub\s+(fn|struct|enum|trait)\s+\w+') {
+                $decl = ($lines[$i].Trim() -replace '\s*\{.*$','')
+                $ids = @()
+                for ($j = [Math]::Max(0, $i - 6); $j -lt $i; $j++) {
+                    if ($lines[$j] -match '^\s*(//|#\[)') {
+                        $ids += [regex]::Matches($lines[$j], '\b(?:SR|LLR)-\d+\b') | ForEach-Object { $_.Value }
+                    }
+                }
+                $pubs += [pscustomobject]@{ Decl = $decl; Ids = @($ids | Sort-Object -Unique) }
+            }
+        }
+        if (-not ($summary -or $pubs)) { continue }
+        $head = "- **$rel**"
+        if ($summary) { $head += " — _${summary}_" }
+        [void]$map.AppendLine($head)
+        if ($uses) { [void]$map.AppendLine("  - uses: " + (($uses | ForEach-Object { '`' + $_ + '`' }) -join ', ')) }
+        foreach ($p in @($pubs | Select-Object -First 12)) {
+            $suffix = if ($p.Ids) { '  <- ' + ($p.Ids -join ', ') } else { '' }
+            [void]$map.AppendLine("  - ``$($p.Decl)``$suffix")
         }
     }
     [void]$map.AppendLine("<!-- END GENERATED MODULE MAP -->")
+
+    # Mermaid dependency diagram (top-level module granularity); spliced only if
+    # architecture.md carries the marker pair, mirroring the kit's optional block.
+    $dg = [System.Text.StringBuilder]::new()
+    [void]$dg.AppendLine("<!-- BEGIN GENERATED DEPENDENCY DIAGRAM (scripts/trace.ps1) -->")
+    [void]$dg.AppendLine("_Generated by ``scripts/trace.ps1``: each arrow is a ``crate::`` reference between top-level modules. Do not edit by hand._")
+    [void]$dg.AppendLine("")
+    [void]$dg.AppendLine('```mermaid')
+    [void]$dg.AppendLine('graph LR')
+    foreach ($m in $modNames) {
+        $label = $m
+        if ($modSummary.ContainsKey($m)) {
+            $s = $modSummary[$m] -replace '"',"'"
+            if ($s.Length -gt 48) { $s = $s.Substring(0,47) + '…' }
+            $label = "$m — $s"
+        }
+        [void]$dg.AppendLine("    m_$m[`"$label`"]")
+    }
+    foreach ($e in ($edges.Keys | Sort-Object)) {
+        $from, $to = $e.Split('|')
+        [void]$dg.AppendLine("    m_$from --> m_$to")
+    }
+    [void]$dg.AppendLine('```')
+    [void]$dg.AppendLine("<!-- END GENERATED DEPENDENCY DIAGRAM -->")
+
     $content = Get-Content $arch -Raw
     $pattern = '(?s)<!-- BEGIN GENERATED MODULE MAP.*?<!-- END GENERATED MODULE MAP -->'
     $content = [regex]::Replace($content, $pattern, [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $map.ToString().TrimEnd() })
-    Set-Content -Path $arch -Value $content -Encoding UTF8
+    $dgPattern = '(?s)<!-- BEGIN GENERATED DEPENDENCY DIAGRAM.*?<!-- END GENERATED DEPENDENCY DIAGRAM -->'
+    if ($content -match $dgPattern) {
+        $content = [regex]::Replace($content, $dgPattern, [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $dg.ToString().TrimEnd() })
+    }
+    Set-Content -Path $arch -Value $content.TrimEnd() -Encoding UTF8
 }
 
 Write-Host "Traceability: SR=$($srs.Count) LLR=$($llrs.Count) TC=$($tcs.Count) orphans=$($orphans.Count). Report -> docs/test/report.md"

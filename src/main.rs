@@ -1,3 +1,7 @@
+//! Binary entry point (`make_video_slideshow`): CLI parsing (build /
+//! validate / setup), the first-run wizard trigger, and the thin
+//! orchestration that wires config → pipeline.
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;

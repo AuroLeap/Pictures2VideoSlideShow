@@ -1,3 +1,6 @@
+//! Library crate root: re-exports the engine's modules so integration tests
+//! and the binary share one implementation.
+
 pub mod config;
 pub mod error;
 pub mod ffmpeg;

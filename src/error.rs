@@ -1,3 +1,7 @@
+//! The crate-wide error type: every failure maps to a `SlideshowError`
+//! variant with a plain-language message (no panics/stack traces for the
+//! end user).
+
 use std::io;
 use thiserror::Error;
 

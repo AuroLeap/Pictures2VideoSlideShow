@@ -1,3 +1,5 @@
+//! Small shared utilities: filesystem helpers and output-size estimation.
+
 pub mod estimate;
 pub mod file_utils;
 

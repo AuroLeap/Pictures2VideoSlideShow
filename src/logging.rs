@@ -1,3 +1,6 @@
+//! Logging setup: env_logger with millisecond timestamps; `--verbose`
+//! raises the level to Debug.
+
 use log::LevelFilter;
 
 pub fn init_logging(verbose: bool) -> std::io::Result<()> {
