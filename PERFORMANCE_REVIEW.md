@@ -1,5 +1,7 @@
 # Pictures2VideoSlideShow - Deep Performance Review & Refactoring Recommendations
 
+> **Historical review (PowerShell pipeline, pre-Rust).** The recommendations here led to the Rust engine, which is now the recommended path (see the [README Project Status](README.md#project-status)). Kept for history; current facts live in the [Quick Reference](docs/quick-reference.md).
+
 ## Executive Summary
 
 This is a PowerShell-based tool that converts photo/video collections into slideshow videos with professional transitions and effects for digital picture frames. While functional, the current architecture has **critical performance bottlenecks** primarily in:

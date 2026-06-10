@@ -1,5 +1,7 @@
 # Orders of Magnitude Performance Improvement: Detailed Analysis
 
+> **Historical analysis (PowerShell pipeline, pre-Rust).** This is the bottleneck analysis that motivated the rewrite; the "Rust rewrite" path it recommends **was chosen and shipped** (see the [README Project Status](README.md#project-status)). Numbers and options below describe the old PowerShell pipeline and are kept for history.
+
 ## Executive Summary
 
 To achieve **orders of magnitude improvement (5-10x+)**, you need to address the **60% bottleneck: ImageMagick frame generation**. This requires either:

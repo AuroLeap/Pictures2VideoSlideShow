@@ -1,5 +1,7 @@
 # Pictures2VideoSlideShow: Complete Refactoring Summary
 
+> **Historical snapshot (PowerShell pipeline, pre-Rust).** Performance numbers and the phased plan below predate the Rust engine, which shipped and is the recommended path (see the [README Project Status](README.md#project-status)). Kept for history.
+
 ## Quick Reference
 
 ### Current Performance

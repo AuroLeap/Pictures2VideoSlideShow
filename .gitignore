@@ -1,16 +1,12 @@
-﻿.vs
+.vs
 TestOut
 
 # Rust build artifacts
 /target
-AlbumOut1440x900q30-Groups
-AlbumOut1440x900q30
-AlbumOut1920x1080_FPS20_DT6_FT0.7_MR30q-Groups
-AlbumOut1920x1080_FPS20_DT6_FT0.7_MR30q
-AlbumOut1440x900_FPS20_DT6_FT0.7_MR30q22-Groups
-AlbumOut
-AlbumOut1920x1080_FPS20_DT6_FT0.7_MR30_q25-Groups
-AlbumOut1440x900_FPS20_DT6_FT0.7_MR30q30-Groups
-AlbumOut1920x1080_FPS20_DT6_FT0.7_MR30_q15
-AlbumOut1920x1080_FPS20_DT6_FT0.7_MR30_q25
-AlbumOut1920x1080_FPS20_DT6_FT0.7_MR30_q17
+
+# Local slideshow output folders (one per output definition / settings combo)
+AlbumOut*
+
+# Python bytecode (kit scripts in templates/)
+__pycache__/
+*.pyc
