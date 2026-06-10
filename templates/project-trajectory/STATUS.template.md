@@ -17,17 +17,26 @@ last) — it is the record, not required reading for every pass.
 
 - **Goal:**
 - **End user(s):**
+- **Active hats:** End User, UX/Docs, System Engineer, Software Engineer, Test
+  Engineer _(+ any domain hats this scope needs, e.g. Network / Security / Data /
+  Hardware — see process.md §1)_
+- **Supported platforms:** _(Linux / macOS / Windows — drives which setup/check
+  launchers must exist)_
 - **Constraints:**
 - **Non-goals:**
 - **Definition of done:**
 
 ## Gate Sign-offs
 
+Add columns for any active domain hats. Drop the `G-Release` row for a one-off
+deliverable.
+
 | Gate | End User | UX/Docs | System Eng | Test Eng | Human |
 |---|---|---|---|---|---|
 | G1 — Requirements/UX/Constraints | PENDING | PENDING | PENDING | n/a | PENDING |
 | G2 — Decomposition & Test Coverage | n/a | n/a | PENDING | PENDING | PENDING |
 | G3 — Implementation | n/a | n/a | PENDING | PENDING | PENDING |
+| G-Release — Release readiness | n/a | n/a | n/a | PENDING | PENDING |
 | G-Final — Acceptance | PENDING | n/a | n/a | (evidence) | PENDING |
 
 ---

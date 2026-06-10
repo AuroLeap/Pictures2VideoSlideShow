@@ -24,8 +24,8 @@ Edge-case table:
 
 ```csv
 SR-ID,Title,UN-Refs,Requirement,Rationale,AcceptanceCriteria,Permutations,Priority,Verification,Status
-SR-001,CSV export (RFC-4180),UN-001,"The system shall export records as RFC-4180 CSV with a header row.","Realizes UN-001 so the file opens cleanly in any spreadsheet.","Output parses as CSV; row count == records + 1 (header); columns match the documented schema in order; fields containing comma/quote/newline are quoted per RFC-4180.","field={plain,comma,quote,newline}",M,Test,Verified
-SR-002,Atomic export write,UN-013,"The system shall write the export to a temporary file and atomically rename it to the final name only after a successful write.","Realizes UN-013 so an interrupted run never leaves a complete-looking partial file.","A run interrupted before completion leaves no file at the final path (only a distinguishable temp); re-running completes normally.","interrupt={during-write,before-rename}",M,Demonstration,Implemented
+SR-001,CSV export (RFC-4180),UN-001,"The system shall export records as RFC-4180 CSV with a header row.","Realizes UN-001 so the file opens cleanly in any spreadsheet.","Output parses as CSV; row count == records + 1 (header); columns match the documented schema in order; fields containing comma/quote/newline are quoted per RFC-4180.","field=set{plain,comma,quote,newline}",M,Test,Verified
+SR-002,Atomic export write,UN-013,"The system shall write the export to a temporary file and atomically rename it to the final name only after a successful write.","Realizes UN-013 so an interrupted run never leaves a complete-looking partial file.","A run interrupted before completion leaves no file at the final path (only a distinguishable temp); re-running completes normally.","interrupt=set{during-write,before-rename}",M,Demonstration,Implemented
 ```
 
 Note: each SR has **measurable** acceptance criteria a test can assert (not "exports correctly"), links its UN, and uses `Permutations` so one row covers many cases.
@@ -45,14 +45,54 @@ Detail *decomposes* the SR — it doesn't restate it.
 ## 4. Test Cases — `test/test-cases.csv`
 
 ```csv
-TC-ID,Verifies,Level,Method,Parameters,Expected,Automated,Status
-TC-001,SR-001;LLR-001,Unit,"to_csv over records incl. special-character fields; parse the result back","field={plain,comma,quote,newline}","Satisfies SR-001 AcceptanceCriteria",Yes,Verified
-TC-002,SR-002;LLR-002,Integration,"Abort write_atomic mid-write; assert no file at the final path and the tmp is cleaned; then a normal run succeeds","interrupt={during-write,before-rename}","Satisfies SR-002 AcceptanceCriteria",Yes,Verified
+TC-ID,Verifies,Level,Method,Tier,Parameters,Expected,Automated,Status
+TC-001,SR-001;LLR-001,Unit,"to_csv over records incl. special-character fields; parse the result back",Smoke,"field=set{plain,comma,quote,newline}","Satisfies SR-001 AcceptanceCriteria",Yes,Verified
+TC-002,SR-002;LLR-002,Integration,"Abort write_atomic mid-write; assert no file at the final path and the tmp is cleaned; then a normal run succeeds",Full,"interrupt=set{during-write,before-rename}","Satisfies SR-002 AcceptanceCriteria",Yes,Verified
 ```
+
+The `Tier` column controls when a test runs: the cheap `to_csv` unit test is
+`Smoke` (every iteration); the slower interruption integration test is `Full`
+(pre-merge). A test needing real hardware or a long soak would be `Release`.
+Mark `Smoke` tests `@pytest.mark.smoke` and `Release` tests
+`@pytest.mark.release`; an unmarked test lands in `Full` — the pre-merge tier —
+by default, so `check.py --tier` can never silently skip it.
 
 Each TC lists the SR **and** the LLR it covers (so both levels are covered by
 one row), expands the requirement's `Permutations`, and **cites** the acceptance
 criteria by id rather than paraphrasing them.
+
+## 4b. Dimensional coverage — boundaries × combinations
+
+`SR-001` has three variable inputs, so one happy-path test is not enough. Declare
+the dimensions in its `Permutations` cell (note **boundary** values and a
+strategy):
+
+```
+field=set{plain,comma,quote,newline}; size=range[0..2GiB]; enc=set{utf8,utf16}; @pairwise
+```
+
+`field` is an equivalence partition (one representative per special-char class);
+`size` contributes its **boundaries** (empty `0` and the max `2GiB` — the
+classic empty-input / overflow catchers); `enc` is two classes. The full product
+is 4 × 2 × 2 = 16. Feed the cell to the generator:
+
+```
+$ python scripts/gen_cases.py --spec "field=set{plain,comma,quote,newline}; size=range[0..2GiB]; enc=set{utf8,utf16}; @pairwise" --id SR-001
+# Dimensional analysis for SR-001
+  - field (4 values): plain, comma, quote, newline
+  - size (2 values): *0*, *2GiB*   (* = boundary)
+  - enc (2 values): utf8, utf16
+  strategy: pairwise   cases: 8  (full product = 16; 50% reduction)
+```
+
+Eight cases instead of sixteen, yet every value of every dimension is still paired
+with every value of the others — e.g. `quote` is tried at both `0` and `2GiB` and
+in both encodings. TC-001 then **expands** these into its `Parameters` (or a
+parametrized test) instead of sixteen near-duplicate rows. If this were an
+expensive integration path, `--strategy boundaries` would drop it to a handful of
+extreme-corner cases for the `Release` tier; if it were a corruption-risk path,
+`@full` would keep all sixteen. **Match the strategy to risk and run cost; let the
+generator produce the combinations.**
 
 ## 5. Code back-links (in the source)
 

@@ -9,7 +9,7 @@ Engineering translations live in `system-requirements.csv` (referenced by
 
 | UN-ID | Need (plain language) | Why it matters | Priority | Acceptance intent (how we'd know it's met) |
 |---|---|---|---|---|
-| UN-001 | | | | |
+| UN-000 | _EXAMPLE — replace this row; number real needs sequentially (the `-000` id is a placeholder the tooling ignores)._ | | | |
 
 ## Edge-case expectations
 

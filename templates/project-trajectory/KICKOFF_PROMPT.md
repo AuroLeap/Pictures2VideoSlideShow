@@ -21,7 +21,11 @@ for **end-user usability and corner cases**, not just the happy path.
   full context across them. Do NOT spin up a separate sub-agent for every role —
   cold sub-agents re-derive context you already hold and waste budget. The hats:
   **End User**, **UX/Docs**, **System Engineer (gatekeeper)**, **Software
-  Engineer**, **Test Engineer**. Switch hats explicitly in your notes.
+  Engineer**, **Test Engineer**. Switch hats explicitly in your notes. At setup,
+  add any **domain hats** the scope demands (e.g. Network, Security, Data/ML,
+  Hardware/Mechanical, Mechatronics, SRE) — each owns its slice of the
+  requirements and brings its own edge cases and release-checklist items; record
+  the active hats in `status.md`.
 - **Spawn a separate sub-agent only for an independent adversarial review before
   a gate** — and only at full depth for high-risk work (security, data-loss/
   crash-safety, money, irreversible actions, gate closure). For low-risk or
@@ -37,8 +41,12 @@ for **end-user usability and corner cases**, not just the happy path.
 
 ## Artifacts to create (the project's "blackboard")
 
-Create these in the repo (use the companion templates as exact formats):
+Create these in the repo (use the companion templates as exact formats). If the
+kit is present, the fastest path is `python scripts/bootstrap.py --dest .` from
+inside it, which lays down everything below; otherwise copy + rename by hand.
 
+- `CLAUDE.md` — the agent/contributor guide with the readability conventions
+  (copy `CLAUDE.template.md`).
 - `docs/process.md` — the method, gates, ID scheme, anti-duplication rules,
   verdict protocol (copy `PROCESS.md`).
 - `docs/status.md` — live state, gate sign-off table, append-only audit log
@@ -50,10 +58,14 @@ Create these in the repo (use the companion templates as exact formats):
   (Software Engineer owns).
 - `docs/test/test-cases.csv` — **TC-###** ↔ requirements (Test Engineer owns).
 - `docs/architecture.md` — one-page overview + a **generated** module/function
-  map (copy `ARCHITECTURE.template.md`).
-- A runnable **check harness** (`scripts/check.*` or equivalent) that runs
-  format + lint + tests + coverage + the traceability check, plus a CI workflow
-  that runs the same. Wire it to this project's stack.
+  map (copy `ARCHITECTURE.template.md`; refresh it with `scripts/gen_arch_map.py`).
+- `docs/interfaces.md` + `docs/requirements/interfaces.csv` — **IF-###**
+  cross-project contracts (copy `INTERFACES.template.md` + the registry).
+  **Only if this project interlinks with another repo**; otherwise omit.
+- A runnable **check harness** — copy `scripts/check.py` (the reference runs
+  format + lint + tests + coverage + traceability + arch-map freshness) and wire
+  its `STEPS` to this project's stack, plus the CI workflow (`ci/check.yml`) that
+  runs the same command.
 
 ## Traceability & anti-duplication (non-negotiable)
 
@@ -89,12 +101,29 @@ low-level requirement (links SR, names module/symbol) → `TC-###` test case
 - **G2 — Decomposition & test coverage.** Every SR → ≥1 LLR (or marked
   Analysis/Inspection); every SR and LLR has ≥1 TC; traceability reports **0
   orphans**; the harness runs locally and in CI. Human approves.
-- **G3 — Implementation.** Build green, lint clean, all tests pass, coverage ≥
-  threshold; every test-verifiable SR is **Verified**, and every remaining SR is
-  explicitly classified **Demonstration / Manual / Inspection** (nothing
-  hand-waved). Human approves.
+- **G3 — Implementation.** Build green, lint clean, the **full** test tier
+  passes, coverage ≥ threshold; every test-verifiable SR is **Verified**, and
+  every remaining SR is explicitly classified **Demonstration / Manual /
+  Inspection** (nothing hand-waved). Human approves.
+- **G-Release — Release readiness** *(per release; skip for a one-off)*. The
+  **release** test tier passes; the generated release checklist
+  (`scripts/gen_release_checklist.py`) is completed + signed; version bumped;
+  changed `Stable` interface versions communicated. Human approves.
 - **G-Final — Acceptance.** A human/end-user exercises the real product
   (including the Demonstration/Manual items) and signs off.
+
+Tag each `TC-###` with a **Tier** (`Smoke`/`Full`/`Release`) so the cheap gate
+can run every iteration and the expensive tests run only at release
+(`check.py --tier`).
+
+**Exercise the input space, not just the happy path.** For any SR with variable
+inputs, list its **dimensions** in `Permutations` (ranges + sets), cover the
+**boundaries** (min/max, empty/zero/one/largest, and just-outside for
+validation), and choose a combination strategy by risk and cost — **full** when
+small or high-risk, **pairwise (all-pairs)** as the default for ≥3 dimensions,
+**boundary-corners** for expensive/hardware paths. `scripts/gen_cases.py` derives
+the values and combinations (and shows the reduction vs. the full product); push
+heavy combinations to the `Release` tier. See PROCESS.md "Dimensional coverage".
 
 Record every gate decision and persona verdict in `docs/status.md` using the
 verdict protocol in `PROCESS.md`. Never report a green result you didn't run —
@@ -137,6 +166,12 @@ For each, ask "what does the user experience, and is it safe/clear/recoverable?"
 - **Primary end user(s) and their expertise level:**
 - **Must-have outcomes:**
 - **Hard constraints (platform, perf, size, compliance, deadlines):**
+- **Supported platforms (Linux / macOS / Windows):** _(determines which
+  setup/check launchers must ship)_
+- **Domain hats / disciplines this needs (beyond the core five):** _(e.g.
+  Network, Security, Data/ML, Hardware, Mechatronics — or "none")_
+- **Release cadence (one-off deliverable vs. versioned releases):** _(decides
+  whether G-Release + the release checklist apply)_
 - **Non-goals (explicitly out of scope):**
 - **Starting point (from scratch / existing draft or spec — link it):**
 - **Coverage threshold / quality bar:**
