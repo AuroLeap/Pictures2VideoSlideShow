@@ -195,6 +195,8 @@ End users do **not** install Rust, compile anything, or hand-edit a config file.
 
 > The first-run GUI wizard, the startup self-check, and the integrity-verified FFmpeg auto-fetch are **implemented** (SR-024/SR-026/SR-027/SR-029; auto-fetch pulls a pinned, checksummed FFmpeg 7.1 build, demonstrated end-to-end). The one piece still pending is a **published** GitHub Release of `make_video_slideshow.exe` (SR-023): the release workflow exists but nothing publishes until a maintainer pushes a `v*` tag. Until that first tag, build the binary once via the Developer path below — it behaves exactly as described (wizard, self-check, auto-fetch all work). See the [Quick Reference §1 note](docs/quick-reference.md#1-end-user-setup--download-run-done-no-rust-no-manual-config-editing).
 
+> **Want to see it work first?** The release zip bundles a one-click **`demo.bat`** that downloads a little free-use sample media and builds an example slideshow — no media of your own required. See **[Quick Reference §1c](docs/quick-reference.md#1c-try-the-bundled-demo-no-media-of-your-own-needed)** and [demo/README.md](demo/README.md).
+
 ### Build from source (developer) — Rust
 
 This is the **developer** path (audience split UN-021 / SR-025); end users skip it. Prerequisites: [Rust](https://rustup.rs/) (cargo) and FFmpeg on `PATH`. Full steps are in the **[Quick Reference §1a](docs/quick-reference.md#1a-developer-setup--build-from-source-rust)**. In short:
@@ -536,7 +538,7 @@ CLI Tools (magick, ffmpeg)
 3. **MetadataReader** - JSON-based property extraction
 4. **PowerShell Wrapper** - Integration layer
 
-*See PHASE2_IMPLEMENTATION.md for complete C# implementation guide*
+*See [planning/PHASE2_IMPLEMENTATION.md](planning/PHASE2_IMPLEMENTATION.md) for complete C# implementation guide*
 
 ---
 
@@ -686,12 +688,13 @@ $env:PATH += ";C:\Program Files\ffmpeg\bin"
 | **[docs/quick-reference.md](docs/quick-reference.md)** | One-page cheat-sheet: Rust commands, recommended frame settings, every config field, current gaps | You just want the command + safe settings |
 | **[docs/](docs/README.md)** | Engineering docs index: requirements, traceability, architecture, tests | Contributing or tracing a requirement |
 | **[docs/process.md](docs/process.md)** | Multi-agent SDLC: roles, gates, ID scheme, anti-duplication, verdict protocol | Running/understanding the `/grind` workflow |
-| **RUST_IMPLEMENTATION_ROADMAP.md** | Rust rewrite phases + live implementation status | Working on the Rust engine |
-| **RUST_IMPLEMENTATION_SPEC.md** | Rust technical architecture & data model | Understanding the Rust design |
-| **PERFORMANCE_REVIEW.md** | Deep technical bottleneck analysis | Planning Phase 2+, understanding architecture |
-| **PHASE1_OPTIMIZATIONS.md** | Step-by-step Phase 1 guide | Starting Phase 1 implementation |
-| **PHASE2_IMPLEMENTATION.md** | C# wrapper implementation guide | Planning/implementing Phase 2 |
-| **REFACTORING_SUMMARY.md** | Quick reference & decision matrix | Deciding which phase to implement |
+| **[planning/](planning/README.md)** | Historical planning, design & performance-analysis docs (Rust rewrite roadmap/spec, optimization phases, refactoring summary, resume pointer) | Researching the rewrite history or performance plans |
+| **[planning/RUST_IMPLEMENTATION_ROADMAP.md](planning/RUST_IMPLEMENTATION_ROADMAP.md)** | Rust rewrite phases + implementation status (historical) | Working on the Rust engine |
+| **[planning/RUST_IMPLEMENTATION_SPEC.md](planning/RUST_IMPLEMENTATION_SPEC.md)** | Rust technical architecture & data model (design) | Understanding the Rust design |
+| **[planning/PERFORMANCE_REVIEW.md](planning/PERFORMANCE_REVIEW.md)** | Deep technical bottleneck analysis | Planning Phase 2+, understanding architecture |
+| **[planning/PHASE1_OPTIMIZATIONS.md](planning/PHASE1_OPTIMIZATIONS.md)** | Step-by-step Phase 1 guide | Starting Phase 1 implementation |
+| **[planning/PHASE2_IMPLEMENTATION.md](planning/PHASE2_IMPLEMENTATION.md)** | C# wrapper implementation guide | Planning/implementing Phase 2 |
+| **[planning/REFACTORING_SUMMARY.md](planning/REFACTORING_SUMMARY.md)** | Quick reference & decision matrix | Deciding which phase to implement |
 | **README.md** (this file) | Project overview & quick start | Getting started, configuration help |
 
 ---
@@ -764,6 +767,6 @@ For questions or issues:
 
 ---
 
-**Last Updated**: 2026-06-02  
-**Status**: PowerShell pipeline stable on `main`; Rust engine working end-to-end on `rust-rewrite` (Ken Burns + rotation + cross-fade + inline video + source-video audio passthrough)  
+**Last Updated**: 2026-06-09  
+**Status**: PowerShell pipeline stable on `main`; Rust engine working end-to-end on `rust-rewrite` (Ken Burns + rotation + cross-fade + inline video + source-video audio passthrough + one-click `demo.bat`)  
 **Next Step (Rust)**: `bulk_video_time_min` splitting into part files

@@ -1,6 +1,6 @@
 # Rust Rewrite: Next Steps
 
-> **Historical planning doc (2026-05-30).** Written when the Rust engine was a set of stubs. The engine is now **working end-to-end** — see the [README Project Status](README.md#project-status). For the authoritative **commands, config fields, and recommended settings**, use the **[Quick Reference](docs/quick-reference.md)** (single source of truth); any command/config snippets below are illustrative and may be out of date.
+> **Historical planning doc (2026-05-30).** Written when the Rust engine was a set of stubs. The engine is now **working end-to-end** — see the [README Project Status](../README.md#project-status). For the authoritative **commands, config fields, and recommended settings**, use the **[Quick Reference](../docs/quick-reference.md)** (single source of truth); any command/config snippets below are illustrative and may be out of date.
 
 **Branch**: `rust-rewrite`  
 **Timeline (original estimate)**: 3-5 weeks to 5-8x improvement

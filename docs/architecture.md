@@ -34,7 +34,7 @@ config (TOML)               media scan (rayon)            per clip
 | `src/util` | dirs, progress |
 
 <!-- BEGIN GENERATED MODULE MAP (scripts/trace.ps1) -->
-_Generated 2026-06-07. Public items by module:_
+_Generated 2026-06-09. Public items by module:_
 
 - **src/config/location.rs**
   - `pub fn choose_config_dir(`
@@ -145,6 +145,7 @@ _Generated 2026-06-07. Public items by module:_
   - `pub fn open(path: &Path, width: u32, height: u32, fps: u32) -> Result<Self>`
   - `pub fn read_frame(&mut self) -> Result<Option<Vec<u8>>>`
 <!-- END GENERATED MODULE MAP -->
+
 
 
 
