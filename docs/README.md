@@ -14,7 +14,8 @@ Engineering documentation for Pictures2VideoSlideShow, produced and maintained b
 | [requirements/low-level-requirements.csv](requirements/low-level-requirements.csv) | Software Engineer | Low-Level Requirements (LLR-###) ↔ code |
 | [test/test-cases.csv](test/test-cases.csv) | Test Engineer | Test Cases (TC-###) ↔ requirements |
 | [test/report.md](test/report.md) | generated | Coverage + traceability (orphans) — produced by `scripts/trace.ps1` |
-| [architecture.md](architecture.md) | Software Engineer | One-page flow + generated module/function map |
+| [architecture.md](architecture.md) | Software Engineer | One-page Mermaid flow + generated dependency diagram & module map |
+| [design/](design/) | Software Engineer | Design write-ups for prospective features (e.g. [multi-frame GUI options](design/multi-frame-gui-options.md)) |
 | [ux/notes.md](ux/notes.md) | UX Designer | Usability findings, doc map, (UI assets if any) |
 
 Anything in these docs is referenced **by ID**; no topic is duplicated across files (see [process.md §4](process.md#4-traceability--anti-duplication-read-this-carefully)).
