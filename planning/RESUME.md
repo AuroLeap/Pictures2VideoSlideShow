@@ -1,14 +1,14 @@
 # Session Resume / Handoff
 
-_Last updated: 2026-06-09. Single source of truth for live status is
-[`docs/status.md`](docs/status.md); this file is the quick "where were we" pointer._
+_Last updated: 2026-06-10. Single source of truth for live status is
+[`docs/status.md`](../docs/status.md); this file is the quick "where were we" pointer._
 
 > **Maintenance since acceptance:** smooth sub-pixel Ken Burns + fixed-focus/ROI
 > database (SR-031), source-video audio passthrough (SR-032), the deferred doc
-> inspections closed (SR-003/019/020/021/025), a root [CLAUDE.md](CLAUDE.md)
+> inspections closed (SR-003/019/020/021/025), a root [CLAUDE.md](../CLAUDE.md)
 > agent guide, and the enriched generated architecture map + Mermaid dependency
 > diagram (template-kit sync from `ai-template`). Registries now SR=32 / LLR=42 /
-> TC=59, orphans=0. Details in [docs/status.md](docs/status.md) "MAINTENANCE"
+> TC=59, orphans=0. Details in [docs/status.md](../docs/status.md) "MAINTENANCE"
 > entries; the snapshot below is the original 2026-06-04 handoff.
 
 ## TL;DR
@@ -51,12 +51,12 @@ Test media lives in `TestInput/`; the test config is `test_config.toml` → outp
 
 ## The multi-agent "grind" framework (reusable)
 
-- Personas: [`.claude/agents/`](.claude/agents/) (end-user, ux-designer, system-engineer, software-engineer, test-engineer)
-- Orchestrator command: [`.claude/commands/grind.md`](.claude/commands/grind.md) — `/grind [1|2|3|final|auto]`
-- Process (roles, gates, ID scheme, anti-duplication, verdict protocol): [`docs/process.md`](docs/process.md)
-- Live blackboard / gate sign-offs / full audit log: [`docs/status.md`](docs/status.md)
-- Registries: [`docs/requirements/`](docs/requirements/) (user-needs.md, system-requirements.csv, low-level-requirements.csv), [`docs/test/test-cases.csv`](docs/test/test-cases.csv)
-- One-page cheat sheet: [`docs/quick-reference.md`](docs/quick-reference.md)
+- Personas: [`.claude/agents/`](../.claude/agents/) (end-user, ux-designer, system-engineer, software-engineer, test-engineer)
+- Orchestrator command: [`.claude/commands/grind.md`](../.claude/commands/grind.md) — `/grind [1|2|3|final|auto]`
+- Process (roles, gates, ID scheme, anti-duplication, verdict protocol): [`docs/process.md`](../docs/process.md)
+- Live blackboard / gate sign-offs / full audit log: [`docs/status.md`](../docs/status.md)
+- Registries: [`docs/requirements/`](../docs/requirements/) (user-needs.md, system-requirements.csv, low-level-requirements.csv), [`docs/test/test-cases.csv`](../docs/test/test-cases.csv)
+- One-page cheat sheet: [`docs/quick-reference.md`](../docs/quick-reference.md)
 
 ## Optional follow-ups (nothing required)
 

@@ -1,6 +1,6 @@
 # Phase 2 Implementation Guide: C# Wrapper Library (2-3 Weeks, 4-6x Total Speedup)
 
-> **Historical design (superseded).** The C# wrapper approach described here was **not pursued** — the project went straight to the Rust engine (see the [README Project Status](README.md#project-status)). Kept for history.
+> **Historical design (superseded).** The C# wrapper approach described here was **not pursued** — the project went straight to the Rust engine (see the [README Project Status](../README.md#project-status)). Kept for history.
 
 ## Overview
 

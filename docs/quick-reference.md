@@ -44,6 +44,28 @@ The GUI wizard and the dependency-fetch prompts appear **only in interactive use
 
 ---
 
+## 1c. Try the bundled demo (no media of your own needed)
+
+Want to see it work before pointing it at your own photos? The release `.zip` ships a
+**`demo.bat`** (next to `make_video_slideshow.exe`) that downloads a little free-use
+sample media and builds an example slideshow (UN-029 / SR-033).
+
+1. **Extract the whole release `.zip`** so `demo.bat` sits beside
+   `make_video_slideshow.exe` (it does in the zip; if you built from source, copy
+   `make_video_slideshow.exe` next to `demo.bat`).
+2. **Double-click `demo.bat`.** It downloads ~12 MB of public-domain / CC0 photos and
+   short video clips (from Wikimedia Commons) into a `demo-media\` folder — verifying each
+   against a pinned SHA-256 — then runs `validate` and `build` using the bundled
+   `demo_config.toml` + `focus.json`.
+
+The example slideshow lands in **`demo-output\demo-1280x800.mp4`**. The bundled
+`demo_config.toml` is a complete, valid config you can copy for your own media, and
+`focus.json` is a worked **Ken Burns focus database** (§6). Re-running is instant
+(already-downloaded media is reused). Details + the media license manifest:
+[demo/README.md](../demo/README.md).
+
+---
+
 ## 2. Commands
 
 These work for both audiences once you have `make_video_slideshow.exe` (end user: downloaded from GitHub Releases per §1; developer: from `cargo build --release` per §1a).

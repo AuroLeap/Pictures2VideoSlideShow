@@ -8,10 +8,10 @@ Back to [docs index](README.md) · [README](../README.md).
 
 ## Current state
 
-- **Active objective:** ✅ **PROJECT COMPLETE — in maintenance.** All objectives signed off; FINAL end-user acceptance APPROVED 2026-06-04. Post-acceptance maintenance has added smooth sub-pixel Ken Burns + fixed-focus/ROI (SR-031) and source-video audio passthrough (SR-032), each fully traced (LLR-036..042, TC-052..059) and Verified; the deferred doc Inspections (SR-003/019/020/021/025) were performed and closed 2026-06-09 (see the maintenance log entries below).
+- **Active objective:** ✅ **PROJECT COMPLETE — in maintenance.** All objectives signed off; FINAL end-user acceptance APPROVED 2026-06-04. Post-acceptance maintenance has added smooth sub-pixel Ken Burns + fixed-focus/ROI (SR-031), source-video audio passthrough (SR-032), the one-click bundled demo (SR-033), closed the deferred doc Inspections (SR-003/019/020/021/025), and merged the demo enhancement with the template-kit-sync session (see the 2026-06-09/10 log entries below).
 - **Round:** maintenance
 - **Mode:** pause-at-each-gate (gates only for new objectives; maintenance changes ride the harness + registry discipline per [CLAUDE.md](../CLAUDE.md))
-- **Latest measurements (2026-06-09, `Scripts/run-tests.ps1`):** `cargo fmt --check` clean; `cargo clippy -D warnings` clean; `cargo test --all` lib 44 + bin 44 + integration 21 — 0 failed, 1 ignored (network FFmpeg fetch); `cargo llvm-cov` line **81.07%** (≥80%); `Scripts/trace.ps1 -Strict` SR=32 LLR=42 TC=59 **orphans=0**.
+- **Latest measurements (2026-06-10 post-merge, `Scripts/run-tests.ps1`):** `cargo fmt --check` clean; `cargo clippy -D warnings` clean; `cargo test --all` lib 45 + bin 45 + integration 23 — 0 failed, 1 ignored (network FFmpeg fetch); `cargo llvm-cov` line **81.26%** (≥80%); `Scripts/trace.ps1 -Strict` SR=33 LLR=44 TC=62 **orphans=0**.
 - **Still open for the human (optional):** SR-023 release publish on a `v*` tag; real-ENOSPC (SR-015) and end-to-end inactivity-timeout (SR-013) demonstrations if desired.
 - **Next action:** None required.
 
@@ -973,3 +973,18 @@ Synced `templates/project-trajectory/` with the upstream `ai-template` repo (@05
 - TC-037/SR-025: End User vs Developer paths are distinct labeled sections; end-user path has zero Rust/cargo steps.
 
 Verdict: APPROVE (maintenance; no gate). Harness + `trace.ps1 -Strict` evidence recorded in the Current state header.
+### ENHANCEMENT — Bundled one-click demo (`demo.bat`) — 2026-06-09
+Post-completion enhancement requested by the human: a one-double-click example so a new user can see the engine work before supplying their own media. Threaded with full SDLC traceability:
+- **UN-029** (C) — one-click example that fetches free-use sample media and produces a slideshow.
+- **SR-033** (UN-029, Demonstration) — ship a runnable `demo.bat` bundled beside the exe (release zip) that downloads integrity-verified free-use sample media, then runs `validate`+`build` using a bundled valid config + ROI focus file; exe-absent → named error + non-zero; checksum-mismatch → file rejected.
+- **LLR-043** (SR-033) — `demo/demo.bat` (curl + certutil SHA-256, idempotent, interactive so FFmpeg auto-fetches) + `.github/workflows/release.yml` demo-kit staging + `make_video_slideshow-<tag>.zip` (FFmpeg still NOT bundled). **LLR-044** (SR-033;SR-003;SR-031) — bundled `demo_config.toml` + `focus.json` are a valid configuration (point + bbox), guarded by `tests/demo_assets.rs`.
+- **TC-060** (SR-033;LLR-043, Demonstration) — clean-host run of `demo.bat`. **TC-061** (SR-033;LLR-044;SR-003;SR-031, Automated) — `cargo test --test demo_assets` asserts the shipped config/focus parse, validate, and resolve.
+- Sample media: 3 images + 2 short clips from Wikimedia Commons, all public-domain / CC0 (~12 MB), pinned by URL + SHA-256 in `demo.bat`; manifest in [demo/README.md](../demo/README.md). Docs: Quick Reference §1c (canonical demo steps) + README pointer.
+- Machine checks: `Scripts/trace.ps1 -Strict` → **SR=33 LLR=44 TC=61 orphans=0**, exit 0. `cargo` is not installed on this dev host, so `cargo test --test demo_assets` / fmt / clippy are deferred to CI (the test uses only verified public APIs: `Config::from_file`/`validate`, `RoiDb::load`/`focus_for`). The `demo.bat` download + SHA-256 verify + reuse + mismatch-abort logic was validated directly on Windows (curl/certutil), and a batch block-parse bug (a literal `)` inside an `if (…)` echo) was found and fixed.
+
+### MERGE — demo enhancement reconciled with the maintenance session — 2026-06-10
+Merged origin/rust-rewrite (02c8ecd, the demo.bat enhancement, authored on a host without cargo) into the local maintenance commits. Running the deferred checks locally surfaced three defects in the incoming work, fixed in the merge commit:
+- **`demo/demo_config.toml` did not parse** — `[processing]` omitted `dry_run`/`verbose`/`use_parallelism`, which Quick Reference §4 documents as defaulted (false/false/true) but the code required. Fixed the *code* to honor the documented contract (serde defaults on `ProcessingConfig`, SR-003), pinned by new unit test `config::tests::processing_flags_default_when_omitted_sr003` (**TC-062**).
+- **`tests/demo_assets.rs` could never pass from a clean checkout** — it called `Config::validate()`, which requires `media_root` ("demo-media") to exist, but that folder only exists after demo.bat downloads. The test now pins the shipped relative value and validates against a temp stand-in dir.
+- **clippy (`-D warnings`)**: `% 2 == 0` → `is_multiple_of(2)`; rustfmt on the test file.
+Merge resolutions: kept both status logs; combined .gitignore (demo artifacts + AlbumOut* glob); regenerated report.md/architecture.md with the enriched generator; fixed the root-relative links inside the six historical headers after the planning/ move. `Scripts/trace.ps1 -Strict`: SR=33 LLR=44 TC=62 orphans=0. Full harness run post-merge recorded below.

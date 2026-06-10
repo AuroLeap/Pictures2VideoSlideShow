@@ -1,6 +1,6 @@
 # Performance Review & Refactoring Documentation
 
-> **Historical index (PowerShell-era performance docs).** Everything indexed here predates the shipped Rust engine (see the [README Project Status](README.md#project-status)); the docs are kept for history. Current commands/settings live in the [Quick Reference](docs/quick-reference.md).
+> **Historical index (PowerShell-era performance docs).** Everything indexed here predates the shipped Rust engine (see the [README Project Status](../README.md#project-status)); the docs are kept for history. Current commands/settings live in the [Quick Reference](../docs/quick-reference.md).
 
 ## 📋 Documentation Index
 

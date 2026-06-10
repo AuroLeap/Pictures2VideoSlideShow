@@ -34,6 +34,23 @@ jobs:
           Copy-Item target/release/make_video_slideshow.exe dist/
           # Ship the license alongside the binary.
           if (Test-Path LICENSE) { Copy-Item LICENSE dist/ }
+          # Bundle the one-click demo kit FLAT beside the exe so demo.bat finds it
+          # as a sibling (LLR-043 / SR-033). FFmpeg is still NOT bundled (SR-023).
+          Copy-Item demo/demo.bat        dist/
+          Copy-Item demo/demo_config.toml dist/
+          Copy-Item demo/focus.json      dist/
+          Copy-Item demo/README.md       dist/DEMO.md
+
+      - name: Package demo zip
+        shell: pwsh
+        run: |
+          # A single "download, extract, run demo.bat" archive: exe + demo kit
+          # (+ LICENSE), all flat so the demo runs from the extracted folder.
+          $tag = '${{ github.event.inputs.tag }}'
+          if (-not $tag) { $tag = '${{ github.ref_name }}' }
+          $zip = "make_video_slideshow-$tag.zip"
+          Compress-Archive -Path dist/* -DestinationPath $zip -Force
+          "ZIP=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
@@ -43,5 +60,6 @@ jobs:
           files: |
             dist/make_video_slideshow.exe
             dist/LICENSE
+            ${{ env.ZIP }}
           fail_on_unmatched_files: true
           generate_release_notes: true

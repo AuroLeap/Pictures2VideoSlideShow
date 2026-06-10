@@ -40,8 +40,14 @@ pub struct OutputConfig {
 pub struct ProcessingConfig {
     pub temp_dir: Option<PathBuf>,
     pub max_workers: Option<usize>,
+    // These three are documented in Quick Reference §4 with defaults
+    // (true / false / false), so omitting them must parse (SR-003).
+    // Implements: SR-003
+    #[serde(default = "default_true")]
     pub use_parallelism: bool,
+    #[serde(default)]
     pub dry_run: bool,
+    #[serde(default)]
     pub verbose: bool,
 
     /// Seconds of no encoder progress (no frame written to ffmpeg) after which a
@@ -239,6 +245,18 @@ mod tests {
     fn even_dims_never_zero_sr006() {
         // Odd 1 rounds down to 0 naively; must be clamped up to the even minimum.
         assert_eq!(sample_output(1, 1).even_dims(), (2, 2));
+    }
+
+    // Verifies: SR-003 — the [processing] flags documented with defaults in
+    // Quick Reference §4 (use_parallelism/dry_run/verbose) may be omitted from
+    // the TOML and take those documented defaults (true/false/false).
+    #[test]
+    fn processing_flags_default_when_omitted_sr003() {
+        let p: ProcessingConfig = toml::from_str("").expect("empty [processing] should parse");
+        assert!(p.use_parallelism, "documented default: true");
+        assert!(!p.dry_run, "documented default: false");
+        assert!(!p.verbose, "documented default: false");
+        assert_eq!(p.ffmpeg_timeout_secs, 120, "documented default: 120s");
     }
 
     // Verifies: SR-032, LLR-042 — audio config fields default when omitted from

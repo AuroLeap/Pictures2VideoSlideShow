@@ -96,7 +96,7 @@ graph LR
 ## Module map (generated)
 
 <!-- BEGIN GENERATED MODULE MAP (scripts/trace.ps1) -->
-_Generated 2026-06-09 by `scripts/trace.ps1` from the source tree — do not edit by hand. Each file's summary is its first `//!` line; `<- SR/LLR` are the `Implements:` back-links found at the item; `uses:` lists in-tree modules the file references (`crate::`)._
+_Generated 2026-06-10 by `scripts/trace.ps1` from the source tree — do not edit by hand. Each file's summary is its first `//!` line; `<- SR/LLR` are the `Implements:` back-links found at the item; `uses:` lists in-tree modules the file references (`crate::`)._
 
 - **src/config/location.rs** — _Config file location (SR-030): the config lives beside the executable when_
   - `pub fn choose_config_dir(`  <- LLR-035, SR-030

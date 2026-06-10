@@ -1,6 +1,6 @@
 # Rust Implementation Roadmap
 
-> **Design/planning doc.** For the authoritative **commands, config fields, and recommended frame settings**, use the **[Quick Reference](docs/quick-reference.md)** (single source of truth). The phase code samples and config snippets below are design sketches and may differ from the shipped code — `src/config/mod.rs` is the schema of record.
+> **Design/planning doc.** For the authoritative **commands, config fields, and recommended frame settings**, use the **[Quick Reference](../docs/quick-reference.md)** (single source of truth). The phase code samples and config snippets below are design sketches and may differ from the shipped code — `src/config/mod.rs` is the schema of record.
 
 **Branch**: `rust-rewrite`  
 **Goal**: 5-8x performance improvement (12 hours → 1.5-2.5 hours)  

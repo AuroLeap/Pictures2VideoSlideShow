@@ -4,6 +4,10 @@ TestOut
 # Rust build artifacts
 /target
 
+# Demo run artifacts (downloaded sample media + generated output)
+demo/demo-media
+demo/demo-output
+
 # Local slideshow output folders (one per output definition / settings combo)
 AlbumOut*
 

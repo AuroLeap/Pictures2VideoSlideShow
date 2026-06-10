@@ -1,6 +1,6 @@
 # Phase 1 Optimization Guide: Quick Wins (1 Week, 2-3x Speedup)
 
-> **Historical guide (PowerShell pipeline, pre-Rust).** These quick wins applied to the old PowerShell pipeline; the project instead shipped the Rust engine (10-15x; see the [README Project Status](README.md#project-status)). Kept for history.
+> **Historical guide (PowerShell pipeline, pre-Rust).** These quick wins applied to the old PowerShell pipeline; the project instead shipped the Rust engine (10-15x; see the [README Project Status](../README.md#project-status)). Kept for history.
 
 ## Overview
 Phase 1 requires **minimal code changes** with **maximum impact**. All changes are **low-risk** and can be implemented independently.
