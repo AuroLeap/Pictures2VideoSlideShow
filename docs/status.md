@@ -8,12 +8,12 @@ Back to [docs index](README.md) · [README](../README.md).
 
 ## Current state
 
-- **Active objective:** ✅ **PROJECT COMPLETE** — all objectives signed off. OBJ3 implementation closure SIGNED by Engineering + Human (2026-06-04), and the **FINAL end-user acceptance is APPROVED** (human ran the built exe: first-run GUI wizard → config written → slideshow produced on real media, 2026-06-04). Remaining work is optional/maintenance (publish a release on a `v*` tag; bump the pinned FFmpeg as desired).
-- **Round:** complete
-- **Mode:** pause-at-each-gate
-- **Closure measurements:** `cargo test --all` lib 34 + bin 34 + integration 17 — 0 failed, 0 ignored; `cargo clippy --all-targets -- -D warnings` clean; `cargo fmt --all -- --check` clean; `Scripts/trace.ps1 -Strict` SR=30 LLR=35 TC=51 orphans=0; `cargo llvm-cov --all --summary-only` line 81.00% (≥80%).
-- **Deferred to FINAL human-acceptance gate (Demonstration/Manual/Inspection):** SR-001 (clean-machine download→first slideshow), SR-012 (absent-FFmpeg message), SR-013 (end-to-end inactivity timeout), SR-015 (real ENOSPC), SR-023 (Releases publish on tag), SR-024 (interactive self-check/wizard launch), SR-026 (GUI dialog), SR-027 (online auto-fetch once pinned), plus the doc Inspections SR-003/019/020/021/025.
-- **Next action:** None required. Optional follow-ups: tag a `v*` release to publish `make_video_slideshow.exe` (SR-023); exercise the remaining Demonstration items (real ENOSPC, end-to-end inactivity timeout) if desired.
+- **Active objective:** ✅ **PROJECT COMPLETE — in maintenance.** All objectives signed off; FINAL end-user acceptance APPROVED 2026-06-04. Post-acceptance maintenance has added smooth sub-pixel Ken Burns + fixed-focus/ROI (SR-031) and source-video audio passthrough (SR-032), each fully traced (LLR-036..042, TC-052..059) and Verified; the deferred doc Inspections (SR-003/019/020/021/025) were performed and closed 2026-06-09 (see the maintenance log entries below).
+- **Round:** maintenance
+- **Mode:** pause-at-each-gate (gates only for new objectives; maintenance changes ride the harness + registry discipline per [CLAUDE.md](../CLAUDE.md))
+- **Latest measurements (2026-06-09):** `Scripts/trace.ps1 -Strict` SR=32 LLR=42 TC=59 orphans=0; full harness run recorded in the maintenance entry below. Closure-time figures (2026-06-04): lib 34 + bin 34 + integration 17 tests, 0 failed; clippy/fmt clean; coverage 81.00% (≥80%).
+- **Still open for the human (optional):** SR-023 release publish on a `v*` tag; real-ENOSPC (SR-015) and end-to-end inactivity-timeout (SR-013) demonstrations if desired.
+- **Next action:** None required.
 
 ## Gate Sign-offs
 
@@ -956,3 +956,20 @@ Verdict: APPROVED. Re-ran the built make_video_slideshow.exe: the Temp-folder la
 
 ### ORCHESTRATOR — Project complete — 2026-06-04
 All objectives closed: OBJ1 (requirements/UX/constraints), OBJ2 (LLR & test coverage), OBJ3 (implementation; coverage 81%, all test-verifiable SRs Verified, Demonstration items exercised incl. live FFmpeg auto-fetch), and FINAL (human end-user acceptance APPROVED). Remaining items are optional/maintenance: publish a release on a `v*` tag (SR-023) and bump the pinned FFmpeg version as desired. Harness green (cargo test/clippy/fmt), trace orphans=0.
+
+### MAINTENANCE — Post-acceptance features (back-filled entry) — 2026-06-05..08
+Two features shipped after FINAL acceptance, each fully traced in the same commits but not logged here at the time (this entry back-fills the log):
+- **SR-031 Smooth (sub-pixel) Ken Burns + fixed-focus/ROI database** (commit 046f4f3): single-warp sub-pixel render, per-output `default_focus`, per-image JSON ROI database. LLR-036/037/038; TC-052/053/054; Verified.
+- **SR-032 Source-video audio passthrough, synced to the crossfaded timeline** (commits ae80942, 5a3e3fc): ffprobe `has_audio` probe, per-clip output-start capture, adelay/amix AAC mux with atomic finalize. LLR-039..042; TC-055..059; Verified. SR-019 was amended (audio must no longer be listed as a gap) which reset it to Draft pending re-inspection — closed in the 2026-06-09 entry below.
+
+### MAINTENANCE — Template-kit sync + doc inspections closed — 2026-06-09
+Synced `templates/project-trajectory/` with the upstream `ai-template` repo (@05c50ab) and applied its new conventions here: root **CLAUDE.md** agent guide added; `Scripts/trace.ps1` now generates an **enriched module map** (per-file `//!` summaries, internal `crate::` deps, `Implements:` SR/LLR back-links) plus a **Mermaid dependency diagram** in [architecture.md](architecture.md); the hand-written flow there is now a Mermaid graph; `//!` headers added to the seven source files that lacked them.
+
+**Doc inspections performed (the items deferred at FINAL), closing TC-006/034/035/036/037 → SR-003/019/020/021/025 = Verified:**
+- TC-006/SR-003: Quick Reference §4 gives unit + default (or a required marker) for every config field; serde-default omission behavior is unit-tested.
+- TC-034/SR-019: Quick Reference §5 lists only the `bulk_video_time_min` splitting gap (with workarounds). **Findings fixed in the same change:** README implementation table still routed "Audio" users to PowerShell; Development Notes claimed "Audio export not fully implemented", "No unit test framework", "No CI/CD pipeline" without scoping to the PowerShell pipeline (all stale/false for the Rust engine). TC-034's own description still demanded audio be labeled not-implemented — rewritten to match the amended SR-019.
+- TC-035/SR-020: quick-reference linked from README; recommended settings live only in §3.
+- TC-036/SR-021: fps-range / CRF default / 3.5 GB threshold / resolution set each stated once and cross-linked; no conflicts.
+- TC-037/SR-025: End User vs Developer paths are distinct labeled sections; end-user path has zero Rust/cargo steps.
+
+Verdict: APPROVE (maintenance; no gate). Harness + `trace.ps1 -Strict` evidence recorded in the Current state header.

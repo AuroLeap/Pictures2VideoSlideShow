@@ -30,7 +30,7 @@ There are **two implementations** in this repository:
 
 | Implementation | Branch | Status | Use it for |
 |---|---|---|---|
-| **PowerShell** (original) | `main` / `dev` | Feature-complete reference | Audio, multi-part splitting, battle-tested output |
+| **PowerShell** (original) | `main` / `dev` | Feature-complete reference | Multi-part splitting, battle-tested output |
 | **Rust engine** (rewrite) | `rust-rewrite` | Active development, end-to-end working | **Speed** (~10-15x faster); see [Rust Engine](#rust-engine-high-performance-rewrite) |
 
 ### PowerShell Performance (baseline)
@@ -708,22 +708,20 @@ $env:PATH += ";C:\Program Files\ffmpeg\bin"
 
 ## Development Notes
 
-### Current Work (Dev Branch)
-- Audio extraction improvements (partially working)
+### Current Work (PowerShell pipeline, `dev` branch — historical)
+- Audio extraction improvements (partially working; the **Rust engine** does audio passthrough — see [Quick Reference §7](docs/quick-reference.md#7-audio--source-video-passthrough-sr-032))
 - Index definition updates
 - Parallel video creation refinements
 
-### Known Limitations
-- Audio export not fully implemented
-- No unit test framework
+### Known Limitations (PowerShell pipeline only)
+- Audio export not fully implemented (use the Rust engine's `enable_audio` instead)
+- No unit test framework and no CI for the PowerShell scripts (the **Rust engine** has a full `cargo test` suite, coverage gate, and [GitHub Actions CI](.github/workflows/ci.yml))
 - Limited error handling in some areas
-- No CI/CD pipeline
 
 ### Future Improvements
 - [x] Source-video audio passthrough (Rust engine — `enable_audio`)
-- [ ] Add comprehensive error handling
-- [ ] Implement unit test framework
-- [ ] Create CI/CD pipeline
+- [x] Unit test framework + CI/CD pipeline (Rust engine)
+- [ ] Comprehensive error handling in the PowerShell pipeline
 - [ ] GPU acceleration (Phase 3)
 
 ---
@@ -741,9 +739,9 @@ Found a bug or want to contribute?
    - Testing results on your setup
 
 ### Optimization Contribution Ideas
-- Reduce ImageMagick frame generation time further
+- Reduce ImageMagick frame generation time further (PowerShell pipeline)
 - Improve FFmpeg transition encoding
-- Implement audio export properly
+- Implement audio export in the PowerShell pipeline (the Rust engine already passes source audio through)
 - Add GPU acceleration support
 
 ---
