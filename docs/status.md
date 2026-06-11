@@ -988,3 +988,20 @@ Merged origin/rust-rewrite (02c8ecd, the demo.bat enhancement, authored on a hos
 - **`tests/demo_assets.rs` could never pass from a clean checkout** — it called `Config::validate()`, which requires `media_root` ("demo-media") to exist, but that folder only exists after demo.bat downloads. The test now pins the shipped relative value and validates against a temp stand-in dir.
 - **clippy (`-D warnings`)**: `% 2 == 0` → `is_multiple_of(2)`; rustfmt on the test file.
 Merge resolutions: kept both status logs; combined .gitignore (demo artifacts + AlbumOut* glob); regenerated report.md/architecture.md with the enriched generator; fixed the root-relative links inside the six historical headers after the planning/ move. `Scripts/trace.ps1 -Strict`: SR=33 LLR=44 TC=62 orphans=0. Full harness run post-merge recorded below.
+
+### INTERFACE — IF-001 ROI sidecar registered with PictureSorter — 2026-06-10
+The sibling PictureSorter project (the sorting tool that already computes face
+boxes / regions of interest during analysis) now **provides** a versioned ROI
+contract this tool consumes: **IF-001, "Photo ROI sidecar (focus database)"**.
+- The existing `roi_db` JSON map (SR-031 / LLR-038, `src/roi/mod.rs`, Verified)
+  is retroactively the contract's **v1** and remains frozen/valid.
+- The **v2 spec** (multiple ROIs per image with kind/weight/`margin` framing
+  bound, schema-detected, per-directory `roi.json` discovery) is owned by the
+  provider: see `PictureSorter/docs/interfaces.md#IF-001`. The consume-side
+  index + adoption deltas are recorded here in
+  [docs/interfaces.md](interfaces.md) — no schema details are restated in this
+  repo, per the kit's one-contract-one-home rule.
+- **No registry changes yet**: adopting v2 is a future maintenance objective
+  (extend the SR-031 family + pin a shared v2 fixture from PictureSorter's
+  TC-042). Today's behavior is unchanged; trace remains SR=33 LLR=44 TC=62
+  orphans=0.
