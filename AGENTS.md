@@ -38,8 +38,9 @@ This repo follows a **gated, requirement-traced process** — read
 gates, and the ID scheme. The short version an agent needs every session:
 
 - **One driver wears role "hats" in sequence** (Stakeholder → UX/Docs → System
-  Engineer → Software Engineer → Test Engineer). Spawn a separate reviewer only
-  for an independent pre-gate audit of high-risk work.
+  Engineer → Software Engineer → Test Engineer). Spawn subagents deliberately
+  (process.md §6): an independent reviewer for high-risk pre-gate audits; step
+  mechanical subtasks down a tier; give bulk content a fresh-context peer.
 - **Everything traces:** `SN → SR → LLR → TC`. Intent lives once, as an id;
   children link to it. The matrix is generated (`scripts/trace.py`) and must
   report **0 orphans** before a gate.
@@ -65,11 +66,13 @@ gates, and the ID scheme. The short version an agent needs every session:
   `Implements:` back-links, and a Mermaid dependency graph — all in
   [docs/architecture.md](docs/architecture.md). **Read it first to find where a
   capability lives**; never hand-edit between the `GENERATED` markers.
-- **Diagrams are Mermaid fenced blocks in the docs** — no toolchain needed.
-  Never edit between `GENERATED` markers; never commit exported diagram images.
+- **Diagrams are Mermaid fenced blocks in the docs.** Never edit between
+  `GENERATED` markers; never commit exported diagram images.
 - **Start each session** with the *Current State* header of
   [docs/status.md](docs/status.md); end each turn by updating it (active gate,
-  what changed, next action awaiting approval).
+  what changed, next action awaiting approval). **Commit early and often** — a
+  small, green commit per logical step; readable change only exists once
+  committed. End sessions with a clean tree.
 
 ## Code we want (readability for humans *and* agents)
 
@@ -83,8 +86,8 @@ Code a newcomer — human or model — can navigate without re-deriving the desi
   lever for testability and clarity.
 - **Entry points orchestrate, they don't compute.** A top-level routine reads
   as a short list of well-named step calls; push logic into the steps.
-  (`gen_arch_map.py --flow <entry>` renders the sequence — short or vague
-  output means the routine does too much itself.)
+  (`gen_arch_map.py --flow <entry>` renders the sequence; vague output means
+  it does too much itself.)
 - **One fact, one home — in code too.** No copy-paste logic; shared behavior
   lives in exactly one place and is imported.
 - **Intention-revealing names; no cryptic abbreviations.** Comments explain
@@ -93,7 +96,7 @@ Code a newcomer — human or model — can navigate without re-deriving the desi
   symbols; test names embed the verified id
   (`test_export_quotes_special_fields_sr001`).
 - **Match the surrounding style.** Read a neighboring file first; mirror its
-  idioms rather than importing your own.
+  idioms.
 - **Fail loudly, never silently.** No bare excepts that swallow failure;
   non-zero exit on failure for anything scriptable.
 - **Automation-safe by default.** Anything interactive needs a non-interactive
@@ -103,19 +106,18 @@ Code a newcomer — human or model — can navigate without re-deriving the desi
 
 Comment **generously and deliberately** — the bar is that a reader never has to
 reverse-engineer *intent*. The generated code map **harvests module and
-public-symbol docstrings**, so good comments teach at the code *and* populate
-the index agents read first:
+public-symbol docstrings** into the index agents read first:
 
 - **Every module: a header docstring** — its single responsibility plus any
-  invariant it upholds ("pure core — no I/O"). Becomes its summary in the map.
+  invariant it upholds ("pure core — no I/O").
 - **Every public symbol: a docstring** — purpose, the *meaning* (and units) of
   parameters and return, failure modes; include `Implements: SR-/LLR-` so the
   back-link lands in the map.
 - **Explain the *why* at every non-obvious point:** the algorithm/order/
   constant choice, the edge case a branch guards, the invariant that must hold,
-  any gotcha or external reference. Assume the next reader lacks your context.
-- **Comment the surprising, not the obvious** (`i += 1  # increment i` is
-  noise); when in doubt on intent-bearing code, err toward more.
+  any gotcha or external reference.
+- **Comment the surprising, not the obvious**; when in doubt on intent-bearing
+  code, err toward more.
 - **A comment is a promise — keep it true.** Update it in the same edit as the
   code; a stale comment is a bug.
 
@@ -147,15 +149,14 @@ the same edit as the signature — a wrong contract is worse than none.
 ## For analytics / data code specifically
 
 - **Reproducibility is a requirement:** pin random seeds; record data source +
-  version/snapshot; a run must be reproducible from inputs alone.
+  version/snapshot.
 - **Notebooks explore; modules ship.** Promote anything reused or tested into
   `src/` so it can be imported and unit-tested.
 - **Separate data I/O from transforms:** pure transforms unit-tested on small
   fixtures; validate schema/shape at the boundary and fail loudly on surprises.
-- **Test the math on hand-checked cases**, and **exercise the input space**:
-  boundaries (min/max, empty, zero, one, largest) plus deliberate combinations —
-  `scripts/gen_cases.py` derives them from the SR's `Permutations`
-  (process.md "Dimensional coverage").
+- **Test the math on hand-checked cases**, and **exercise the input space** —
+  `scripts/gen_cases.py` derives boundary + combination cases from the SR's
+  `Permutations` (process.md "Dimensional coverage").
 
 ## Working agreement
 
@@ -166,15 +167,17 @@ Direct and concrete; explain the *why* before the *how*.
   interpretation, proceed, and **record it** under *Assumptions* in
   [docs/status.md](docs/status.md) to confirm or revert at the next gate.
   Raise a **conflict or ambiguity** between requirements as a finding — never
-  silently resolve it (process.md §4 "Consistency review").
+  silently resolve it (process.md §4 "Consistency review"). How *eagerly* to
+  ask is the project's **decision dial** (process.md §6): high-risk domains
+  ratify often; low-risk creative work may decide-and-record.
 - **Right-size the solution.** The simplest thing that satisfies the
   requirement; no speculative flexibility — but judge "simple" against the
   whole design, and flag over-engineering either way. (Guardrails on what
   right-sizing must never cut + the `SHORTCUT:` convention: process.md §3.)
 - **Stay in your lane, but speak up.** Don't change unrelated code; surface a
   design smell as a separate finding to its owner instead of fixing it inline.
-- **Flag uncertainty honestly.** Say what you're unsure of; a small, low-risk
-  experiment with hypothesis + result beats confident guessing.
+- **Flag uncertainty honestly.** Say what you're unsure of; a small experiment
+  with hypothesis + result beats confident guessing.
 - **Propose better ways.** The stronger or longer-lived approach is welcome,
   not noise.
 - **Repo text is the project's memory; yours is scratch.** Durable facts — a

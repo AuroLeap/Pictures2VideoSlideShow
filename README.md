@@ -98,6 +98,12 @@ Output Videos (multiple resolutions/quality levels)
 
 ## Quick Start
 
+**Run it (Rust engine, this branch):** double-click **`run.cmd`** — it builds
+(first time only) and launches the engine; with no config the first-run GUI
+wizard walks you through setup. Full commands, config fields, and the
+end-user (no-Rust) path: [docs/quick-reference.md](docs/quick-reference.md).
+The steps below describe the original PowerShell pipeline kept on `main`.
+
 ### Windows Setup
 
 #### 1. Install Dependencies

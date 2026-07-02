@@ -996,3 +996,27 @@ Merged origin/rust-rewrite (02c8ecd, the demo.bat enhancement, authored on a hos
 - **`tests/demo_assets.rs` could never pass from a clean checkout** — it called `Config::validate()`, which requires `media_root` ("demo-media") to exist, but that folder only exists after demo.bat downloads. The test now pins the shipped relative value and validates against a temp stand-in dir.
 - **clippy (`-D warnings`)**: `% 2 == 0` → `is_multiple_of(2)`; rustfmt on the test file.
 Merge resolutions: kept both status logs; combined .gitignore (demo artifacts + AlbumOut* glob); regenerated report.md/architecture.md with the enriched generator; fixed the root-relative links inside the six historical headers after the planning/ move. `Scripts/trace.ps1 -Strict`: SR=33 LLR=44 TC=62 orphans=0. Full harness run post-merge recorded below.
+
+<!-- agent-setup --> Agent setup (2026-07-02): agents=`claude`; skills materialized: downstream-resync, gate-advance, registry-hygiene. AGENTS.md remains the canonical, agent-neutral guide (skills are opt-in accelerators, not a process gate).
+
+### Kit re-sync — 2026-07-02 — 9670982 → 9b697cc (WI-1.6..WI-1.12)
+
+Kit-owned overwrites: docs/process.md (+ meta strip), docs/process-options.md,
+Scripts/trace.py (Attest + assets integrity), .githooks/pre-commit (Scripts/
+case fix — supersedes this repo's motivating bug), Scripts/check.py resolves
+siblings via __file__ (_SCRIPTS) replacing the hand-fixed "Scripts/" literals.
+New: docs/requirements/assets.csv (inert), .claude/skills (3) + inert
+settings.json.example, kit-version restamped.
+Decisions (dial: recorded, reversible):
+- run.cmd wired to `cargo run --release --` (dev-checkout launcher; no config
+  → first-run wizard; args pass through). POSIX run.sh/run.command deliberately
+  dropped — Windows-only product (WinForms wizard, .exe distribution).
+- README Quick Start gained a 3-line "Run it (Rust engine)" pointer; the
+  legacy PowerShell quick-start text left intact (serves main).
+- AGENTS.md merged with kit template delta (commit cadence, decision-dial
+  pointer, subagent bullet); inverted AGENTS/CLAUDE layout preserved.
+- Decision dial for this repo: LOW (complete, creative-output product;
+  non-destructive MP4 writer) — decide-and-record; gate/release actions
+  remain human-paused as always.
+Verification: python Scripts/check.py PASS (G2 process steps);
+pwsh Scripts/run-tests.ps1 HARNESS PASSED (coverage 82.22% ≥ 80, orphans=0).
