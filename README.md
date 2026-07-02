@@ -286,9 +286,9 @@ We've identified 5 independent optimizations that can be applied incrementally. 
 
 | Your Goal | Effort | Improvement | Risk | Start Here |
 |---|---|---|---|---|
-| **I want immediate improvement** | 6-8 hours | 2-3x faster | Very Low | [Phase 1](#phase-1-quick-wins) |
-| **I need maximum performance** | 80-120 hours | 4-6x faster | Medium | [Phase 2](#phase-2-c-wrapper) |
-| **I want the absolute best** | 150+ hours | 8-10x faster | High | [Phase 3](#phase-3-advanced) |
+| **I want immediate improvement** | 6-8 hours | 2-3x faster | Very Low | [Phase 1](#phase-1-quick-wins-1-week-2-3x-faster-very-low-risk) |
+| **I need maximum performance** | 80-120 hours | 4-6x faster | Medium | [Phase 2](#phase-2-c-wrapper-library-2-3-weeks-4-6x-total-faster-medium-risk) |
+| **I want the absolute best** | 150+ hours | 8-10x faster | High | [Phase 3](#phase-3-advanced-optimization-4-6-weeks-8-10x-faster-high-risk) |
 
 ### Phase 1: Quick Wins (1 Week, 2-3x Faster, Very Low Risk)
 

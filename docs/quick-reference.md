@@ -1,6 +1,6 @@
 # Quick Reference — Rust Slideshow Engine
 
-The one-page cheat-sheet for the slideshow engine: the end-user setup, the commands, the recommended frame settings, every config field, and what is **not implemented yet**. This is the **single source of truth** for these facts — other docs link here instead of restating them (per [anti-duplication](process.md#4-traceability--anti-duplication-read-this-carefully)).
+The one-page cheat-sheet for the slideshow engine: the end-user setup, the commands, the recommended frame settings, every config field, and what is **not implemented yet**. This is the **single source of truth** for these facts — other docs link here instead of restating them (per [anti-duplication](process.md#3-traceability--anti-duplication)).
 
 The binary is **`make_video_slideshow.exe`**. The setup path is split by audience (UN-021 / SR-025): **§1 End user** (download and run the prebuilt exe — no Rust, no manual config editing) and **§1a Developer** (build from source — Rust). **§1b** documents the non-interactive/automation path. Rust appears only in §1a.
 

@@ -168,7 +168,7 @@ def steps(coverage, tier, gate, phase=None):
         (
             "perf-budgets",
             (),
-            [sys.executable, "scripts/check_perf.py", "--tier", tier],
+            [sys.executable, "Scripts/check_perf.py", "--tier", tier],
             {"G3"},
             "process",
         ),
