@@ -26,6 +26,10 @@ Reads (relative to --docs, default "<root>/docs"; --root defaults to "."):
                                              owning interface row of record (MULTI_REPO.md §3.3);
                                              integrity-checked only, like a MOD row with no
                                              DelegatedSRs)
+    requirements/assets.csv                  (optional; ASSET-### binary/large-asset provenance,
+                                             process-options.md "Binary assets" — provenance,
+                                             license, attribution, contract link + a pointer/hash;
+                                             integrity-checked only, like PART)
 
 Writes:
     test/report.md  — counts, the SR->LLR->TC matrix, the orphan list, and two
@@ -41,9 +45,11 @@ Exit code: 0 normally; with --strict, 1 if any orphan (or, with
 --require-verified, any status finding) exists — use in gates.
 
 Orphan rules (the method rules are stated once, in process.md §4):
-    - SR with no LLR (unless Verification is Analysis/Inspection — those have no
-      code to decompose; Demonstration/Manual SRs still describe behavior the
-      software implements, so they keep the LLR requirement)
+    - SR with no LLR (unless Verification is Analysis/Inspection/Attest — those
+      have no code to decompose; Demonstration/Manual SRs still describe behavior
+      the software implements, so they keep the LLR requirement. Attest is the
+      human-attestation kind — a named person's recorded judgment, often over a
+      subjective/binary asset with no code symbol, so it is LLR-exempt too)
     - SR with no TC (every SR needs ≥1 TC row regardless of method; for human
       methods the TC records the procedure with Automated=No)
     - SR with no SN link (only when stakeholder-needs.md provides real SN ids —
@@ -80,6 +86,11 @@ Always (independent of --strict-schema), structural integrity is checked:
       interfaces.csv (the IF-### tier is off the joined spine), so PART is
       integrity-checked only — like a MOD row that delegates nothing. The
       PART-000 example row is ignored, so the optional registry never blocks a gate
+    - a binary/large-asset provenance row (ASSET-###, process-options.md "Binary
+      assets") with a malformed/duplicate ASSET- id. Off the spine like PART:
+      integrity-checked only, its provenance/license/hash tracked in text even
+      though the asset itself can't be diffed. The ASSET-000 example row is
+      ignored, so the optional registry never blocks a gate
 These join `--strict`'s failure set like orphans do. `--strict-integrity` fails
 on *only* this integrity class: it is the always-valid floor the pre-commit hook
 runs on every commit — a duplicated or malformed id is wrong at any stage, while
@@ -97,9 +108,17 @@ starts green.
       Title, Module, CodeSymbol, Detail, Status; TC: TC-ID, Verifies, Level,
       Method, Tier, Expected, Automated, Status);
     - the two *closed* vocabularies the method defines (process.md §4) hold:
-      SR Verification in {Test, Demonstration, Manual, Analysis, Inspection},
-      TC Tier in {Smoke, Full, Release}. Priority/Status are deliberately NOT
-      enumerated — the method leaves them open (e.g. Priority S, Status Planned).
+      SR Verification in {Test, Demonstration, Manual, Analysis, Inspection,
+      Attest}, TC Tier in {Smoke, Full, Release}. Priority/Status are deliberately
+      NOT enumerated — the method leaves them open (e.g. Priority S, Status
+      Planned).
+
+The report always includes a "Verification basis (attested vs mechanized)"
+count (process.md §4 "Attest"): of the SRs reported Verified, how many rest on a
+runnable check vs a named human's recorded judgment (Verification=Attest). This
+keeps the project's trust footprint auditable — attestation is honest but
+trust-based (the box can be checked without the work having happened), so the
+report never lets it hide inside a bare "Verified".
 """
 
 import argparse
@@ -149,6 +168,9 @@ ID_PATTERNS = {
     "PART": re.compile(
         r"^PART-\d+$"
     ),  # optional purchased/external parts registry (process-options.md)
+    "ASSET": re.compile(
+        r"^ASSET-\d+$"
+    ),  # optional binary/large-asset provenance registry (process-options.md)
 }
 
 # Fields that must be non-empty under --strict-schema. Deliberately omits the
@@ -181,10 +203,23 @@ REQUIRED_FIELDS = {
 # Status are intentionally left open, so they are not validated here.
 ENUM_FIELDS = {
     "SR": {
-        "Verification": {"Test", "Demonstration", "Manual", "Analysis", "Inspection"}
+        "Verification": {
+            "Test",
+            "Demonstration",
+            "Manual",
+            "Analysis",
+            "Inspection",
+            "Attest",
+        }
     },
     "TC": {"Tier": {"Smoke", "Full", "Release"}},
 }
+
+# Verification methods whose "Verified" state rests on a recorded human judgment,
+# not a runnable check (process.md §4 "Attest"). --require-verified accepts these
+# as legitimately Verified but the report surfaces them distinctly ("attested vs
+# mechanized"), so an audit can always see how much of the project rests on trust.
+ATTESTED_METHODS = {"Attest"}
 
 
 def id_key(label):
@@ -556,6 +591,12 @@ def main():
     # file -> []. Integrity-checked only (IF-Ref points at the off-spine IF-###
     # tier, which trace.py does not read).
     raw_parts = load_csv(docs / "requirements" / "procurement.csv")
+    # Optional binary/large-asset provenance registry (process-options.md "Binary
+    # assets"); absent file -> []. Integrity-checked only (its Refs back-link the
+    # SR/LLR the asset realizes, but like PART it is off the joined spine — the
+    # asset's provenance/license/hash is what matters, tracked in text even when
+    # the binary itself can't be diffed).
+    raw_assets = load_csv(docs / "requirements" / "assets.csv")
 
     # The working sets exclude template example rows (ids ending "-000") so a
     # fresh scaffold has nothing to orphan; the raw lists above keep them for the
@@ -566,6 +607,9 @@ def main():
     pbs = [r for r in raw_pbs if r.get("PB-ID") and not is_example(r["PB-ID"])]
     mods = [r for r in raw_mods if r.get("MOD-ID") and not is_example(r["MOD-ID"])]
     parts = [r for r in raw_parts if r.get("PART-ID") and not is_example(r["PART-ID"])]
+    assets = [
+        r for r in raw_assets if r.get("ASSET-ID") and not is_example(r["ASSET-ID"])
+    ]
 
     sn_ids = set()
     sn_md = docs / "requirements" / "stakeholder-needs.md"
@@ -588,10 +632,11 @@ def main():
     orphan_ids = set()
     for r in srs:
         sid = r["SR-ID"]
-        analytic = r.get("Verification", "") in ("Analysis", "Inspection")
+        analytic = r.get("Verification", "") in ("Analysis", "Inspection", "Attest")
         if not analytic and sid not in llr_sr_refs:
             orphans.append(
-                f"SR {sid} has no LLR (and Verification != Analysis/Inspection)"
+                f"SR {sid} has no LLR (and Verification not in "
+                "Analysis/Inspection/Attest)"
             )
             orphan_ids.add(sid)
         if sid not in tc_refs:
@@ -678,6 +723,22 @@ def main():
 
     status_findings = []
     phase_deferred = []
+    # Attested-vs-mechanized audit surface (process.md §4 "Attest"): of the SRs
+    # the project reports as Verified, how many rest on a runnable check vs a
+    # recorded human judgment (Attest)? Independent of --require-verified so the
+    # trust footprint is always visible in the report.
+    mechanized_verified = [
+        r["SR-ID"]
+        for r in srs
+        if r.get("Status", "") == "Verified"
+        and r.get("Verification", "") not in ATTESTED_METHODS
+    ]
+    attested_verified = [
+        r["SR-ID"]
+        for r in srs
+        if r.get("Status", "") == "Verified"
+        and r.get("Verification", "") in ATTESTED_METHODS
+    ]
     if args.require_verified:
         for r in srs:
             if r.get("Verification", "") != "Test":
@@ -711,6 +772,12 @@ def main():
     # resolution (its IF-Ref points at the IF-### tier trace.py doesn't read), so a
     # project that buys nothing keeps its PART-000 placeholder without blocking a gate.
     integrity += integrity_findings("PART", raw_parts)
+    # The binary-asset provenance registry (ASSET-###, process-options.md) is the
+    # same optional off-spine kind — integrity-checked (malformed/duplicate id),
+    # out of the placeholder/schema sweeps and with no back-link resolution, so a
+    # project with no binary assets keeps its ASSET-000 placeholder without
+    # blocking a gate.
+    integrity += integrity_findings("ASSET", raw_assets)
     placeholders = (
         [f for label in raw for f in placeholder_findings(label, raw[label])]
         + [f"SN placeholder {u} still present" for u in scan_sn_placeholders(sn_md)]
@@ -737,6 +804,8 @@ def main():
             f"| Test cases (TC) | {len(tcs)} |",
             f"| Orphans | {len(orphans)} |",
             f"| Integrity findings | {len(integrity)} |",
+            f"| Verified SRs — mechanized | {len(mechanized_verified)} |",
+            f"| Verified SRs — attested (human, §4) | {len(attested_verified)} |",
         ]
         + (
             [f"| Status findings | {len(status_findings)} |"]
@@ -766,6 +835,7 @@ def main():
             else []
         )
         + ([f"| Purchased parts (PART) | {len(parts)} |"] if parts else [])
+        + ([f"| Binary assets (ASSET) | {len(assets)} |"] if assets else [])
         + [
             "",
             "## SR -> LLR -> TC matrix",
@@ -807,6 +877,20 @@ def main():
         if not integrity
         else [f"- {f}" for f in integrity]
     )
+    # Attested-vs-mechanized surface (process.md §4 "Attest"): make the project's
+    # trust footprint auditable — how much of what is "Verified" rests on a named
+    # human's recorded judgment rather than a runnable check.
+    lines += ["", "## Verification basis (attested vs mechanized)", ""]
+    lines += [
+        "_Of the SRs reported `Verified`: `Attest` rows rest on a named human's "
+        "recorded judgment (trust-based — the box can be checked without the work "
+        "having happened, process.md §4); all others rest on a runnable check._",
+        "",
+        f"- Mechanized (Test/Demonstration/Manual/Analysis/Inspection): "
+        f"{len(mechanized_verified)}",
+        f"- Attested (Attest): {len(attested_verified)}"
+        + (f" — {', '.join(attested_verified)}" if attested_verified else ""),
+    ]
     if pbs:
         lines += ["", "## Performance budgets (§9 back-links)", ""]
         lines += (
@@ -826,6 +910,12 @@ def main():
         lines += [
             f"{len(parts)} part row(s); each IF-Ref names its owning interface row "
             "of record (MULTI_REPO.md §3.3), integrity-checked only."
+        ]
+    if assets:
+        lines += ["", "## Binary assets (process-options.md)", ""]
+        lines += [
+            f"{len(assets)} asset row(s); provenance/license/hash tracked in text "
+            "(the ideal-not-requirement stance), integrity-checked only."
         ]
     if args.no_placeholders:
         lines += ["", "## Placeholders (--no-placeholders)", ""]
@@ -865,6 +955,12 @@ def main():
     print(
         f"Traceability: SN={len(sn_ids)} SR={len(srs)} LLR={len(llrs)} "
         f"TC={len(tcs)} orphans={len(orphans)} integrity={len(integrity)}"
+        + (
+            f" verified-mechanized={len(mechanized_verified)}"
+            f" verified-attested={len(attested_verified)}"
+            if attested_verified
+            else ""
+        )
         + (f" status-findings={len(status_findings)}" if args.require_verified else "")
         + (f" placeholders={len(placeholders)}" if args.no_placeholders else "")
         + (f" schema-findings={len(schema)}" if args.strict_schema else "")
@@ -876,6 +972,7 @@ def main():
             else ""
         )
         + (f" parts={len(parts)}" if parts else "")
+        + (f" assets={len(assets)}" if assets else "")
         + f". Report -> {out}"
         + (f" + {html_out}" if html_out else "")
     )

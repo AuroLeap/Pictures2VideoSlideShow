@@ -11,6 +11,71 @@ Section headings mirror the core-doc sections that point here.
 
 ---
 
+## Proportionality doctrine
+
+*Referenced from PROCESS.md header ("Proportionality") and §3 "Right-sizing".*
+**Applies always** — this is the philosophy that frames how hard every other
+layer is applied; it is opt-in only in the sense that it tells you when to *not*
+reach for machinery.
+
+The core is the process's own guardrail against turning a sustainability tool
+into a straitjacket. Four points, one voice:
+
+- **(a) The tracked-artifact ideal, not an entry gate.** The whole method is
+  built to perform change management and transparency **where possible**: a
+  text-representable, line-diffable, mechanically-checkable artifact is the
+  **ideal** it reaches for. But some work genuinely can't produce one, and that
+  is not a disqualification. When the artifact itself can't be diffed, **track
+  *about* it in text** — provenance, license, version, a content hash (§8
+  "Binary assets") — so the *record* is change-tracked even when the *asset*
+  isn't. The ideal is a direction, not an admission ticket.
+- **(b) Attestation is the honest floor — and honestly trust-based.** Where
+  verification cannot be mechanized, the floor is a **recorded human
+  attestation**: a named person's recorded judgment that the acceptance
+  criterion is met (a playtest, a creative review, a physical action). Be honest
+  about what this is: **the box can be checked without the work having
+  happened.** Attestation is trust; a mechanized check is proof. The process does
+  **not** pretend they are equivalent — its job is to make the attestation
+  **explicit** (a real verification kind, not a silent "Verified"), **named** (who
+  attested), and **auditable** (when, against which criterion), so a reader can
+  always see how much of the project rests on trust. That is the `Attest`
+  verification kind (§4) and the "attested vs mechanized" split in the trace
+  report.
+- **(c) Over-aggressive traceability is a failure mode.** Traceability founds
+  sustainability — *and* pushed past what a scope earns, it becomes an overly
+  complex, overly constrained process that bogs development down. The balance is
+  the whole game. **Right-sizing the traceability is the process working, not a
+  compromise of it.** A gate that demands fine-grained decomposition of work no
+  script can verify isn't more rigorous; it is theater that trades real velocity
+  for the *appearance* of control. Reach for the lightest structure that keeps
+  key items from being missed or silently broken.
+- **(d) For creative/subjective domains, fly high.** Story, music, artwork,
+  voice acting, level design — mostly binary, mostly subjectively verified. Here
+  the `SN→SR→LLR→TC` spine's value is at **high altitude**: use `SN→SR` to
+  ensure nothing key is **missed or silently broken** as development moves
+  forward (the through-line of a story, the mood targets of a soundtrack, the
+  cast a script needs). **Descend to LLR/TC granularity only where a mechanized
+  check earns its keep** — a save-file schema, an audio-loudness bound, a
+  build-size budget — and stop there. Decomposing a subjective judgment ("is this
+  scene moving?") into finer rows a script still can't check adds process weight
+  with no verification return; mark it `Attest` and move on.
+- **(e) Decision-surfacing rate is a setup dial, not a constant.** How often the
+  driver pauses for the human to **ratify a decision** is project-specific:
+  calibrate it **at project setup** on the same risk axis as review-depth triage
+  (PROCESS.md §6) and record the setting in `AGENTS.md` (Project section). In
+  specialized or high-consequence domains — where safety is a risk even an
+  *ancillary* one, money, privacy, anything irreversible — surface decisions
+  **often**: bring even medium calls to the human to ratify. In low-risk domains
+  (creative content is the archetype), where a wrong call is cheap to revert and
+  carries little tech debt, a **confident** agent may decide **autonomously** —
+  and the non-negotiable price of that autonomy is that every autonomous
+  decision is **recorded** (a *Decisions log* / *Assumptions* entry in
+  `status.md`: the call, the alternatives passed over, why) so it stays visible,
+  auditable, and cheaply revertible. The dial moves *how often you ask*, never
+  the fixed points: gates still pause for human approval (§4), and a requirement
+  **contradiction** still routes as a finding to its owner — an unrecorded
+  autonomous decision is a *silent* one, which no dial setting permits.
+
 ## Phased delivery
 
 *Referenced from PROCESS.md §4.* **Applies when** a roadmap ships v1 before
@@ -113,6 +178,29 @@ installer — so a contributor (including a non-code one, whose deliverable is s
 a reviewable git change) can go from a bare machine to an editable, testable
 checkout without needing prior git literacy.
 
+**The evaluator's rungs — README + run launchers.** The ladder above serves the
+*contributor*; a project also has *evaluators* — the stakeholder, a tester, the
+future you — whose path is shorter: understand it, then run it. Two artifacts
+serve that path, both scaffolded by bootstrap:
+
+- **`README.md` is the human front door and exists from day one.** Bootstrap
+  lays down a skeleton (project name filled from the folder; everything else a
+  marked fill-in) and the kickoff agent **builds it out from the project brief**
+  — purpose, how to run it, how to get started. An adopted repo keeps its own
+  README (bootstrap never overwrites); retrofit the run/getting-started pointers
+  into it instead (ADOPTING.md §1).
+- **Root `run.{cmd,sh,command}` launchers — one double-clickable start per
+  platform the project supports** (the PROJECT BRIEF's "Supported platforms"
+  line). Ease of access is a requirement of its own: the launch command may be
+  obvious, and it may be documented in the README, but *recall is still the
+  enemy* — a launcher turns "remember the incantation" into "open the folder and
+  click". Each is a short, readable script with one `RUN_CMD` slot (filled twice:
+  `run.cmd` for Windows, `run.sh` for POSIX; `run.command` delegates to `run.sh`
+  so macOS costs no third copy). They ship **inert** — an unfilled `RUN_CMD`
+  prints guidance and exits nonzero, the same always-scaffolded-inert stance as
+  the optional registries — and a pure library deletes them and describes usage
+  in the README instead.
+
 **Offline-render principle.** Legibility artifacts (the Mermaid diagrams, the
 trace HTML map, the code map) must render with **local, offline** tooling — never a
 cloud rendering service — the same reason the kit chose Mermaid-in-Markdown (§3) in
@@ -170,6 +258,49 @@ cheap), and a query-time semantic index (§7 map-vs-index note) can help chase
 references across a large tree — but both are optional, downstream, and orthogonal
 to the promote rule.
 
+## Skills layer
+
+*Referenced from PROCESS.md §7 "boundary notes".* **Applies when** a repo will be
+worked by an AI agent (Claude Code, Gemini CLI, …) and you want that agent to load
+this repo's repeatable procedures as first-class, on-demand **skills**. Skip it for
+a repo with no agent — nothing here is required, and the gates never read a skill.
+
+A **skill** is a small, focused capability — a procedure grounded in this repo's
+actual commands and files — that an agent loads on demand to work faster and more
+correctly. Skills are **opt-in accelerators, not process gates** (the
+Proportionality doctrine applied to tooling): the gates, the traceability spine,
+and the git/CI floor are the bar; a skill only helps an agent clear it. The full
+contract lives in the kit's `skills/README.md`; the shape:
+
+- **Neutral source → per-agent materialization.** The kit ships skills as
+  agent-neutral `skills/<name>/SKILL.md` files. `bootstrap.py --agents
+  claude|gemini|both|none` materializes the selected agent's skills into its native
+  location (Claude Code `.claude/skills/<name>/SKILL.md`; Gemini CLI
+  `.gemini/skills/<name>/SKILL.md`) — both read the same Agent-Skills `SKILL.md`
+  frontmatter, so materialization is a straight copy. `none` (the non-interactive
+  default) materializes nothing, preserving the agent-neutral scaffold; run
+  interactively and bootstrap **asks**. `AGENTS.md` stays the canonical guide
+  whichever agent is chosen.
+- **The optional hook config is copied inert.** The chosen agent's
+  `agent-hooks/*.settings.json` is copied as `settings.json.example`, **never** a
+  live `settings.json` — the scaffold must not silently install a `Stop` hook that
+  runs commands. Enforcement stays in git + CI (`agent-hooks/README.md`); activating
+  the example is the user's explicit choice.
+- **Applicability schema + generated index.** Each `SKILL.md` frontmatter carries
+  `stacks`/`domains`/`phases`/`tags` (+ a `scope` of `kit` or `this-repo`) so a
+  skill's fit is machine-readable. `scripts/gen_skills_index.py` regenerates
+  `skills/INDEX.csv` (one row per skill) as the cheap scan surface, with `--check`
+  as the freshness gate — the same "generated, don't hand-maintain" stance as the
+  code map. At setup bootstrap asks up to three scope questions (stack? domain?
+  binary/hardware?) and selects the `kit`-scope skills whose tags **intersect** the
+  answers — a trivial set-intersection, no engine. The **metadata convention is the
+  deliverable**, so a later tool can match/fetch smarter without redesign.
+- **Future external sources plug in here.** `skills/README.md` documents the
+  contract (naming, the frontmatter shape, the neutral-source landing zone,
+  trust/review) for how a later tool would fetch remote/community skills — they land
+  in the same `skills/` source layout and materialize via the same path, never
+  written straight into an agent dir bypassing the index.
+
 ## §8 purchased parts
 
 *Referenced from PROCESS.md §8.* **Applies when** the product incorporates
@@ -199,6 +330,64 @@ that buys nothing ignores the file; a leftover `PART-000` never blocks a gate.
   per-module allocation and quantity roll-ups, assembly trees, lead-time/reorder
   logic — is **explicitly deferred**; add it only when a project demonstrably
   needs it, extending this registry rather than replacing it.
+
+## Binary assets
+
+*Referenced from PROCESS.md §8 "Binary assets".* **Applies when** a project ships
+unavoidably-binary deliverables — game art, music, voice acting, video, rendered
+CAD, publication artwork — the kind of asset that can't be line-diffed or
+mechanically verified.
+
+This is the Proportionality doctrine's *"track about the asset in text"* stance
+(this file, "Proportionality doctrine" (a)) made operational. The asset itself is
+binary; the **record of it** is text, tracked, and reviewable.
+
+- **Manage the binary as a pointer + manifest, not as a blob in the tree.** Store
+  the asset in **git-LFS** or an **out-of-repo store** (an object store, an asset
+  server) and keep, in the repo, a **manifest row** that points at it and pins its
+  identity: the optional `requirements/assets.csv` registry (`ASSET-###`). This
+  keeps the git history diffable and the checkout small while the manifest stays
+  the change-tracked source of truth *about* every asset.
+- **Columns (what to track *about* an un-diffable asset).** `ASSET-ID, Name,
+  Refs, Kind, Provenance, License, Attribution, ContractRef, Location, Hash,
+  Version, Notes`. The load-bearing ones:
+  - **`Provenance`** = `human-made | ai-generated | mixed`. Real-world driver:
+    distribution platforms (e.g. **Steam**) require **AI-content disclosure**, so
+    the provenance of every shipped asset must be recordable and auditable, not
+    guessed at release time.
+  - **`License`** (SPDX id or `proprietary`) and **`Attribution`** (any required
+    credit line) — so a licence obligation can't be lost between acquisition and
+    ship.
+  - **`ContractRef`** links the **voice-actor release** or **commissioned-work
+    agreement** that grants the right to ship the asset — the paperwork a purely
+    binary asset would otherwise carry no trace of.
+  - **`Location`** is the **pointer** (git-LFS path or store URL); **`Hash`**
+    (e.g. `sha256:…`) + **`Version`** make that pointer **verifiable** — you can
+    confirm the bytes on the store match the row even though you can't diff them.
+  - **`Refs`** back-link the SR/LLR the asset realizes, keeping it on the spine's
+    high-altitude thread (usually an `Attest` SR — this file, "Proportionality
+    doctrine" (d)); `trace.py` integrity-checks the `ASSET-` id only, off-spine
+    like `PART-###`.
+- **Registry choice — a sibling registry, not a widened `procurement.csv`.**
+  Procurement (`PART-###`) tracks parts the project **buys** (owner-of-record is
+  an `IF-###` interface row; columns are vendor/cost/status/quantity). A created
+  or commissioned **digital asset** is a different concern — license, provenance,
+  release paperwork — so it gets its own minimal registry rather than overloading
+  procurement's columns with fields that don't apply to a motor, or forcing an
+  asset row to fake a vendor/cost. Same off-spine, integrity-only, optional
+  pattern; different subject.
+- **Deferred product-layer idea — the "asset manifest freshness check."** A
+  natural next step is a tool that verifies each `ASSET-###` row against its store
+  — the pointer resolves, the `Hash` still matches, no manifest row is orphaned
+  from its file and no shipped file is missing a row. This is a **product-layer,
+  project-owned** check (it must reach a git-LFS or object store — outside the
+  kit's stdlib, offline, no-network line), named here and **deliberately
+  deferred**, in the **same family as the Thread-16 CAD/non-code-artifact
+  verification stub** (render-on-change, visual diff, design-rule checks): the kit
+  **names and routes** these, the project **wires** them, the gate **records** the
+  verification (the meters-vs-comparator split, PROCESS.md §9). Until then the
+  manifest is the honest, text-tracked record — an ideal reached for, not a check
+  faked.
 
 ## §9 NFR checklist
 

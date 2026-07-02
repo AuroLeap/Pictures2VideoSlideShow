@@ -1,15 +1,8 @@
 # Development Process
 
-Canonical method for a gated, requirement-traced project. Stack-agnostic core;
-see §7 for this repo's stack-specific wiring. Other docs reference this file by
-section rather than restating it.
-
-**This repo's harness commands (§7 wired to Rust):**
-- Product gate: `pwsh Scripts/run-tests.ps1` (fmt, clippy, tests, coverage ≥80%, trace)
-- Process checks: `python Scripts/check.py` (traceability, doc-links, arch-map; Python 3.8+)
-- Traceability only: `pwsh Scripts/trace.ps1 [-Strict]`
-
-Back to [README](../README.md) · docs index: [docs/README.md](README.md).
+Canonical method for a gated, requirement-traced project. It is **stack-agnostic** — wire the harness commands
+to your project's language/tooling. Other docs reference this file by section
+rather than restating it.
 
 **Read this file top to bottom for the load-bearing core** (§1–§7): roles, ids,
 the §3 discipline, the gates, the verdict protocol, the harness contract. The
@@ -25,12 +18,28 @@ review triage (§6), and the harness (§7). Everything else is opt-in: skip §8,
 §9, §10, the `Phase`/`Lifecycle` tags, and every "optional" tripwire until the
 scope forces it. That default is rung 1 of the §10 ladder.
 
+**Proportionality — the process right-sizes itself.** Text-representable,
+change-trackable artifacts are the **ideal** this process reaches for, not an
+entry requirement: track *about* an asset in text even where the asset itself
+can't be diffed. Where verification can't be mechanized, a **recorded human
+attestation** (§4 `Attest`) is the honest floor — trust-based by nature (the box
+can be checked without the work having happened), so the process's job is to make
+it **explicit, named, and auditable**, never to pass it off as a mechanized
+check. Over-aggressive traceability is itself a failure mode: right-sizing is the
+process working, not a compromise of it (see §3 "Right-sizing"). The same
+calibration sets the **decision-surfacing dial** at project setup — how often the
+driver pauses for human ratification (§6). Full doctrine — including the
+creative/subjective stance and the dial — in
+[`process-options.md`](process-options.md#proportionality-doctrine).
+
 ---
 
 ## 1. Roles (hats), not necessarily separate agents
 
 One driver wears these hats in sequence, keeping context. Spawn a *separate*
-agent only for an independent pre-gate review (see §6).
+agent for an independent pre-gate review, to step a mechanical subtask down a
+tier, or to give bulk content a dedicated context (all §6) — never to split the
+hats' shared context.
 
 | Hat | Owns (single source of truth) |
 |---|---|
@@ -97,6 +106,19 @@ comment naming the **ceiling** it accepts (a global lock, an O(n²) scan, a naiv
 heuristic) and the **upgrade path** past it — so it is greppable, reviewable, and
 never mistaken for the final design. One tag, defined once; not a taxonomy.
 
+Right-sizing cuts the *other* way too: **over-aggressive traceability is a
+failure mode in its own right.** Traceability founds sustainability, but pushed
+past what the scope earns it becomes an overly complex, overly constrained
+process that bogs development down — so trimming it to fit is the process
+working, not a lapse from it. This bites hardest in **creative / subjective
+domains** (game story, music, artwork, voice acting — mostly binary, mostly
+human-judged): there the spine's value is at **high altitude** — `SN→SR` to
+ensure nothing key is missed or silently broken as work moves forward — and you
+**descend to LLR/TC granularity only where a mechanized check earns its keep**,
+not to decompose inherently subjective work into fine-grained rows a script still
+can't verify. Where the honest floor is a human's judgment, name it `Attest`
+(§4) rather than inflate a subjective call into a false `Test`.
+
 **Reviewability — review the source, not the render.** The registries (the
 `SN`/`SR`/`LLR`/`TC` CSVs) are the tracked, line-by-line-reviewable source of
 truth; every other view is *generated* from them. Generated output splits by size:
@@ -118,6 +140,21 @@ truth; every other view is *generated* from them. Generated output splits by siz
 This is the "composite artifacts are ignored from change tracking" rule, named:
 the cost of reviewing a big regenerated file is never paid, because the small
 registry diff already carries the intent.
+
+**Commit cadence — reviewable change exists only once committed.** Everything
+above buys its value at **commit granularity**: line-diffable registries, the
+drift-gated map, committed goldens — none of it protects work sitting
+uncommitted in a working tree, which can't be diffed, reviewed, reverted, or
+bisected, and can simply be lost. So **commit early and often**: a small,
+single-purpose commit at each green step (one finding closed, one requirement
+decomposed, one registry edit plus its regenerated blocks), never a
+session-sized batch. The pre-commit floor (§7) is deliberately fast and
+**always-valid** *so that* frequent commits stay cheap — that is its design
+intent, not a coincidence. A commit is not a release and not a gate: the bar is
+"floor-green plus a coherent, describable change", never perfection — polish
+arrives as further commits. End every session with a **clean tree**: work
+either committed or explicitly parked as a finding/assumption in `status.md`,
+never silently stranded.
 
 **The doc set must stay navigable (the doc map stays honest like the code map).**
 The freshness gate above keeps *generated* blocks honest; the hand-written docs
@@ -319,16 +356,28 @@ rule, and the config-straddles-Provision↔Startup guidance are in
 **Constants:** `MAX_ROUNDS = 4` per gate (then escalate to the human);
 `COVERAGE_THRESHOLD = 80%` line coverage (adjust by agreement; record here).
 
-**Verification methods:** `Test` (automated) · `Demonstration` (run + observe,
-e.g. a GUI or a real device) · `Manual` (human procedure) · `Analysis` ·
-`Inspection`. Pick the cheapest method that actually establishes the criterion;
-don't claim `Test` for something only a human can confirm. The method drives
-what `trace.py` requires: only `Analysis`/`Inspection` SRs are exempt from the
-LLR requirement (they have no code to decompose; `Demonstration`/`Manual` SRs
-still describe implemented behavior, so they keep it), and **every SR needs ≥1
-TC row regardless of method** — for human methods the TC records the procedure
-(`Automated=No`, usually `Tier=Release`), which is how the release checklist
-finds it.
+**Verification methods:** the classic four — `Test` · `Demonstration` ·
+`Inspection` · `Analysis` (`TDIA`, per MIL-STD-961E / ISO/IEC/IEEE 29148 / INCOSE
+SE Handbook) — plus two the kit names: `Manual` (a human procedure that isn't
+`Attest`) and `Attest`. Definitions follow the standard rather than being restated
+here; pick the cheapest method that actually establishes the criterion, and don't
+claim `Test` for something only a human can confirm. **`Attest`** is the kit's
+honest extension (nearest standard analog: a witnessed test / QA sign-off record,
+but the attested-vs-mechanized *reporting* is deliberately beyond the standards):
+the floor for what can't be mechanized at all (a playtest, a creative review, a
+physical action) — a **named human's recorded judgment**, **trust-based, the box
+can be checked without the work having happened** (Proportionality doctrine); the
+process's job is to make it explicit, named, and auditable, not pass it off as a
+check. Its TC records **who** attested and **when** (`Parameters`/`Expected` cell,
+`Automated=No`); `trace.py` accepts an `Attest` SR as Verified **and** reports it
+under "attested vs mechanized" so an audit sees the trust footprint. Method drives
+what `trace.py` requires: only `Analysis`/`Inspection`/`Attest` SRs are LLR-exempt
+(no code to decompose — `Attest` typically covers a subjective/binary asset with no
+code symbol). `Demonstration` (observe functional behavior, no instrumented
+pass/fail) and `Manual` still run the system, so **they keep the LLR** — the
+standard reading puts `Demonstration` closer to `Test`. **Every SR needs ≥1 TC row
+regardless of method** — for human methods the TC records the procedure
+(`Automated=No`, usually `Tier=Release`), which is how the release checklist finds it.
 
 **Test tiers (run cost vs. confidence).** Running the whole suite every iteration
 gets untenable as a project grows (and CI has time/quota limits), so each
@@ -439,7 +488,27 @@ hint** — metadata an agent reads and may act on, guidance like any other
 `AGENTS.md` directive, not a guarantee. Host-specific levers (e.g. a
 strong-model-plans/cheaper-model-executes mode, per-subagent model overrides,
 a model-selection command) are optional, documented per-host examples — name
-the pattern, never a vendor-specific model-selection engine.
+the pattern, never a vendor-specific model-selection engine. Tiering is also an
+**in-flight duty**, not just plan-time metadata: mid-session the driver should
+**step down** — hand a mechanical, well-specced subtask to a cheaper-tier
+subagent rather than spend strong-model context on it — and **step sideways** to
+a peer-tier subagent with a fresh, dedicated context when the work would
+otherwise crowd the driver's context (bulk asset/prose generation, a wide file
+sweep; the independent reviewer above is already this pattern). Hosts
+increasingly make these hand-offs automatically; the duty stands wherever the
+lever is manual.
+
+**Decision-surfacing rate — same axis, set at setup.** The risk triage above
+also calibrates **how often the driver pauses for a human decision**. It is a
+project-setup dial, not a constant: a specialized or high-consequence domain
+(safety even as an *ancillary* risk, money, irreversible actions) surfaces
+decisions often — the human ratifies even medium calls; a low-risk domain
+(creative content) where a reverted decision costs little tech debt lets a
+**confident** agent decide autonomously, **provided the decision is recorded**
+in `status.md` (Decisions log / Assumptions) so it stays auditable and
+revertible. The dial never moves the fixed points — gates still pause (§4/§5),
+contradictions still route as findings. Full doctrine: point (e) of the
+[proportionality doctrine](process-options.md#proportionality-doctrine).
 
 ## 7. Harness contract (wire to your stack)
 
@@ -498,9 +567,16 @@ provision the developer workstation (rare, per contributor); `setup` provisions
 the product toolchain; `check` is the process floor. Each rung is an optional,
 readable, **consent-first** helper — never a silent or compiled installer — so
 even a non-code contributor can reach an editable checkout without prior git
-literacy. Details and the full rationale for these three §7 boundary notes
-(developer-workstation · onboarding ladder · offline-render) are in
-[`process-options.md`](process-options.md#7-boundary-notes).
+literacy. The ladder serves the *contributor*; the **evaluator's rungs** are the
+repo `README.md` (the human front door — scaffolded by bootstrap, built out from
+the project brief at kickoff, never overwritten on adoption) and the root
+**`run.{cmd,sh,command}` product launchers**: every launchable project ships a
+double-clickable launcher per supported platform, because ease of access is a
+requirement of its own — running the product must never depend on recalling a
+command, however obvious or well-documented. Details and the full rationale for
+these §7 boundary notes
+(developer-workstation · onboarding ladder · evaluator's rungs · offline-render)
+are in [`process-options.md`](process-options.md#7-boundary-notes).
 
 **Offline-render principle.** Legibility artifacts (Mermaid diagrams, the trace
 HTML map, the code map) must render with **local, offline** tooling — never a
@@ -513,7 +589,9 @@ over time is an *external readiness assessor*, optional downstream tooling — t
 `ruff`/`pytest` stance: name the gate, the project picks the tool); **the kit
 is a spec, not a turnkey agent-runtime harness** (an `npx`-installed engine
 shipping skills/agents/hooks/MCP for one tool is a different, optional product
-that *composes* with a scaffolded repo but neither depends on the other); and
+that *composes* with a scaffolded repo but neither depends on the other — though
+the kit *does* ship neutral, opt-in **skills** an agent can materialize at setup,
+`process-options.md` "Skills layer"); and
 **repo text is the durable agent memory layer** — the committed artifacts
 (`status.md`, registries, `AGENTS.md`, the code map) are the agent-neutral,
 reviewable memory; agent-native memory tools (auto-memory, MCP memory servers)
@@ -606,6 +684,17 @@ owner-of-record (MULTI_REPO.md §3.3) — with acquisition facts (vendor, cost,
 status, quantity) in the optional `requirements/procurement.csv` (`PART-###`).
 Minimal by design; full BOM tracking is deferred. See
 [`process-options.md`](process-options.md#8-purchased-parts).
+
+**Binary assets — track *about* the asset in text.** *(opt-in)* When a
+deliverable is unavoidably binary (art, music, voice acting, video), you can't
+diff the asset — but you can, and must, change-track the **facts about it**: its
+**provenance** (human-made / AI-generated / mixed — distribution platforms like
+Steam require AI-content disclosure), **license**, required **attribution**, a
+**contract/release link** (voice-actor release, commission agreement), and a
+**pointer + hash** to the asset in a git-LFS or out-of-repo store. That is the
+optional `requirements/assets.csv` (`ASSET-###`, integrity-checked like
+`PART-###`) — the ideal-not-requirement stance (header) made concrete. See
+[`process-options.md`](process-options.md#binary-assets).
 
 ## 9. Non-functional requirements & performance budgets *(opt-in)*
 

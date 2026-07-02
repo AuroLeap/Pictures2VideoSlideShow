@@ -35,6 +35,23 @@ if [ -z "$PY" ]; then
   exit 0
 fi
 
+# Locate the scripts directory relative to the repo root rather than using a
+# bare "scripts/" cwd-relative string. NTFS is case-preserving: a repo whose
+# existing directory is "Scripts/" keeps that name, and bare "scripts/" fails
+# on case-sensitive Linux CI even though Windows never notices. Resolve from
+# the hook's own location (.githooks/../) and accept either casing.
+REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
+SCRIPTS_DIR=""
+for sd in scripts Scripts; do
+  if [ -d "$REPO_ROOT/$sd" ]; then
+    SCRIPTS_DIR="$REPO_ROOT/$sd"; break
+  fi
+done
+if [ -z "$SCRIPTS_DIR" ]; then
+  echo "pre-commit: cannot find scripts/ dir under $REPO_ROOT; skipping process checks." >&2
+  exit 0
+fi
+
 # 1. Code map must be fresh — protects the GENERATED regions from hand-edits and
 #    catches a map that has drifted from the source.
 #    EDIT FOR A NON-PYTHON STACK: this line drives the *Python* generator. A
@@ -43,7 +60,7 @@ fi
 #        pwsh -NoProfile -File scripts/gen_arch_map.ps1 -Check
 #    Any generator that fills the same marker block works — the block is the whole
 #    contract (ADOPTING.md §3). Drop this step only if you also drop the arch-map.
-"$PY" scripts/gen_arch_map.py --check
+"$PY" "$SCRIPTS_DIR/gen_arch_map.py" --check
 
 # 2. Traceability *integrity*: no duplicate / malformed ids — wrong at any
 #    stage, so safe to enforce on every commit. Deliberately NOT the full
@@ -51,7 +68,7 @@ fi
 #    legitimately holds SRs with no LLR/TC yet), and --no-placeholders is
 #    likewise gate-scoped in check.py. The floor must never block a legitimate
 #    early-stage commit.
-"$PY" scripts/trace.py --strict-integrity
+"$PY" "$SCRIPTS_DIR/trace.py" --strict-integrity
 
 # 3. Format check on staged Python files — product tooling, so run it only if
 #    ruff is importable by this interpreter (matching check.py's detection); skip
