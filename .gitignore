@@ -11,6 +11,13 @@ demo/demo-output
 # Local slideshow output folders (one per output definition / settings combo)
 AlbumOut*
 
-# Python bytecode (kit scripts in templates/)
+# Python bytecode (kit scripts in Scripts/)
 __pycache__/
 *.pyc
+
+# Kit-generated composite artifacts (gitignored per ADOPTING.md §1)
+docs/test/report.html
+docs/test/stub-report.md
+docs/test/perf-report.md
+docs/test/perf-metrics.json
+docs/test/perf-baseline.json

@@ -1,44 +1,67 @@
 # Stakeholder Needs (SN-###)
 
-Owned by the **Stakeholder** hat — whoever the system serves: an end user, an
-operator, or **another system** (represented by its owner/integrator).
-Plain-language needs + edge-case expectations. Engineering translations live in
-`system-requirements.csv` (referenced by `SN-Refs`); do not restate them here.
-Priority: **M**=Must · **S**=Should · **C**=Could.
+Owned by the **Stakeholder** hat. Plain-language needs and edge-case expectations
+for a non-programmer hobbyist on Windows who points the tool at a folder of
+photos and videos and expects looping slideshow MP4s for a digital picture frame.
 
-> **Cover the whole lifecycle, not just steady state.** For each need, ask *when
-> in the running product's life must this hold?* — **Provision** (before it runs:
-> install, dependencies), **Startup** (once per launch: config, migrations), or
-> **Runtime** (steady-state serving). Most authors write only Runtime needs and
-> discover the install/first-run ones late; tag the non-runtime ones with an
-> optional `Lifecycle` value (process.md §4 "Lifecycle phase").
->
-> **Consider the cost, not just the behavior.** Where the scope warrants it, also
-> capture **non-functional** needs — performance, memory/size, **cost** (unit/BOM,
-> licensing, cloud spend), reliability, security, observability — and route each
-> to its home (process.md §9). It's a prompt, not a mandate: skip the categories
-> the scope doesn't need.
+> **Rename note (2026-07-01 kit re-sync):** The top-level id tier was renamed
+> from UN-### (User Need) to SN-### (Stakeholder Need). Numbers are unchanged
+> (UN-001 = SN-001). Historical audit quotes in docs/status.md still say "UN-###"
+> — those are the record of what was decided at the time; they are intentionally
+> not rewritten.
+
+Engineering translations live in [system-requirements.csv](system-requirements.csv)
+(referenced by `SN-Refs`); do not restate them here. See [process.md](../process.md)
+for the ID/anti-duplication rules.
+
+Priority: **M** = Must · **S** = Should · **C** = Could.
+
+I am a non-programmer hobbyist on Windows. I point the tool at a folder of photos
+and videos and expect looping slideshow MP4s that *just play* on my cheap digital
+picture frame. I care most about: getting set up without a fight, not having to
+babysit a long run, and the tool behaving sanely when something goes wrong. I
+should not have to read source code to use this.
 
 ## Core needs
 
-| SN-ID | Need (plain language) | Why it matters | Priority | Acceptance intent (how we'd know it's met) |
+| SN-ID | Need (plain language) | Why it matters | Priority | Acceptance intent (how I'd know it's met) |
 |---|---|---|---|---|
-| SN-000 | _EXAMPLE — replace this row; number real needs sequentially (the `-000` id is a placeholder the tooling ignores)._ | | | |
+| SN-001 | Get from a fresh Windows PC to a first successful slideshow by downloading one file and running it — no manual config editing for a basic run, no Rust, no compiler, no source code. | If setup is a fight, I give up before I ever see output. I am not a programmer; installing a build toolchain or hand-editing a config file is exactly the friction that loses me. | M | A new user with neither Rust nor FFmpeg installed: (1) downloads `make_video_slideshow.exe` from GitHub Releases (SN-019); (2) runs it — on first run with no config it opens a GUI wizard (SN-022) that collects the basics and writes the config for me (SN-025), and the startup dependency self-check (SN-020) fetches/locates FFmpeg (SN-023), prompting only as needed; (3) gets a playable MP4. No step installs Rust or a compiler, requires source code, or requires hand-editing a config file for a basic run. Building from source is a separate developer path (SN-021), never required of the end user. |
+| SN-002 | Tell the tool *before* a long run whether my setup is sane (runtime prerequisites present — FFmpeg locatable, config valid, media folder readable, output writable). | I don't want to discover a typo'd path or missing FFmpeg after waiting an hour. | M | A `validate` step reports each runtime prerequisite as pass/fail in plain language and refuses to start `build` if something essential is missing. The only runtime dependency it checks for is FFmpeg (the binary itself is already in hand per SN-019); Rust is never a runtime prerequisite. (See `validate` in the [Rust Engine](../../README.md#rust-engine-high-performance-rewrite) README.) |
+| SN-003 | Configure a run by editing one well-documented config file, using plain settings (resolution, fps, seconds-per-image, quality), with sensible defaults I can leave alone. | I shouldn't need to understand CRF, codecs, or Ken Burns internals to get a good result. | M | Every config field has a short inline comment, a default, and a stated unit; leaving the recommended defaults produces frame-friendly output. |
+| SN-004 | See clear progress while a run is going (what stage, how far along, roughly how long left) and a clear success/failure summary at the end. | Long runs (tens of minutes to hours) are nerve-wracking with a silent terminal; I need to know it's alive and whether it worked. | M | During `build` I see ongoing progress (e.g. items processed / total) and on completion a summary listing each output file written and its location, or a clear failure message. |
+| SN-005 | Produce output that actually plays on a typical budget digital picture frame by default. | The entire point is the frame, not my PC; a file my PC plays but my frame rejects is a failure. | M | With default settings the output is H.264 / MP4 / yuv420p / `+faststart`, even dimensions, 24-30 fps — the broadly compatible combination per the [Output Constraints](../../README.md#output-constraints--limitations-digital-picture-frames). |
+| SN-006 | Be warned (and ideally protected) before producing a file that won't fit on a FAT32 card (>4 GB) or won't suit my frame. | A slideshow that crosses the 4 GB FAT32 wall fails to copy or silently truncates — I'd lose the whole run. | M | Before/while building, the tool estimates output size/duration and warns when an output is likely to exceed ~3.5 GB, pointing me at the documented mitigations (raise CRF, smaller album, split, exFAT). See [§1 File size](../../README.md#1-file-size--the-4-gb-fat32-wall-most-important). |
+| SN-007 | Match my output to my frame's panel (resolution, fps) easily, and define more than one frame's output in one run. | I have more than one frame at different resolutions; re-running from scratch per frame is painful. | S | Multiple output definitions can be configured and produced in a single run, each with its own resolution/fps/quality. |
+| SN-008 | Choose which folders/files to skip (e.g. private albums) by a simple ignore list. | I have folders I never want on a frame in the living room. | S | A documented case-insensitive ignore list excludes matching files/folders from the run. |
+| SN-009 | Documentation that is accurate about what works *today* vs. what's planned, and honestly flags the Rust engine's current gaps (e.g. no `bulk_video_time_min` splitting). | Being surprised by a missing feature mid-project erodes all trust in the docs. | M | The docs clearly mark not-yet-implemented items (`bulk_video_time_min` splitting) and steer me to the PowerShell path or a workaround where the Rust engine falls short. Audio passthrough is now implemented (SN-028) and no longer listed as a gap. |
+| SN-010 | A single short quick-reference (the few commands and the recommended frame settings) I can find fast, without re-reading the whole README. | When I come back after a month I just want the command and the safe defaults. | S | A concise quick-reference (commands + "recommended starting point for a typical frame") is discoverable from the README and is the *only* copy of those facts (others link to it). |
+| SN-011 | Information lives in one place; I shouldn't find the same setting explained three different (and conflicting) ways. | Conflicting docs make me distrust all of them and pick wrong. | S | No constraint/setting is restated with different values across docs; shared facts are stated once and linked (per [anti-duplication](../process.md#4-traceability--anti-duplication-read-this-carefully)). |
+| SN-012 | Reproducible output — running the same media and config again gives the same slideshow. | If I tweak one setting I want to compare results, not chase random pan/zoom changes. | C | Re-running an unchanged config over unchanged media yields equivalent output (deterministic Ken Burns per file, as the README claims). |
+| SN-019 | The product ships to me as a prebuilt `make_video_slideshow.exe` downloadable from GitHub Releases; FFmpeg is its only runtime dependency and is auto-fetched on first run (SN-023) rather than bundled. | I should never have to compile anything or install a development toolchain just to run a tool. Download-the-exe-and-run is what a non-programmer expects, and the exe sorting out FFmpeg itself saves me hunting for it. | M | A prebuilt Windows `make_video_slideshow.exe` is published on GitHub Releases and runs on a clean PC with no Rust, no build tools, and no source checkout; FFmpeg is not bundled/redistributed in the download but is obtained at runtime per SN-023. |
+| SN-020 | Setup is built into the exe, not a separate script: on every startup `make_video_slideshow.exe` runs a dependency self-check and, if something is missing (chiefly FFmpeg), prompts me to fetch/install it; first run with no config opens a GUI wizard (SN-022) to configure me. | Manual download/copy/PATH steps and a separate installer are the exact friction SN-001 warns about; the exe getting itself ready on its own is what gets a non-programmer to a first run. | M | Launching `make_video_slideshow.exe` on a clean Windows PC: the startup self-check detects missing dependencies and prompts to fetch/install them (FFmpeg via SN-023), and on first run with no config the GUI wizard (SN-022) collects settings and writes the config (SN-025). The self-check runs on every startup, reports clearly, and never requires Rust. Prompts/GUI appear only in interactive use (SN-024). |
+| SN-021 | Building from source (the Rust toolchain) is a clearly separate **developer** path, documented apart from the end-user experience. | The audience split must be explicit so a non-programmer is never accidentally routed into installing Rust; developers still need a documented build path. | C | Docs make two audiences explicit: **End User (run)** = download `make_video_slideshow.exe` + first-run wizard/self-check, no Rust (SN-001/SN-019/SN-020); **Developer (build-from-source)** = Rust + FFmpeg, in a clearly separate section. The end-user quick-start contains no Rust/compiler step. |
+| SN-022 | On first run with no config, the exe opens a friendly GUI wizard that asks me, in plain terms, where my photos/videos are (source), where to keep intermediary/temp videos, the frame defaults (resolution/fps/quality), and whether I want one or multiple frames. | A non-programmer should be guided through setup with a few clear questions, not left to find and hand-edit a config file. A GUI is far less intimidating than a text file full of settings. | M | First run with no config launches a GUI wizard that collects: media/source path, intermediary/temp video path, frame defaults (resolution/fps/quality), and single-vs-multiple frames; on finish it writes a valid config (SN-025) and the run can proceed. The wizard appears only in interactive use (SN-024). |
+| SN-023 | If FFmpeg is missing, the exe fetches it for me to a per-user location (no admin/elevation required), but I can also work offline by pointing it at an FFmpeg I already have. | I shouldn't need admin rights or an internet connection to use the tool; forcing elevation or a download is friction (and may be impossible on a locked-down or offline PC). | M | When FFmpeg is absent the exe auto-fetches it to a per-user directory needing no elevation; if auto-fetch can't run (offline/blocked), I can point the tool at an existing FFmpeg and it works. The downloaded FFmpeg is integrity-verified before use (SN-026). |
+| SN-024 | The tool never blocks when run unattended/automated: GUI and prompts appear only in interactive use, and a non-interactive/`--config` path always runs to completion without any GUI. | I (or a script/scheduled task/CI) may run this with no one watching; a tool that pops a dialog and waits forever is worse than one that errors out. | M | In interactive use the wizard/prompts may appear; in non-interactive use (a `--config`/non-interactive invocation, or no console) no GUI or prompt is shown and the run completes or exits with a clear non-zero status — it never hangs waiting for input. |
+| SN-025 | The wizard/exe writes my config to a sensible, documented location: beside the exe when that's writable, otherwise %APPDATA%. | I want to find (and back up or tweak) my settings later, and the tool must still work when its own folder is read-only (e.g. Program Files). | S | Config is written beside `make_video_slideshow.exe` when that directory is writable; otherwise it falls back to `%APPDATA%`. The chosen location is reported to me, and subsequent runs read the config back from there. |
+| SN-026 | An auto-fetched FFmpeg is integrity-verified so I never end up running a tampered or corrupted binary. | A tool that silently downloads and runs an unverified executable is a security risk I shouldn't have to think about. | M | A downloaded FFmpeg is verified (e.g. checksum against a pinned/trusted value) before it is used; a failed/mismatched verification aborts with a plain-language error and does not run the suspect binary. |
+| SN-027 | The Ken Burns pan/zoom should glide smoothly like the original ImageMagick slideshow — not visibly step/jitter — and I want the option to pin the zoom on a chosen point or region of an image (e.g. a face), including feeding those regions in bulk from prior recognition. | The motion is the whole appeal; visible stepping looks cheap, and a zoom that drifts off the subject (or toward an empty corner) wastes the effect. Letting me supply a focus — by hand or from face/feature detection — keeps the subject centered. | S | Pan/zoom motion is sub-pixel smooth frame-to-frame (no integer stair-stepping). By default each image keeps a varied (but smooth) motion. When a focus point is supplied — per output, or per image via a region-of-interest database keyed by the image's path — the zoom stays anchored on that point/region for the whole clip instead of wandering. |
+| SN-028 | The sound from my source video clips should be preserved in the slideshow, in sync — when a video plays, I want to hear it; photos are silent. | A slideshow that silently drops every video's audio loses half the memory. The original tool tried this but produced corrupted/desynced audio, so I want it done right. | S | With audio enabled, each source **video** clip's audio is carried into the output and stays aligned with that clip's frames (including across the cross-dissolves); image segments are silent. An album with no audio-bearing videos still produces a valid (silent) output. The audio track is AAC; bitrate and sample rate are configurable per frame. |
+| SN-029 | A one-double-click example that fetches a little free-use sample media and produces a slideshow, so I can see the tool actually work — and learn the valid input layout (media folder + config + focus file) — before pointing it at my own photos. | Trying a brand-new tool on my own irreplaceable photos is intimidating and setup-heavy; a ready-made example that *just runs* builds trust and teaches me by showing a working configuration. | C | A bundled `demo.bat` (shipped beside `make_video_slideshow.exe` in the release zip) downloads free-use sample photos/videos, ships a valid config and a focus-definition file, and runs `validate` then `build` to produce a playable MP4 — with no media of my own and no manual config editing. |
+
+---
 
 ## Edge-case expectations
 
-How the system should behave when things go wrong (the highest-value part — be
-specific; the System Engineer turns each into measurable SRs). Most of these rows
-are **Provision** or **Startup** lifecycle concerns (first-run, missing
-dependency, unwritable output) — exactly the phases that get neglected, so they
-earn first-class SRs.
+How the system should behave when things go wrong. Each row is a user-facing
+expectation; the System Engineer turns it into measurable SRs.
 
 | SN-ID | Scenario | Expected behavior |
 |---|---|---|
-| SN-0xx | Interruption / power loss / killed mid-operation | |
-| SN-0xx | Invalid / corrupt / unsupported input | |
-| SN-0xx | Resource exhaustion (disk / memory full) | |
-| SN-0xx | Missing dependency / wrong version | |
-| SN-0xx | Output target removed / locked / unwritable | |
-| SN-0xx | Unattended/automated run (must never block; clear failure) | |
-| SN-0xx | First-run setup & discoverable docs / quick-reference | |
+| SN-013 | **Power loss / process killed mid-run** | No corruption of my *source* media (inputs are only ever read, never modified in place). A killed run leaves no half-written file masquerading as a finished output — partial/temp output is clearly distinguishable from a complete MP4 (and ideally cleaned up or resumable). Re-running after a crash is safe and does not silently skip or double-produce content. |
+| SN-014 | **Application failure / FFmpeg error or FFmpeg missing** | The tool fails loudly with a plain-language message naming the cause (e.g. "FFmpeg not found on PATH", "FFmpeg exited with an error on file X"), a non-zero exit status, and a hint at the fix. It does not hang indefinitely or report success when no valid output was produced. |
+| SN-015 | **Corrupt / unreadable / unsupported input media** | One bad file does not abort the whole run by default. The tool skips it, names the skipped file and why, continues with the rest, and reports the count of skipped items in the final summary so I can decide whether to re-source them. |
+| SN-016 | **Storage full / no space for output or temp** | The tool detects it can't write, stops with a clear "out of disk space"/"cannot write to <path>" message, and does not leave a truncated file that looks complete. It fails the run rather than producing an unusable output silently. |
+| SN-017 | **Output device / SD card / network path removed or unwritable mid- or pre-run** | If the output (or input NAS) path is missing or becomes unwritable, the tool reports the specific path and the problem and stops cleanly, rather than crashing cryptically or silently writing nowhere. Removing the card after a file is fully written never corrupts already-completed outputs. |
+| SN-018 | **Output too big for the target frame / FAT32** | Covered as a *pre-run* protection in SN-006; as an edge case, if an output still ends up oversized the tool surfaces it in the summary (file path + size) rather than letting me discover it only when the frame rejects the card. |

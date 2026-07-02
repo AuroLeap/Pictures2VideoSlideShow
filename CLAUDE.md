@@ -34,10 +34,12 @@ This repo follows a **gated, requirement-traced process**. Read
 [docs/process.md](docs/process.md) once; it is the source of truth for roles,
 gates, and the ID scheme. The short version an agent needs every session:
 
-- **Everything traces:** `UN → SR → LLR → TC`
+- **Everything traces:** `SN → SR → LLR → TC`
   ([docs/requirements/](docs/requirements/), [docs/test/test-cases.csv](docs/test/test-cases.csv)).
   Intent lives once, as an id, and children link to it. The matrix is generated
   (`Scripts/trace.ps1`) and must report **0 orphans**; `-Strict` fails on any.
+  (Historical status.md/audit quotes say "UN-###" — that is the 2026-07-01
+  rename of the top tier from User Need to Stakeholder Need; numbers unchanged.)
 - **The check harness is the bar:** `Scripts/run-tests.ps1` runs
   `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --all`, coverage
   (`cargo llvm-cov`, ≥ 80% line), and the traceability report — the same steps
@@ -100,5 +102,7 @@ gates, and the ID scheme. The short version an agent needs every session:
 ---
 
 > This guide follows the [project-trajectory kit](templates/project-trajectory/README.md)
-> (upstream: the `ai-template` repo). Add a rule here only after you've had to
+> (upstream: `ai-template` repo, kit commit stamped in `docs/kit-version`).
+> `AGENTS.md` exists as the cross-tool standard pointer; it defers to this file
+> for all project-specific content. Add a rule here only after you've had to
 > repeat it; delete rules you don't enforce.

@@ -80,14 +80,14 @@ def _utf8_console():
 
 
 # ============================ EDIT FOR YOUR STACK ============================
-# The stack-specific knobs live here. For a non-Python project: point SRC/TESTS
-# at your layout, then swap the format/lint/tests commands in steps() (search
-# "EDIT FOR YOUR STACK" again) for your toolchain — or drop a step you don't
-# have. The traceability, design-flows, and arch-map steps are stdlib-only and
-# stack-agnostic; keep them as-is.
-SRC = "src"  # source root
-TESTS = "tests"  # test root
-COVERAGE_THRESHOLD = 80  # line-coverage %, enforced at full/release (process.md)
+# Rust/Cargo project. Product checks (format/lint/tests/coverage) are owned by
+# Scripts/run-tests.ps1 (the canonical gate). This file covers the PROCESS layer
+# only: traceability, doc-navigability, arch-map freshness (all stdlib Python,
+# stack-agnostic). Product steps below are disabled (empty command list) so
+# check.py is not a false-green wrapper around cargo.
+SRC = "src"   # Rust source root (used by check_docs.py path references)
+TESTS = "tests"  # Rust integration tests root
+COVERAGE_THRESHOLD = 80  # line %, per Scripts/run-tests.ps1 (not enforced here)
 # ============================================================================
 
 # Tier -> pytest marker expression. Tiers are cumulative, and the safe default
@@ -116,33 +116,20 @@ COVERAGE_TIERS = ("full", "release", "all")
 # process.md §7 "process vs product checks"). Edit commands to fit your stack;
 # keep the gate tags and layers.
 def steps(coverage, tier, gate, phase=None):
-    # --- EDIT FOR YOUR STACK: the format/lint/test commands -------------------
-    # `pytest_cmd` (assembled here because it varies by tier/coverage) and the
-    # `ruff` format/lint entries in the returned list are the Python-reference
-    # toolchain. Replace them with your stack's equivalents — or drop a step you
-    # don't have — but keep each step's gate tags. Tools run as `python -m <mod>`
-    # via this interpreter, so the launcher's venv python is enough (no PATH/venv
-    # dance). `pytest_needs` lists the modules a step imports, so a missing tool
-    # is reported SKIP(missing) and (outside --lenient) fails rather than passing.
-    pytest_cmd = [sys.executable, "-m", "pytest", "-q"]
-    pytest_needs = ("pytest",)
-    if tier in COVERAGE_TIERS:
-        pytest_cmd += [
-            "--cov=" + SRC,
-            "--cov-report=term-missing",
-            "--cov-fail-under=" + str(coverage),
-        ]
-        pytest_needs = ("pytest", "pytest_cov")
-    marker = TIERS.get(tier)
-    if marker:
-        pytest_cmd += ["-m", marker]
-    # The traceability step only runs at G2/G3, where placeholder rows must be
-    # gone, so --no-placeholders is always on here (a fresh scaffold is exempt
-    # only because nothing past G1 runs against it). --html also regenerates the
-    # scalable full-graph view (a gitignored composite artifact) every run.
+    # --- EDIT FOR YOUR STACK: Rust/Cargo -----------------------------------
+    # Product checks (format/lint/tests/coverage) are delegated to
+    # Scripts/run-tests.ps1 (the canonical gate for this repo). This file covers
+    # the PROCESS layer only. The three product entries below are DISABLED by
+    # having no command and an empty gate-set so they never run; they are kept as
+    # documentation of what the Rust equivalents would be:
+    #   format  -> cargo fmt --all -- --check
+    #   lint    -> cargo clippy --all-targets -- -D warnings
+    #   tests   -> cargo test --all  (+ cargo llvm-cov for coverage)
+    # Run Scripts/run-tests.ps1 for the real product gate.
+    # The traceability step path uses Scripts/ (case-insensitive on Windows).
     trace_cmd = [
         sys.executable,
-        "scripts/trace.py",
+        "Scripts/trace.py",
         "--strict",
         "--no-placeholders",
         "--html",
@@ -153,30 +140,8 @@ def steps(coverage, tier, gate, phase=None):
         if phase:  # phased delivery: close G3 for this phase only (process.md §4)
             trace_cmd += ["--phase", phase]
     return [
-        # --- product checks: language-specific, wired to your stack -----------
-        (
-            "format",
-            ("ruff",),
-            [sys.executable, "-m", "ruff", "format", "--check", SRC, TESTS],
-            {"G3"},
-            "product",
-        ),
-        (
-            "lint",
-            ("ruff",),
-            [sys.executable, "-m", "ruff", "check", SRC, TESTS],
-            {"G3"},
-            "product",
-        ),
-        ("tests+coverage", pytest_needs, pytest_cmd, {"G3"}, "product"),
-        # Optional PRODUCT-layer detector, not wired into the required floor:
-        # `scripts/check_stubs.py` is the Python-reference tripwire for the G3
-        # no-stub / substance criterion (process.md §4). It is warn-first and
-        # language-specific (a stub's shape differs per stack), so — like the perf
-        # *meters* — a project opts in by adding its own step here, e.g.:
-        #   ("no-stubs", (), [sys.executable, "scripts/check_stubs.py"], {"G3"}, "product"),
-        # (add --strict to make found stubs fail the gate). A non-Python stack
-        # swaps or drops it. Left out of the default plan to keep the floor honest.
+        # --- product checks: disabled — use Scripts/run-tests.ps1 instead ----
+        # (format, lint, tests+coverage are run by the Rust harness, not here)
         # --- process checks: kit-owned, stdlib-only, identical everywhere -----
         ("traceability", (), trace_cmd, {"G2", "G3"}, "process"),
         # Doc navigability (process.md §3 "Reviewability"): broken intra-repo
@@ -187,7 +152,7 @@ def steps(coverage, tier, gate, phase=None):
             (),
             [
                 sys.executable,
-                "scripts/check_docs.py",
+                "Scripts/check_docs.py",
                 "--ignore",
                 "docs/test/report.md",
             ],
@@ -213,28 +178,16 @@ def steps(coverage, tier, gate, phase=None):
         (
             "design-flows",
             (),
-            [sys.executable, "scripts/check_flows.py", "--no-placeholders"],
+            [sys.executable, "Scripts/check_flows.py", "--no-placeholders"],
             {"G2", "G3"},
             "process",
         ),
-        # Add `--doc AGENTS.md` / `--doc CLAUDE.md` to route the map there too, and
-        # `--flow <entry>` to also check the generated high-level flow.
-        (
-            "arch-map",
-            (),
-            [
-                sys.executable,
-                "scripts/gen_arch_map.py",
-                "--check",
-                "--strict-parse",
-                "--src",
-                SRC,
-                "--doc",
-                "docs/architecture.md",
-            ],
-            {"G3"},
-            "process",
-        ),
+        # arch-map: disabled — gen_arch_map.py parses Python AST; this repo is Rust.
+        # The architecture map is generated by Scripts/trace.ps1 from the Rust AST
+        # and lives in docs/architecture.md between GENERATED markers (see CLAUDE.md).
+        # Re-enable by porting Scripts/gen_arch_map.reference.ps1 to a check.ps1
+        # step, or by writing a Rust-AST equivalent of gen_arch_map.py.
+        # (ADOPTING.md §3 "Non-Python stacks", option 2 — drop, record in status.md)
     ]
 
 
@@ -267,7 +220,7 @@ def run_step(name, requires, cmd, lenient):
     missing = [m for m in requires if importlib.util.find_spec(m) is None]
     if missing:
         status = "SKIP" if lenient else "FAIL"
-        return status, "module(s) {} not importable by {} — run scripts/setup".format(
+        return status, "module(s) {} not importable by {} — run Scripts/setup".format(
             ", ".join(missing), sys.executable
         )
     start = time.time()

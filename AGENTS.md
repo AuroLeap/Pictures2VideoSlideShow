@@ -1,26 +1,33 @@
 # AGENTS.md — Agent & Contributor Guide
 
-**What this file does:** the standing brief for any agent or human working in
-this repo — *how we build here*, so quality doesn't depend on who (or which
-model) shows up. It is loaded every session: keep it short, concrete, and
-current. Project facts live in `docs/`; this file points at them.
+> **Layout note (inverted from kit default):** In this repo `CLAUDE.md` is the
+> rich project encyclopedia (project facts, stack, working rules, code standards).
+> `AGENTS.md` (this file) carries the kit's agent-guide boilerplate and points at
+> `CLAUDE.md` for all project-specific detail. See ADOPTING.md §6 "Repos whose
+> AGENTS.md already means something else".
 
-> Copy this into a new repo as `AGENTS.md` (the cross-tool standard). Thin
-> `CLAUDE.md`/`GEMINI.md` stubs point back here; keep the full content here,
-> not in the stubs. Fill the **Project** section and delete guidance that
-> doesn't apply. Everything below the line is durable — change it
-> deliberately, not per-task.
+**Read [`CLAUDE.md`](CLAUDE.md) first** — it is the standing brief for any agent
+or human working in this repo: what the project is, how to run it, how we work
+here, and the code standards. The sections below are the kit's durable working
+agreement, kept here for cross-tool compatibility.
 
 ---
 
-## Project (fill this in)
+## Project
 
-- **What this is / one-line purpose:**
-- **Primary users & their expertise level:**
-- **Stack & layout:** language(s); source in `src/`, tests in `tests/`.
-- **How to run the app / pipeline:**
-- **Non-goals (explicitly out of scope):**
-- **Sibling/linked projects (if any):** see `docs/interfaces.md`.
+- **What this is:** converts a photo/video collection into slideshow MP4s for
+  digital picture frames (Ken Burns motion, cross-dissolves, audio passthrough).
+- **Primary user:** non-developer hobbyist on Windows; one binary, no compiler.
+- **Stack & layout:** Rust engine (`src/`, binary `make_video_slideshow`; tests in
+  `src/**/tests` + `tests/`). Original PowerShell pipeline (`*.psm1` +
+  `BuildAlbum.ps1`) kept as reference on `main`/`dev` branches.
+- **How to run:** see [docs/quick-reference.md](docs/quick-reference.md).
+- **Canonical gate command:** `pwsh Scripts/run-tests.ps1` (Rust stack; mirrors
+  CI). The kit's `Scripts/check.ps1` → `Scripts/check.py` covers process checks
+  (traceability, doc-navigability); run it separately with Python 3.8+.
+- **Non-goals:** `bulk_video_time_min` multi-part splitting in Rust (use
+  PowerShell); editing/curation UI.
+- **Sibling/linked projects:** none (standalone); see `docs/interfaces.md`.
 
 ---
 
@@ -41,11 +48,11 @@ gates, and the ID scheme. The short version an agent needs every session:
   G3 code gets written — within the traceability spine, not instead of it.
 - **Gates G1→G2→G3→(G-Release)→G-Final each pause for human approval.** Never
   advance a gate yourself; record it in [docs/status.md](docs/status.md).
-- **The check harness is the bar:** `python scripts/check.py` (launchers:
-  `scripts/check.{sh,ps1}`) runs format, lint, tests, coverage, traceability,
-  flow checks, and map freshness at the repo's active gate (`docs/gate`);
-  `--tier smoke` is the fast subset. Never report a result you didn't run —
-  paste the real output.
+- **The check harness is the bar:** `pwsh Scripts/run-tests.ps1` is the
+  canonical gate (Rust stack: fmt, clippy, tests, coverage ≥80%, trace). The
+  kit's `python Scripts/check.py` covers process-layer checks (traceability,
+  doc-navigability, perf-budgets) — run it separately with Python 3.8+.
+  Never report a result you didn't run — paste the real output.
 - **Behavior is reviewed as diagrams, not rows:** runtime flows (especially
   anything concurrent/non-blocking) are authored Mermaid sequence diagrams in
   [docs/architecture.md](docs/architecture.md) "Runtime flows", written with
@@ -53,11 +60,11 @@ gates, and the ID scheme. The short version an agent needs every session:
   process.md §3).
 - **Releases (if this project ships versioned):** G-Release runs the `release`
   tier plus the generated human checklist (`scripts/gen_release_checklist.py`).
-- **The code map is generated** (`scripts/gen_arch_map.py`): per-module
-  summary, internal dependencies, and public symbols with `Implements:`
-  back-links, in [docs/architecture.md](docs/architecture.md). **Read it to
-  find where a capability lives before searching the tree**; the harness keeps
-  it (and the Mermaid dependency diagram) fresh — never hand-edit it.
+- **The code map is generated** (`Scripts/trace.ps1`): per-module summary
+  (from `//!` headers), internal `crate::` dependencies, public symbols with
+  `Implements:` back-links, and a Mermaid dependency graph — all in
+  [docs/architecture.md](docs/architecture.md). **Read it first to find where a
+  capability lives**; never hand-edit between the `GENERATED` markers.
 - **Diagrams are Mermaid fenced blocks in the docs** — no toolchain needed.
   Never edit between `GENERATED` markers; never commit exported diagram images.
 - **Start each session** with the *Current State* header of
