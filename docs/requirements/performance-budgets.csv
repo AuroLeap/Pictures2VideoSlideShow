@@ -1,0 +1,2 @@
+PB-ID,Metric,Refs,Budget,Unit,Tolerance,Direction,Tier,Gate,Owner,Notes
+PB-000,EXAMPLE - delete on first real entry,SR-000,0,Unit,10%,lower-better,Release,warn,Integration,"Quantitative perf/resource budget for an NFR (process.md §9). Refs back-link the SR/LLR/Module this bounds; trace.py flags an unknown ref. Direction=lower-better|higher-better; Gate=fail|warn; Tier=Smoke|Full|Release. The Integration/Coordination hat allocates these; a module ships provisional self-measured numbers. Standalone projects with no resource concerns ignore this file (like interfaces.csv)."

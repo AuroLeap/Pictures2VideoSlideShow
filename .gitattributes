@@ -1,0 +1,19 @@
+# Line-ending policy for the scaffolded repo. Without this, a Windows clone with
+# core.autocrlf=true rewrites the sh-based git hook with CRLF, and its `#!/bin/sh`
+# shebang then breaks (incl. under Git Bash) — the pilot hit exactly this.
+
+# Sensible default; the more specific rules below win (last match applies).
+* text=auto eol=lf
+
+# The pre-commit hook is an extensionless sh script — LF required on every
+# platform (a CRLF shebang breaks `#!/bin/sh`).
+.githooks/pre-commit text eol=lf
+
+# Shell + macOS double-clickable launchers are sh scripts — same LF requirement.
+*.sh text eol=lf
+*.command text eol=lf
+
+# Native-Windows scripts: CRLF (LF can misparse batch labels / `goto`).
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
