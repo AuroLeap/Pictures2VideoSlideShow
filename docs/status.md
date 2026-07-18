@@ -1027,3 +1027,9 @@ New maintenance objective per Peter: execute [RUST_PERFORMANCE_PLAN.md](../plann
 - **Base:** branch `Optomizations` at the kit-resync merge (56ac0a7) as provided; the parallel session's review-fix commits in the original repo are NOT merged (competition kept clean; merge option recorded in Current state).
 - **Hardware context (this machine):** RTX 3080; ffmpeg 7.1 (gyan.dev) with h264_nvenc/hevc_nvenc/qsv/amf present — Phase 1a hardware-encode TCs can run locally as Release-tier demonstrations.
 - **Round plan:** R1 System Engineer authors perf SRs (+PB budget rows with Test Engineer); R2 Phase 0 (timers+bench+baseline); R3 Phase 1 (1a–1f); R4 Phase 2 (cache; concat-seam spike first); R5 Phase 3 (overlap). Harness green + registry rows in the same commit at every step.
+
+### END-USER — OBJ-PERF — Round 1 — 2026-07-17
+Verdict: APPROVE (needs authored; SRs pending)
+Findings:
+- [MAJOR] SN-030 → new stakeholder need (cold-build speed: ~5,000-photo library, one 1080p output, ≤ 8 h overnight bound on a mid-range PC; hardware acceleration used and reported when present, build still completes without it) has no SR coverage yet → author SR(s) with measurable AcceptanceCriteria tracing SN-030 → @system-engineer
+- [MAJOR] SN-031 → new stakeholder need (incremental rebuild: adding N photos to an already-built M-photo album re-runs in time proportional to N, not M; target ≤ 10% of cold-build time for 100 added to 5,000; output equivalent to a from-scratch build) has no SR coverage yet → author SR(s) with measurable AcceptanceCriteria tracing SN-031 → @system-engineer
