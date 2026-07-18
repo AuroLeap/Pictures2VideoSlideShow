@@ -1077,3 +1077,36 @@ Verification (pasted output):
 Notes:
 - G3 TDD discipline: these Status=Draft TCs flip to Verified ONLY when their planned tests exist and pass — red first (each TC becomes a failing test before the code that satisfies it). Round 3+ implementation commits must flip TC/LLR/SR statuses in the same commit as the passing tests, harness green.
 - No cargo run this round (registry-only change per the round rules); harness/coverage status unchanged from the last green run (2026-07-02, coverage 82.22%). `docs/architecture.md` untouched by content (trace.ps1 regenerated it byte-identical).
+
+### SOFTWARE-ENGINEER — OBJ-PERF — Round 3 (Phase 0) — 2026-07-17
+Verdict: APPROVE (Phase 0 measurement infrastructure implemented — LLR-050/051/052 only; no encoder/cache/prefetch/SIMD work touched)
+Implemented (TDD: TC-072/TC-073 tests written red-first, then the code):
+- **LLR-050 stage timers** — new `src/util/timing.rs` (`StageTimings`: relaxed u64-nano atomic accumulators, one `Instant` pair per instrumentation point, no syscalls in the frame loop; `StageSnapshot` + `log_summary`). Instrumentation: `FrameRenderer::load_with_focus` times decode/prescale separately (`LoadTimings`), `ImageFrameSource::next_frame` times render per batch, `CrossfadeMixer` `timed_blend`/`timed_scale` (blend) and `emit` (encode-write stall), encoder spawn→exit (ffmpeg-wall). Six `log::debug!` lines per output under `--verbose`; non-verbose output unchanged; `BuildSummary.timings` (`OutputTimings`) carries the snapshot for the bench runner.
+- **LLR-051 metrics writer** — `util::timing::write_perf_metrics(path, pairs)` serializes the flat `{PB-ID -> number}` JSON; called by the bench path only, unmeasured PBs omitted (check_perf verified to SKIP absent rows, not fail).
+- **LLR-052 bench runner** — `bench --full [--corpus DIR]` in `src/main.rs` (`run_bench_full`, `resolve_bench_corpus`: explicit dir → `TestInput/` → synthesized PNGs; cold+warm scan; real build of the first output to a temp dir; PB-001/002/003/005 computed, PB-004 omitted until SR-037; `peak_working_set_mb` via `K32GetProcessMemoryInfo` on Windows / `VmHWM` on Linux) writing cwd-relative `docs/test/perf-metrics.json` (gitignored composite, confirmed). New `Scripts/bench.ps1` = canonical producer: `cargo build --release` + pinned 1920x1080 bench config + `bench --full` + `check_perf --tier release`.
+- Tests: `tests/stage_timings.rs` (`verbose_emits_one_line_per_stage_sr036`, `nonverbose_output_unchanged_sr036` — TC-072 names), `util::timing::tests::perf_metrics_json_is_pbid_to_number_sr036` (TC-073 name) + accumulation/peak-WS unit tests, and `cli_arms::bench_full_writes_pb_metrics_sr036` (automated smoke of the TC-074 plumbing; the Release-tier procedure itself stays Automated=No).
+Registry/docs: LLR-050/051/052 → **Implemented** (Module/CodeSymbol trued up); TC statuses untouched (Test Engineer owns the flips). `architecture.md`: `src/util` responsibility row updated; module map + dependency diagram regenerated via trace.ps1.
+Verification (pasted from `pwsh Scripts/run-tests.ps1` + `python Scripts/check.py`):
+```
+    OK: coverage >= 80%   (TOTAL ... lines 82.36%)
+==> traceability report
+Traceability: SR=38 LLR=64 TC=90 orphans=0. Report -> docs/test/report.md
+    OK: traceability report
+HARNESS PASSED
+Check summary (gate G2, tier all): PASS traceability / PASS doc-navigability / PASS design-flows — RESULT: PASS
+```
+`cargo test --all`: 122 passed, 0 failed, 1 ignored (network fetch test) — lib 48 + bin 48 + 26 integration.
+**Phase 0 baseline** (release build, `pwsh Scripts/bench.ps1`, corpus TestInput/ = 10 files: 6 images + 4 videos incl. one 4K; host: AMD Ryzen 9 5900X 12C/24T, RTX 3080, 64 GB RAM, NVMe SSD source disk; ffmpeg 7.1 gyan, software libx264 medium; output bench-1920x1080 @30fps crf 28, 2021 frames in 28.2 s):
+| PB | Value | Budget | Status |
+|---|---|---|---|
+| PB-001 end-to-end frames/s | **71.6** | 60 (higher-better) | OK |
+| PB-002 boundary stall ms/photo | **242.1** | 100 | WARN (expected pre-1b) |
+| PB-003 scan s per 1k files | **46.5** | 2 | WARN (honest full re-probe, no probe cache until SR-038; extrapolated from 10 files where 4 ffprobe spawns dominate — corpus-scale-sensitive) |
+| PB-004 warm-rebuild % | omitted | 10 | SKIP until SR-037 |
+| PB-005 peak working set MB | **405.4** | 2048 | OK |
+Stage share of build wall (plan §2 exit table, 1080p): decode 0.4%, prescale 4.8%, **render 42.3%**, blend 8.9%, encode-write-stall 16.5% (ffmpeg-wall = 100% by construction — encode overlaps the render loop). `check_perf --tier release`: 0 fail, 2 warn, 1 skip — exit 0 (all rows Gate=warn).
+Findings:
+- [MAJOR] TC-072/TC-073 → planned tests now exist and pass under the planned names → verify and flip TC-072/TC-073 (and TC-074 after witnessing a bench run) per the G3 TDD discipline; SR-036 status is the System Engineer's call once the TC set closes → @test-engineer
+- [MAJOR] PB baseline → record the golden: run `python Scripts/check_perf.py --update-baseline` against a fresh bench (or copy the table above) and commit `docs/test/perf-baseline.json`... note it is currently gitignored by the kit stanza — un-ignoring the committed golden (process.md §9 baseline-as-golden) is your call to make consistently → @test-engineer
+- [MINOR] PB-002 (242 ms/photo vs provisional 100) and PB-003 (46.5 vs provisional 2) budgets were provisional pending this baseline → true them up (or keep as targets for Phases 1b/SR-038) so warn-noise is deliberate, not ambient → @test-engineer
+- [NOTE] Baseline reading for phase ordering (plan §9): render (42.3%) is the largest measured stage at 1080p software-encode; encode-write stall (16.5%) suggests Phase 1a/3 overlap value; boundary stall 242 ms/photo × N photos is the Phase 1b win; PB-001 already beats the provisional 60 fps budget on this host.
