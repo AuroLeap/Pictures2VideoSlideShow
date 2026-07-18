@@ -1473,3 +1473,13 @@ python Scripts/trace.py --strict --no-placeholders
 ### ORCHESTRATOR — OBJ-PERF — Closure — 2026-07-18
 
 Grind complete: Rounds 1–6b all APPROVE (End User, System Engineer, Software Engineer x5, Test Engineer x4 verdicts above). Phases 0–3 of [RUST_PERFORMANCE_PLAN.md](../planning/RUST_PERFORMANCE_PLAN.md) shipped on branch `Optomizations`; Phase 4 (wgpu) not started, per plan gate. Measured (accepted golden baseline, quiet host, 2026-07-18): streaming 69.4→91.2 fps (+31%), rotation-off 134.6 fps, boundary stall 278→4.2 ms/photo, warm scan 41.5→0.257 s/1k (~160x), warm rebuild +12 photos = 6.43% of cold (15.6x). 211 tests 0 failed, coverage 87.4%, orphans=0 strict. Remaining human items: see SYSTEM-ENGINEER Closure list. Branch not pushed (no remote decision made) — Peter merges/pushes as desired.
+
+### DRIVER (Test Engineer + System Engineer hats, process.md §1) — OBJ-PERF — TC-069 demonstration — 2026-07-18
+
+TC-069 (SR-034 NVENC hardware leg) executed by the driver agent at Peter's direction ("Any reason you can't run TC-069?" — direction recorded here as the witness context). Procedure followed as written in the TC row; all four steps passed:
+1. Config: one [[outputs]] with `encoder = "h264_nvenc"` (1280x720@30, crf 28), media = TestInput (11 items).
+2. `build --non-interactive`: exit 0; 1271 frames in 20.1 s; summary `segments: 0 reused, 11 re-encoded`.
+3. Encoder-in-use line: `Encoding 'nvenc-demo' … encoder h264_nvenc`.
+4. ffprobe: codec=h264, format mov/mp4, pix_fmt=yuv420p, 1280x720 (even), 30/1 fps; faststart confirmed (moov@36 < mdat@16295).
+Also run: `cargo test --test encode_profile -- --ignored` → `hardware_encoders_keep_frame_profile_sr034 ... ok` (nvenc/qsv/amf legs).
+Registry: TC-069 → Verified (execution record in row); SR-034 → Verified in this same commit (closure-round convention). Remaining human items drop to: TC-082 real-frame demo, quiet-host re-bench, pre-existing SR-013/023/024/027.
