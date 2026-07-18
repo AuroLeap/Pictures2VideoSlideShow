@@ -6,28 +6,17 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-mod cache;
-mod config;
-mod error;
-mod ffmpeg;
-mod image;
-mod logging;
-mod media;
-mod pipeline;
-mod preflight;
-mod roi;
-mod setup;
-mod transform;
-mod util;
-mod video;
+// The binary is a thin shell over the library crate — modules are compiled
+// once (in the lib) and imported here, never re-declared.
+use slideshow_core::{cache, config, error, media, pipeline, preflight, roi, setup, util};
 
 use config::Config;
-use logging::init_logging;
+use slideshow_core::logging::init_logging;
+use slideshow_core::util::estimate::human_bytes;
 use std::io::IsTerminal;
-use util::estimate::human_bytes;
 
 #[derive(Parser, Debug)]
-#[command(name = "slideshow")]
+#[command(name = "make_video_slideshow", version)]
 #[command(about = "Convert photos/videos to slideshow for digital frames", long_about = None)]
 struct Args {
     /// Configuration file path (TOML/JSON). When omitted, defaults to the
@@ -103,14 +92,16 @@ enum Commands {
     },
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let args = Args::parse();
 
     // Initialize logging
     init_logging(args.verbose)?;
 
-    log::info!("Slideshow Engine v0.1.0 starting...");
+    log::info!(
+        "Slideshow Engine v{} starting...",
+        env!("CARGO_PKG_VERSION")
+    );
     log::debug!("Arguments: {:?}", args);
 
     let non_interactive = args.non_interactive;
@@ -155,9 +146,25 @@ async fn main() -> Result<()> {
 
     // Execute command
     match args.command {
-        None | Some(Commands::Build { .. }) => {
+        None => {
             log::info!("Starting slideshow generation pipeline...");
-            run_build(&config, non_interactive, args.no_cache, args.clear_cache).await?;
+            run_build(
+                &config,
+                non_interactive,
+                None,
+                args.no_cache,
+                args.clear_cache,
+            )?;
+        }
+        Some(Commands::Build { output }) => {
+            log::info!("Starting slideshow generation pipeline...");
+            run_build(
+                &config,
+                non_interactive,
+                output.as_deref(),
+                args.no_cache,
+                args.clear_cache,
+            )?;
         }
         Some(Commands::Validate) => {
             log::info!("Validating runtime prerequisites...");
@@ -165,7 +172,7 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Stats) => {
             log::info!("Collecting project statistics...");
-            run_stats(&config).await?;
+            run_stats(&config)?;
         }
         Some(Commands::Bench {
             images,
@@ -174,10 +181,10 @@ async fn main() -> Result<()> {
         }) => {
             if full {
                 log::info!("Running full end-to-end bench...");
-                run_bench_full(&config, corpus, non_interactive).await?;
+                run_bench_full(&config, corpus, non_interactive)?;
             } else {
                 log::info!("Running benchmark with {} images...", images);
-                run_bench(&config, images).await?;
+                run_bench(&config, images)?;
             }
         }
     }
@@ -216,9 +223,16 @@ fn print_check_results(results: &[preflight::CheckResult]) {
     }
 }
 
-async fn run_build(
+/// Run `build`. `only_output` (the `build --output <name>` filter) restricts
+/// the run to the one named output definition; an unknown name is a hard error
+/// listing the available definitions, never a silent full build. `no_cache`
+/// bypasses the SR-037 segment cache (streaming pipeline); `clear_cache`
+/// empties the store first.
+// Implements: SR-017, LLR-065, SR-037, LLR-054
+fn run_build(
     config: &Config,
     non_interactive: bool,
+    only_output: Option<&str>,
     no_cache: bool,
     clear_cache: bool,
 ) -> Result<()> {
@@ -241,10 +255,35 @@ async fn run_build(
         std::process::exit(1);
     }
 
+    // Resolve the `build --output <name>` filter up front so a typo'd name
+    // fails fast, before any scanning or encoding starts.
+    // Implements: SR-017, LLR-065
+    let outputs: Vec<config::OutputDef> = match only_output {
+        Some(name) => {
+            let selected: Vec<_> = config
+                .outputs
+                .iter()
+                .filter(|o| o.name == name)
+                .cloned()
+                .collect();
+            if selected.is_empty() {
+                let available: Vec<_> = config.outputs.iter().map(|o| o.name.as_str()).collect();
+                return Err(error::SlideshowError::InvalidConfig(format!(
+                    "no output definition named '{}'; available outputs: {}",
+                    name,
+                    available.join(", ")
+                ))
+                .into());
+            }
+            selected
+        }
+        None => config.outputs.clone(),
+    };
+
     // 1. Load media
     log::info!("Loading media files...");
     let media_loader = media::MediaLoader::new(config.input.clone());
-    let album = media_loader.scan_and_index().await?;
+    let album = media_loader.scan_and_index()?;
     log::info!(
         "Found {} media files, total size: {} MB",
         album.media_files.len(),
@@ -273,7 +312,7 @@ async fn run_build(
     // Implements: SR-037, LLR-054
     let pipeline = pipeline::FrameGenerationPipeline::new(
         album,
-        config.outputs.clone(),
+        outputs,
         config.processing.clone(),
         config.output.base_dir.clone(),
         config.input.media_root.clone(),
@@ -286,10 +325,10 @@ async fn run_build(
         log::info!("Segment cache cleared: {}", cache_root.display());
     }
     let summary = if no_cache {
-        pipeline.execute().await?
+        pipeline.execute()?
     } else {
         let mut store = cache::store::SegmentStore::open(&cache_root)?;
-        pipeline.execute_cached(&mut store).await?
+        pipeline.execute_cached(&mut store)?
     };
 
     print_completion_summary(&summary);
@@ -347,9 +386,9 @@ fn print_completion_summary(summary: &pipeline::BuildSummary) {
     }
 }
 
-async fn run_stats(config: &Config) -> Result<()> {
+fn run_stats(config: &Config) -> Result<()> {
     let media_loader = media::MediaLoader::new(config.input.clone());
-    let album = media_loader.scan_and_index().await?;
+    let album = media_loader.scan_and_index()?;
 
     println!("\n=== Project Statistics ===");
     println!("Media files: {}", album.media_files.len());
@@ -370,22 +409,20 @@ async fn run_stats(config: &Config) -> Result<()> {
     Ok(())
 }
 
-async fn run_bench(config: &Config, num_images: usize) -> Result<()> {
+fn run_bench(config: &Config, num_images: usize) -> Result<()> {
     let media_loader = media::MediaLoader::new(config.input.clone());
-    let album = media_loader.scan_and_index().await?;
+    let album = media_loader.scan_and_index()?;
 
     let first_image = album
         .media_files
         .iter()
         .find(|m| m.file_type == media::MediaType::Image)
-        .ok_or_else(|| {
-            crate::error::SlideshowError::Media("No images found to benchmark".into())
-        })?;
+        .ok_or_else(|| error::SlideshowError::Media("No images found to benchmark".into()))?;
 
     let output_def = config
         .outputs
         .first()
-        .ok_or_else(|| crate::error::SlideshowError::InvalidConfig("No output defined".into()))?;
+        .ok_or_else(|| error::SlideshowError::InvalidConfig("No output defined".into()))?;
 
     log::info!(
         "Benchmarking frame generation on {} ({} simulated images)...",
@@ -393,7 +430,7 @@ async fn run_bench(config: &Config, num_images: usize) -> Result<()> {
         num_images
     );
 
-    let renderer = image::FrameRenderer::load(&first_image.path, output_def)?;
+    let renderer = slideshow_core::image::FrameRenderer::load(&first_image.path, output_def)?;
     let frames_per_image = renderer.total_frames();
 
     let start = std::time::Instant::now();
@@ -482,11 +519,7 @@ fn resolve_bench_corpus(explicit: Option<PathBuf>) -> Result<(PathBuf, Option<Be
 /// rebuild, SR-037) is measured by the `Scripts/bench.ps1` wrapper via timed
 /// `build` invocations and merged in there, like PB-006.
 // Implements: LLR-052, LLR-051, SR-036
-async fn run_bench_full(
-    config: &Config,
-    corpus: Option<PathBuf>,
-    non_interactive: bool,
-) -> Result<()> {
+fn run_bench_full(config: &Config, corpus: Option<PathBuf>, non_interactive: bool) -> Result<()> {
     let ffmpeg = setup::ensure_ffmpeg(config, non_interactive)?;
     log::info!("Using FFmpeg: {}", ffmpeg.display());
 
@@ -515,10 +548,10 @@ async fn run_bench_full(
     let _ = std::fs::remove_file(&bench_cache);
     let loader = media::MediaLoader::new(input).with_probe_cache_path(bench_cache.clone());
     let t = std::time::Instant::now();
-    let _cold = loader.scan_and_index().await?;
+    let _cold = loader.scan_and_index()?;
     let cold_scan = t.elapsed();
     let t = std::time::Instant::now();
-    let album = loader.scan_and_index().await?;
+    let album = loader.scan_and_index()?;
     let warm_scan = t.elapsed();
     let _ = std::fs::remove_file(&bench_cache);
     let warm_stats = album.probe_stats;
@@ -542,7 +575,7 @@ async fn run_bench_full(
         None,
     );
     let t = std::time::Instant::now();
-    let summary = pipeline.execute().await?;
+    let summary = pipeline.execute()?;
     let build_wall = t.elapsed();
     let _ = std::fs::remove_dir_all(&out_dir);
     let ot = summary.timings.first().ok_or_else(|| {

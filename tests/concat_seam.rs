@@ -115,7 +115,7 @@ fn segmented_concat_build_equals_cold_build_sr037() {
         media.clone(),
         None,
     );
-    let summary = futures::executor::block_on(cold_pipe.execute()).expect("cold build");
+    let summary = cold_pipe.execute().expect("cold build");
     assert_eq!(summary.written.len(), 1, "cold build writes one output");
     let cold_mp4 = summary.written[0].path.clone();
 

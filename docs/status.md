@@ -1483,3 +1483,30 @@ TC-069 (SR-034 NVENC hardware leg) executed by the driver agent at Peter's direc
 4. ffprobe: codec=h264, format mov/mp4, pix_fmt=yuv420p, 1280x720 (even), 30/1 fps; faststart confirmed (moov@36 < mdat@16295).
 Also run: `cargo test --test encode_profile -- --ignored` → `hardware_encoders_keep_frame_profile_sr034 ... ok` (nvenc/qsv/amf legs).
 Registry: TC-069 → Verified (execution record in row); SR-034 → Verified in this same commit (closure-round convention). Remaining human items drop to: TC-082 real-frame demo, quiet-host re-bench, pre-existing SR-013/023/024/027.
+
+### MAINTENANCE — review-fix pass — 2026-07-17
+
+Applied the fix set from [review-2026-07-17.md](review-2026-07-17.md) (C1–C2, H1–H4, M1–M4 doc legs):
+- **C1**: removed redistributed non-commercial-only third-party scripts (`Scripts/autocolor`, `autogamma`, `autotone` — Fred Weinhaus, incompatible with MIT). **C2**: removed `Scripts/ContReportPath` (3.6 MB personal media inventory; history purge still pending — owner decision).
+- **H1**: `build --output <name>` now honored — filter resolved before scan/encode; unknown name fails fast naming available outputs. New LLR-045; TC-063/TC-064.
+- **H2**: ignore patterns match the path relative to media_root (folder exclusion works; media-root path never matches). TC-066.
+- **H3**: bin is a thin shell over the lib crate (no module re-declaration; crate compiled once).
+- **H4**: dropped unused deps (tokio/futures/once_cell/regex/lazy_static); pipeline/scan de-asynced (`execute`, `scan_and_index` now sync — no runtime needed).
+- **M2**: duplicate `[[outputs]].name` rejected by `Config::validate`. TC-065.
+- **M3**: `RUST_LOG` wins over `--verbose` default. **M4**: stale BLOCKER narrative on the passing all-skipped test replaced with regression-test doc.
+- **M1 (doc leg)**: `exception_pattern`/`exception_threshold` documented as inert in the Rust engine (Quick Reference §4 + §5 gap row); implement-or-remove decision deferred.
+- **Hook repair**: `.githooks/pre-commit` no longer runs `gen_arch_map.py --check` (cannot parse the Rust map's trace.ps1 markers — failed unconditionally); `core.hooksPath` enabled locally so `trace.py --strict-integrity` guards every commit again. Stale `src/.gitkeep`/`tests/.gitkeep` removed.
+- Deferred items + reasons: [review-2026-07-17.md §0](review-2026-07-17.md).
+
+Verification (pwsh Scripts/run-tests.ps1): fmt/clippy clean; `cargo test --all` 0 failed; coverage line **81.58%** ≥ 80; trace SR=33 LLR=45 TC=66 **orphans=0**. HARNESS PASSED.
+
+*(Entry above predates the OBJ-PERF log entries but merged after them — see the MERGE entry below for the id renumbering that resolved its LLR-045/TC-063..066 references.)*
+
+### MERGE — kit-resync-2026-07 → Optomizations — 2026-07-18
+
+Merged the parallel session's review-fix commits (`ad15454`, `dd65a95`) into the OBJ-PERF line. Resolutions:
+- **Id collision (ids never reused):** kit-resync's rows were renumbered on merge — LLR-045→**LLR-065** (build --output filter), TC-063..066→**TC-091..094** — including the `Implements:`/`Verifies:` back-links in src/main.rs and tests/multi_output.rs. OBJ-PERF's LLR-045..064/TC-063..090 keep their numbers. The historical text of the review-fix entry above intentionally still cites the old ids.
+- **De-async completed:** their tokio removal now covers the OBJ-PERF additions too (`execute_cached`, `run_bench_full`, `scan_and_index` call sites all sync; no `.await` remains).
+- **Both features kept:** `build --output <name>` filter + duplicate-name validation + folder-aware ignore patterns (theirs) coexist with the segment cache flags, bench, and encoder work (ours); `main.rs` is their thin-shell over the lib with our subcommands.
+- **Generated files** (architecture.md, report.md) regenerated post-merge; Cargo.lock regenerated from the merged Cargo.toml (their dep-slim + our image 0.25/fast_image_resize).
+Verification: full harness + strict trace below (this entry precedes the run; evidence pasted in the merge commit message).

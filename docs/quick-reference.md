@@ -101,9 +101,9 @@ For a basic end-user run you do **not** edit this file by hand — the first-run
 | Field | Unit / type | Default | Meaning |
 |---|---|---|---|
 | `media_root` | path | *(required)* | Folder scanned for photos/videos (recursed). |
-| `ignore_patterns` | list of strings | `[]` | Case-insensitive filename/path substrings to skip (e.g. `["DNP"]`). |
-| `exception_pattern` | string | *(none)* | Optional pattern that re-includes otherwise-ignored items. |
-| `exception_threshold` | integer | *(none)* | Optional numeric threshold paired with `exception_pattern`. |
+| `ignore_patterns` | list of strings | `[]` | Case-insensitive substrings matched against each file's path **relative to `media_root`** — a pattern can name a file or a whole folder (e.g. `["DNP"]`). |
+| `exception_pattern` | string | *(none)* | **Not implemented in the Rust engine** (accepted for config compatibility, no effect — see §5). |
+| `exception_threshold` | integer | *(none)* | **Not implemented in the Rust engine** (accepted for config compatibility, no effect — see §5). |
 | `roi_db` | path | *(none)* | Optional JSON region-of-interest database that pins the Ken Burns zoom per image (e.g. a face). Keyed by each image's path **relative to `media_root`**; value `{"x":..,"y":..}` or `{"bbox":[x,y,w,h]}` (normalized 0-1; bbox center used). A missing/invalid file fails the run. See §6. |
 
 ### `[output]`
@@ -156,6 +156,7 @@ The Rust engine is fast but feature-incomplete. These gaps are stated **here onc
 |---|---|---|
 | **`bulk_video_time_min` splitting** | Rust writes **one continuous MP4 per output**, no matter how long. A long album can cross the **4 GB FAT32 wall**. | Keep the album small, raise `quality_crf` (smaller file), use an **exFAT/NTFS** card, or use the **PowerShell pipeline** (which splits into ~20-min parts). |
 | Shared video-decode across multiple outputs | Each output re-decodes videos (slower with many outputs). | Cosmetic/perf only; no action needed. |
+| **`exception_pattern` / `exception_threshold`** | Parsed but **inert** in the Rust engine — setting them re-includes nothing. | Curate with `ignore_patterns` only, or use the PowerShell pipeline if you rely on the exception mechanism. |
 | GPU **rendering** | Frame rendering (Ken Burns warp, blends) is CPU-only. | Hardware **encoding** is available today via the `encoder` config field (§4); GPU rendering is a possible future phase. |
 
 When the Rust engine falls short, the **PowerShell pipeline** (feature-complete reference on `main`) is the documented fallback — see the README [Project Status](../README.md#project-status) for which implementation to choose.

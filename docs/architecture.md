@@ -297,7 +297,7 @@ _Generated 2026-07-18 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn total_frames(&self) -> u32`
   - `pub fn fade_frames(&self) -> u32`
   - `pub fn even_dims(&self) -> (u32, u32)`  <- LLR-010, SR-005, SR-006
-  - `pub fn from_file(path: &PathBuf) -> Result<Self>`
+  - `pub fn from_file(path: &std::path::Path) -> Result<Self>`
   - `pub fn validate(&self) -> Result<()>`
 - **src/error.rs** — _The crate-wide error type: every failure maps to a `SlideshowError`_
   - `pub enum SlideshowError`
@@ -372,6 +372,7 @@ _Generated 2026-07-18 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub struct MediaLoader`  <- SR-038
   - `pub fn new(config: InputConfig) -> Self`  <- LLR-058, SR-038
   - `pub fn with_probe_cache_path(mut self, path: PathBuf) -> Self`  <- LLR-058, SR-038
+  - `pub fn scan_and_index(&self) -> Result<Album>`  <- LLR-058, LLR-059, SR-038
 - **src/media/probe_cache.rs** — _Media-scan probe cache (SR-038): JSON persistence of per-file probe_
   - uses: `error`, `util`
   - `pub struct ProbeEntry`  <- LLR-058, SR-038
@@ -392,6 +393,8 @@ _Generated 2026-07-18 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn oversize_outputs(&self) -> Vec<&WrittenOutput>`  <- LLR-013, SR-009
   - `pub struct FrameGenerationPipeline`
   - `pub fn new(`  <- SR-036
+  - `pub fn execute(&self) -> Result<BuildSummary>`  <- LLR-017, LLR-019, LLR-023, LLR-024, SR-004, SR-014
+  - `pub fn execute_cached(&self, store: &mut SegmentStore) -> Result<BuildSummary>`  <- LLR-054, LLR-055, SR-014, SR-037
   - `pub fn execute_segmented(`  <- LLR-040, LLR-041, LLR-053, LLR-054, LLR-055, LLR-056, LLR-057, SR-011, SR-013, SR-014, SR-032, SR-037
   - `pub struct SegmentedBuild`  <- LLR-055, LLR-056, SR-037
 - **src/pipeline/overlap.rs** — _Encoder-writer thread (Phase 3 pipeline overlap, plan §5): the mixer emits_

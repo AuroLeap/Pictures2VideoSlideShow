@@ -27,7 +27,7 @@ fn scan(media_root: &Path, cache: &Path) -> Album {
         roi_db: None,
     })
     .with_probe_cache_path(cache.to_path_buf());
-    futures::executor::block_on(loader.scan_and_index()).expect("scan")
+    loader.scan_and_index().expect("scan")
 }
 
 /// A three-file library: two images and one silent synthesized video.

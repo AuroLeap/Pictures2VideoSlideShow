@@ -174,7 +174,7 @@ impl FrameGenerationPipeline {
     /// files and skipped inputs. The directory check names the exact path on
     /// failure (LLR-019).
     // Implements: LLR-017, LLR-023, LLR-024, SR-004, SR-014
-    pub async fn execute(&self) -> Result<BuildSummary> {
+    pub fn execute(&self) -> Result<BuildSummary> {
         ensure_dir_exists(&self.output_dir)?;
 
         let media: Vec<_> = self.album.media_files.iter().collect();
@@ -536,7 +536,7 @@ impl FrameGenerationPipeline {
     /// its index. The default `build` path; `--no-cache` uses
     /// [`Self::execute`] instead (neither reads nor writes the store).
     // Implements: LLR-054, LLR-055, SR-037, SR-014
-    pub async fn execute_cached(&self, store: &mut SegmentStore) -> Result<BuildSummary> {
+    pub fn execute_cached(&self, store: &mut SegmentStore) -> Result<BuildSummary> {
         ensure_dir_exists(&self.output_dir)?;
         let mut written = Vec::new();
         for output_def in &self.outputs {
