@@ -8,14 +8,14 @@ Back to [docs index](README.md) · [README](../README.md).
 
 ## Current state
 
-- **Active objective:** ✅ **PROJECT COMPLETE — in maintenance.** All objectives signed off; FINAL end-user acceptance APPROVED 2026-06-04.
-- **Round:** maintenance
-- **Mode:** pause-at-each-gate (gates only for new objectives; maintenance changes ride the harness + registry discipline per [CLAUDE.md](../CLAUDE.md))
+- **Active objective:** **OBJ-PERF — engine performance, phases 0–3 of [planning/RUST_PERFORMANCE_PLAN.md](../planning/RUST_PERFORMANCE_PLAN.md)** (measurement → encoder/CPU quick wins → incremental segment cache → pipeline overlap). Prior scope: ✅ PROJECT COMPLETE, FINAL acceptance APPROVED 2026-06-04; this is post-acceptance maintenance work on branch `Optomizations`.
+- **Round:** OBJ-PERF round 1
+- **Mode:** **autonomous** (set by Peter 2026-07-17 for OBJ-PERF: decide-and-record per the process.md §6 dial; gates/harness discipline unchanged; decisions logged below instead of pausing)
 - **Latest measurements (2026-07-01, kit re-sync + `Scripts/run-tests.ps1` + `python Scripts/check.py`):** `cargo fmt --check` clean; `cargo clippy -D warnings` clean; `cargo test --all` 113 tests 0 failed; `cargo llvm-cov` line **82.22%** (≥80%); `Scripts/trace.ps1 -Strict` SR=33 LLR=44 TC=62 **orphans=0**; `python Scripts/check.py` (G2): traceability + doc-navigability + design-flows all PASS.
 - **Active gate:** G2. G3 requires all Verification=Test SRs to be Status=Verified; SR-013, SR-024, SR-027 remain Implemented/Draft because their Tier=Release TCs require Peter's hardware/interactive/network. Pre-existing; see Constraints.
 - **Kit version:** `9670982 2026-07-01` (ai-template branch MultiRepoSupport; stamped in `docs/kit-version`).
 - **Still open for the human:** SR-023 release publish on a `v*` tag; SR-013/SR-024/SR-027 Tier=Release TCs for G3 advancement; real-ENOSPC (SR-015) demonstration.
-- **Next action:** Peter reviews branch `kit-resync-2026-07` and merges (or notes items below).
+- **Next action:** OBJ-PERF grind in progress (see round log tail). This clone (`C:\Projects\Pictures2VideoSlideShowOptomizations`, branch `Optomizations`) is the perf worktree; the original repo continues under a parallel session whose review-fix commits (`ad15454`, `dd65a95`) are **deliberately not merged here** — one `git fetch <orig> kit-resync-2026-07` + merge away if Peter wants them.
 
 ## Constraints
 
@@ -1020,3 +1020,10 @@ Decisions (dial: recorded, reversible):
   remain human-paused as always.
 Verification: python Scripts/check.py PASS (G2 process steps);
 pwsh Scripts/run-tests.ps1 HARNESS PASSED (coverage 82.22% ≥ 80, orphans=0).
+
+### ORCHESTRATOR — OBJ-PERF — Round 1 — 2026-07-17 (kickoff)
+
+New maintenance objective per Peter: execute [RUST_PERFORMANCE_PLAN.md](../planning/RUST_PERFORMANCE_PLAN.md) phases 0–3 on branch `Optomizations` in this dedicated clone. Mode set to **autonomous** (decide-and-record). Decisions:
+- **Base:** branch `Optomizations` at the kit-resync merge (56ac0a7) as provided; the parallel session's review-fix commits in the original repo are NOT merged (competition kept clean; merge option recorded in Current state).
+- **Hardware context (this machine):** RTX 3080; ffmpeg 7.1 (gyan.dev) with h264_nvenc/hevc_nvenc/qsv/amf present — Phase 1a hardware-encode TCs can run locally as Release-tier demonstrations.
+- **Round plan:** R1 System Engineer authors perf SRs (+PB budget rows with Test Engineer); R2 Phase 0 (timers+bench+baseline); R3 Phase 1 (1a–1f); R4 Phase 2 (cache; concat-seam spike first); R5 Phase 3 (overlap). Harness green + registry rows in the same commit at every step.
