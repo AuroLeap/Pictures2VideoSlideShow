@@ -139,6 +139,54 @@ sequenceDiagram
     Wr-->>Mix: Result re-raised by join; .part cleanup unchanged (SR-011, LLR-064)
 ```
 
+### GPU render path (SR-039; OBJ-PERF Phase 4a — designed Round 7b, implementation lands Round 7d)
+
+**Designed (LLR-066..LLR-074, Draft):** the frame renderer goes behind a
+`ClipRenderer` trait — today's `FrameRenderer` is the CPU impl and correctness
+reference — while decode+prescale stay shared and CPU-side as a backend-blind
+`LoadedClip` from the unchanged `ClipPrefetcher` (LLR-066: prescale is 1.5% of
+rot-15 wall, so the GPU uploads the small prescaled image, not the full
+decode). Backend selection is the SR-034 pattern replayed: a process-wide-once
+wgpu adapter probe plus a pure `select_backend` decision table (LLR-067,
+LLR-068), falling back to CPU with a logged reason — never a failed build
+(SR-039). The GPU impl uploads each clip's texture once (LLR-069), then per
+frame draws one textured quad through a matrix the **CPU** computes from
+`ClipPlan::projection(i)` — the shader re-derives no motion math (LLR-070,
+SR-022 per-backend determinism) — and reads back through a 3-deep async
+staging-buffer ring into rgb24 frames shape-identical to the CPU path
+(LLR-071), so mixer/writer/encoder are untouched. Blend stays in the CPU
+`CrossfadeMixer` (LLR-062; 2.6% share — render-only scope recorded in
+LLR-070), and the stdin pipe-write share is the recorded Phase-4b boundary
+(LLR-071). Device loss mid-build completes the in-flight range on the CPU from
+the retained `LoadedClip` and degrades the rest of the build to CPU, logged —
+never skipped, never failed (LLR-072). Cross-backend similarity is
+tolerance-checked via `frame_mean_abs_diff` (LLR-073); deps wgpu + bytemuck +
+pollster are justified/costed in LLR-074.
+
+```mermaid
+sequenceDiagram
+    participant Cfg as render_backend config (LLR-067)
+    participant Sel as probe_adapter + select_backend (LLR-068)
+    participant Pre as ClipPrefetcher — LoadedClip, backend-blind (LLR-060, LLR-066)
+    participant Gpu as GpuRenderer (LLR-069, LLR-070, LLR-074)
+    participant Ring as ReadbackRing, 3-deep async map (LLR-071)
+    participant Src as ImageFrameSource via ClipRenderer (LLR-066)
+
+    Cfg->>Sel: auto | cpu | gpu (SR-039)
+    Note over Sel: probe once per process; adapter absent / probe fail -> CPU + logged reason — never a build failure (SR-039)
+    Sel-->>Src: backend selected; backend-in-use reported at build start (LLR-072)
+    Pre->>Gpu: decoded+prescaled LoadedClip (prescale stays CPU, LLR-066)
+    Gpu->>Gpu: upload clip texture once — Rgba8, bilinear sampler (LLR-069)
+    loop per frame
+        Src->>Gpu: render_range(i..j)
+        Gpu->>Gpu: CPU computes ClipPlan projection(i) -> FrameUniforms (SR-022, LLR-070)
+        Gpu->>Ring: draw textured quad -> copy to staging buffer (LLR-071)
+        Ring-->>Src: rgb24 Vec<u8> — FrameSource contract unchanged (SR-039)
+    end
+    Note over Src: blend stays CPU in CrossfadeMixer (LLR-062) — render-only Phase-4a scope (LLR-070)
+    Note over Gpu: device lost mid-clip -> retained LoadedClip completes the range on CPU, build degrades to CPU, warning logged (LLR-072, LLR-073)
+```
+
 ## High-level flow (Rust engine)
 
 ```mermaid
