@@ -11,6 +11,12 @@ engineering registries (requirements/tests/traceability) live under [../docs/](.
 > snapshots** and may differ from the shipped code; `src/config/mod.rs` is the config
 > schema of record.
 
+## Current-era plans (Rust engine)
+
+| Doc | Contents |
+|---|---|
+| [RUST_PERFORMANCE_PLAN.md](RUST_PERFORMANCE_PLAN.md) | **PROPOSED (2026-07):** phased speed-up plan for the shipped Rust engine — measurement, hardware encode, incremental segment cache, pipeline overlap, wgpu/Vulkan GPU rendering. |
+
 ## Rust rewrite (design / planning)
 
 | Doc | Contents |
