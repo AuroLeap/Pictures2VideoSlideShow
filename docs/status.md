@@ -1510,3 +1510,7 @@ Merged the parallel session's review-fix commits (`ad15454`, `dd65a95`) into the
 - **Both features kept:** `build --output <name>` filter + duplicate-name validation + folder-aware ignore patterns (theirs) coexist with the segment cache flags, bench, and encoder work (ours); `main.rs` is their thin-shell over the lib with our subcommands.
 - **Generated files** (architecture.md, report.md) regenerated post-merge; Cargo.lock regenerated from the merged Cargo.toml (their dep-slim + our image 0.25/fast_image_resize).
 Verification: full harness + strict trace below (this entry precedes the run; evidence pasted in the merge commit message).
+
+### ATTESTATION — TC-082 — 2026-07-18
+
+Peter Johnson attested TC-082 (real-frame playback of segmented builds): frame-test-software.mp4 and frame-test-nvenc.mp4 (1440x900 segmented-cache builds of TestInput from this session, SR-005 profile ffprobe-verified incl. faststart) played on the physical frame per the TC procedure. Recorded per process.md §4 Attest (trust-based human judgment, named and dated). Registry: TC-082 → Verified (attestation in row), SR-037 → Verified in the same commit. OBJ-PERF SRs now all Verified (SR-034..038). Remaining human items: quiet-host Phase-3 bench re-witness; pre-existing SR-013/023/024/027.
