@@ -93,6 +93,61 @@ fn build_skips_bad_and_continues_exit_zero_sr014() {
     );
 }
 
+/// With background clip prefetch active (LLR-060, bounded lookahead), a
+/// corrupt image among valid ones: the failed prefetch is delivered in order
+/// to the clip loop and routed through `record_skip` identically to the
+/// serial path — the corrupt file is skipped exactly once with path + reason,
+/// BOTH surrounding valid clips still contribute (frame count proves the
+/// neighbors survived), and the run exits zero. Skip semantics are otherwise
+/// guarded by the two suites above (TC-022/TC-023), referenced not duplicated.
+/// Verifies: SR-014, SR-036, LLR-060 (TC-086).
+#[test]
+fn prefetch_error_routes_to_record_skip_sr014() {
+    let tmp = TempDir::new("skip_prefetch_order");
+    let media = tmp.join("media");
+    let outdir = tmp.join("out");
+    std::fs::create_dir_all(&media).unwrap();
+    std::fs::create_dir_all(&outdir).unwrap();
+
+    // Corrupt clip in the MIDDLE so in-order delivery matters: the prefetcher
+    // has already loaded (or is loading) the neighbors when the error lands.
+    write_png(&media.join("a_good.png"), 96, 72, [40, 180, 220]);
+    write_corrupt_image(&media.join("b_bad.png"));
+    write_png(&media.join("c_good.png"), 96, 72, [220, 80, 40]);
+
+    let cfg = tmp.join("config.toml");
+    write_config(&cfg, &media, &outdir, "show", 64, 48);
+
+    let out = run_build(&cfg);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+
+    assert!(
+        out.status.success(),
+        "build must exit zero (valid clips produced output); stdout=\n{stdout}\nstderr=\n{stderr}"
+    );
+    let mp4 = outdir.join("show.mp4");
+    assert!(
+        mp4.exists() && std::fs::metadata(&mp4).unwrap().len() > 0,
+        "the valid images must still produce a non-empty output:\n{stdout}"
+    );
+    // Exactly the corrupt file is skipped, with its path and a reason.
+    assert!(
+        stdout.contains("Inputs skipped: 1"),
+        "exactly one skip (the corrupt middle clip):\n{stdout}"
+    );
+    assert!(
+        stdout.contains("b_bad.png"),
+        "the skipped file must be named:\n{stdout}"
+    );
+    // Both neighbors contributed: two 1-second clips at the configured fps
+    // means the two [img] progress lines around the skip both appear.
+    assert!(
+        stderr.contains("a_good.png") && stderr.contains("c_good.png"),
+        "both valid neighbors must stream around the in-order skip:\n{stderr}"
+    );
+}
+
 /// all-bad: only corrupt images. Every input is skipped, no valid output is
 /// produced, the run MUST exit non-zero with the plain "no outputs produced"
 /// message and leave no MP4.

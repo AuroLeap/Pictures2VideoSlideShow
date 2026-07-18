@@ -6,6 +6,7 @@
 //! holds a rolling window of `fade_frames` at each boundary, so memory stays
 //! bounded regardless of clip length or count — whole videos are never loaded.
 
+mod prefetch;
 mod source;
 
 use crate::config::{OutputDef, ProcessingConfig};
@@ -13,7 +14,6 @@ use crate::error::Result;
 use crate::ffmpeg::audio::{AudioClip, AudioParams};
 use crate::ffmpeg::encoder_args::EncoderSettings;
 use crate::ffmpeg::FfmpegEncoder;
-use crate::image::FrameRenderer;
 use crate::media::{Album, MediaFile, MediaType};
 use crate::roi::RoiDb;
 use crate::util::ensure_dir_exists;
@@ -22,6 +22,7 @@ use crate::util::estimate::{
 };
 use crate::util::timing::{StageSnapshot, StageTimings};
 use crate::video::VideoFrameReader;
+use prefetch::{ClipPrefetcher, PrefetchJob};
 use source::{FrameSource, ImageFrameSource, VideoFrameSource};
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -277,6 +278,23 @@ impl FrameGenerationPipeline {
         // Implements: SR-032, LLR-040
         let mut audio_clips: Vec<AudioClip> = Vec::new();
 
+        // Background prefetch of every image clip, in media order, with the
+        // Ken Burns focus resolved here (main thread, ROI db) so the worker
+        // only decodes+prescales. The loop below joins each result at its item,
+        // timing the blocking wait as the PB-002 boundary stall.
+        // Implements: LLR-060, SR-014, SR-036
+        let jobs: Vec<PrefetchJob> = media
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.file_type == MediaType::Image)
+            .map(|(index, m)| PrefetchJob {
+                index,
+                path: m.path.clone(),
+                focus: self.focus_for(&m.path),
+            })
+            .collect();
+        let mut prefetcher = ClipPrefetcher::spawn(jobs, output_def.clone());
+
         for (idx, item) in media.iter().enumerate() {
             let name = item
                 .path
@@ -285,26 +303,36 @@ impl FrameGenerationPipeline {
                 .unwrap_or_default();
 
             let mut src: Box<dyn FrameSource> = match item.file_type {
-                MediaType::Image => match FrameRenderer::load_with_focus(
-                    &item.path,
-                    output_def,
-                    self.focus_for(&item.path),
-                ) {
-                    Ok(r) => {
-                        // The serial decode+prescale stall at this clip
-                        // boundary (PB-002). Implements: LLR-050, SR-036
-                        let lt = r.load_timings();
-                        stage_timings.add_decode(lt.decode);
-                        stage_timings.add_prescale(lt.prescale);
-                        stage_timings.add_clip();
-                        Box::new(ImageFrameSource::new(r, batch, Arc::clone(&stage_timings)))
+                MediaType::Image => {
+                    // Join the prefetched load for THIS item: the worker feeds
+                    // results in media order, so the received index always
+                    // matches. Only the blocking wait is boundary dead time
+                    // (PB-002); decode/prescale accrue their raw overlapped
+                    // time below. Implements: LLR-060, LLR-050, SR-036
+                    let wait = Instant::now();
+                    let (job_idx, result) = prefetcher
+                        .next()
+                        .expect("prefetcher yields one result per image item");
+                    stage_timings.add_stall(wait.elapsed());
+                    debug_assert_eq!(job_idx, idx, "prefetch results must arrive in media order");
+                    match result {
+                        Ok(r) => {
+                            let lt = r.load_timings();
+                            stage_timings.add_decode(lt.decode);
+                            stage_timings.add_prescale(lt.prescale);
+                            stage_timings.add_clip();
+                            Box::new(ImageFrameSource::new(r, batch, Arc::clone(&stage_timings)))
+                        }
+                        // A failed prefetch surfaces here, at its own item, and
+                        // routes through the same skip path as a serial load
+                        // failure. Implements: LLR-060, LLR-016, LLR-017, SR-014
+                        Err(e) => {
+                            log::warn!("Skipping image {}: {}", item.path.display(), e);
+                            self.record_skip(&item.path, e.to_string());
+                            continue;
+                        }
                     }
-                    Err(e) => {
-                        log::warn!("Skipping image {}: {}", item.path.display(), e);
-                        self.record_skip(&item.path, e.to_string());
-                        continue;
-                    }
-                },
+                }
                 MediaType::Video => {
                     match VideoFrameReader::open(&item.path, width, height, output_def.fps) {
                         Ok(rd) => Box::new(VideoFrameSource::new(rd)),
@@ -490,16 +518,17 @@ impl CrossfadeMixer {
         } else {
             let prev = std::mem::take(&mut self.prev_tail);
             let m = prev.len().min(head.len());
-            // Dissolve overlapping frames.
-            for k in 0..m {
-                let t = (k + 1) as f32 / (m + 1) as f32;
-                let frame = self.timed_blend(&prev[k], &head[k], t);
-                self.emit(frame)?;
-            }
-            // If this clip's head ran longer than the previous tail (a short
-            // previous clip), emit the surplus head frames as ordinary body.
-            for f in head.iter().skip(m) {
-                self.emit(f.clone())?;
+            // Dissolve overlapping frames; surplus head frames (this clip's
+            // head ran longer than the previous tail — a short previous clip)
+            // are ordinary body, consumed by value with no clone (LLR-062).
+            for (k, f) in head.into_iter().enumerate() {
+                if k < m {
+                    let t = (k + 1) as f32 / (m + 1) as f32;
+                    let frame = self.timed_blend(&prev[k], &f, t);
+                    self.emit(frame)?;
+                } else {
+                    self.emit(f)?;
+                }
             }
             // (If the previous tail was longer than this head, the leftover
             // tail frames are dropped — only happens for sub-transition clips.)
@@ -555,21 +584,35 @@ impl CrossfadeMixer {
     }
 }
 
-/// Linear cross-dissolve: `out = a*(1-t) + b*t` per channel byte.
+/// Quantize a blend factor `t` in `[0,1]` to a fixed-point weight in `0..=256`
+/// (8.8 fixed point; 256 = fully the second frame). Quantization moves
+/// transition bytes at most ±1 LSB vs the f32 reference — motion parameters
+/// (SR-022 determinism) are untouched.
+// Implements: LLR-062, SR-036
+fn blend_weight(t: f32) -> u16 {
+    (t.clamp(0.0, 1.0) * 256.0).round() as u16
+}
+
+/// Linear cross-dissolve: `out = a*(1-t) + b*t` per channel byte, computed in
+/// u16 fixed point (`(a*(256-w) + b*w + 128) >> 8`). The max intermediate is
+/// `255*256 + 128 = 65408`, which fits u16; `+128` rounds to nearest.
+// Implements: LLR-062, SR-036
 fn blend(a: &[u8], b: &[u8], t: f32) -> Vec<u8> {
-    let t = t.clamp(0.0, 1.0);
-    let inv = 1.0 - t;
+    let w = blend_weight(t);
+    let inv = 256 - w;
     a.iter()
         .zip(b.iter())
-        .map(|(&x, &y)| (x as f32 * inv + y as f32 * t).round().clamp(0.0, 255.0) as u8)
+        .map(|(&x, &y)| ((x as u16 * inv + y as u16 * w + 128) >> 8) as u8)
         .collect()
 }
 
-/// Brightness scale toward/from black: `out = a*t`.
+/// Brightness scale toward/from black: `out = a*t`, in the same u16 fixed
+/// point as [`blend`] (the `b = 0` special case).
+// Implements: LLR-062, SR-036
 fn scale(a: &[u8], t: f32) -> Vec<u8> {
-    let t = t.clamp(0.0, 1.0);
+    let w = blend_weight(t);
     a.iter()
-        .map(|&x| (x as f32 * t).round().clamp(0.0, 255.0) as u8)
+        .map(|&x| ((x as u16 * w + 128) >> 8) as u8)
         .collect()
 }
 
@@ -609,6 +652,77 @@ mod tests {
             PathBuf::from(media_root),
             roi,
         )
+    }
+
+    // Verifies: SR-022, SR-036, LLR-062 (TC-088) — the u16 fixed-point
+    // blend/scale match an f32 reference within +-1 LSB on every channel over
+    // boundary and interior weights/pixels, and the weight endpoints are exact
+    // (w=0 returns the first frame byte-for-byte, w=256 the second).
+    #[test]
+    fn fixed_point_blend_matches_f32_within_one_lsb_sr022() {
+        // Representative pixel bytes (TC-088 Parameters) plus both frames'
+        // values crossed, so a/b pairs cover the corners and mid-range.
+        let px: [u8; 6] = [0, 1, 127, 128, 254, 255];
+        let a: Vec<u8> = px.iter().flat_map(|&x| px.iter().map(move |_| x)).collect();
+        let b: Vec<u8> = px.iter().flat_map(|_| px.iter().copied()).collect();
+
+        // Boundary and interior weights (TC-088: {0,1,127,128,255,max}) as the
+        // t each weight quantizes from, plus arbitrary ts between lattice
+        // points to exercise the quantization itself.
+        let ts: Vec<f32> = [0u16, 1, 127, 128, 255, 256]
+            .iter()
+            .map(|&w| w as f32 / 256.0)
+            .chain([0.1234f32, 0.337, 0.5001, 0.9999])
+            .collect();
+
+        for &t in &ts {
+            let w = blend_weight(t) as i32;
+            assert!((0..=256).contains(&w), "weight {w} out of range for t={t}");
+
+            let got = blend(&a, &b, t);
+            let scaled = scale(&a, t);
+            for i in 0..a.len() {
+                // f32 reference (the pre-LLR-062 implementation).
+                let reference = (a[i] as f32 * (1.0 - t) + b[i] as f32 * t)
+                    .round()
+                    .clamp(0.0, 255.0);
+                let diff = (got[i] as f32 - reference).abs();
+                assert!(
+                    diff <= 1.0,
+                    "blend a={} b={} t={t}: got {} vs f32 ref {} (>1 LSB)",
+                    a[i],
+                    b[i],
+                    got[i],
+                    reference
+                );
+                let sref = (a[i] as f32 * t).round().clamp(0.0, 255.0);
+                assert!(
+                    (scaled[i] as f32 - sref).abs() <= 1.0,
+                    "scale a={} t={t}: got {} vs f32 ref {sref} (>1 LSB)",
+                    a[i],
+                    scaled[i]
+                );
+                // The exact fixed-point contract from LLR-062.
+                let expect =
+                    ((a[i] as u16 * (256 - w as u16) + b[i] as u16 * w as u16 + 128) >> 8) as u8;
+                assert_eq!(
+                    got[i], expect,
+                    "blend must equal the u16 fixed-point formula (a={} b={} w={w})",
+                    a[i], b[i]
+                );
+            }
+        }
+
+        // Endpoint exactness: zero weight returns the first frame exactly,
+        // full weight the second.
+        assert_eq!(blend(&a, &b, 0.0), a, "w=0 must return frame a exactly");
+        assert_eq!(blend(&a, &b, 1.0), b, "w=256 must return frame b exactly");
+        assert_eq!(scale(&a, 1.0), a, "scale w=256 must be identity");
+        assert_eq!(
+            scale(&a, 0.0),
+            vec![0u8; a.len()],
+            "scale w=0 must be black"
+        );
     }
 
     // Verifies: SR-031, LLR-038 — an ROI entry (keyed by path relative to the

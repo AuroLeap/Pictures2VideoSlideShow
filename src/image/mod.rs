@@ -8,15 +8,57 @@
 use crate::config::OutputDef;
 use crate::error::{Result, SlideshowError};
 use crate::transform::{seed_from_str, ClipPlan};
-use ::image::imageops::FilterType;
 use ::image::{GenericImageView, Rgb, RgbImage};
+use fast_image_resize as fir;
 use imageproc::geometric_transformations::{warp_into, Interpolation};
 use rayon::prelude::*;
+use std::cell::RefCell;
 use std::path::Path;
 use std::sync::Arc;
 
+thread_local! {
+    /// One SIMD resizer per rayon worker: `fir::Resizer` reuses internal
+    /// buffers across resizes but is not `Sync`, so sharing per-thread keeps
+    /// the reuse without locking.
+    static RESIZER: RefCell<fir::Resizer> = RefCell::new(fir::Resizer::new());
+}
+
+/// SIMD bilinear resize of an rgb24 buffer, optionally from a float crop
+/// window `(left, top, width, height)` of the source (sub-pixel cropping is
+/// how the fast path pans/zooms without a warp). SSE4.1/AVX2 are runtime
+/// detected by `fast_image_resize`.
+// Implements: LLR-061, SR-036
+fn simd_resize(
+    src: &RgbImage,
+    crop: Option<(f32, f32, f32, f32)>,
+    dst_w: u32,
+    dst_h: u32,
+) -> RgbImage {
+    let src_view = fir::images::ImageRef::new(
+        src.width(),
+        src.height(),
+        src.as_raw(),
+        fir::PixelType::U8x3,
+    )
+    .expect("rgb24 buffer matches dimensions");
+    let mut dst = fir::images::Image::new(dst_w, dst_h, fir::PixelType::U8x3);
+    let mut opts = fir::ResizeOptions::new()
+        .resize_alg(fir::ResizeAlg::Convolution(fir::FilterType::Bilinear));
+    if let Some((l, t, w, h)) = crop {
+        opts = opts.crop(l as f64, t as f64, w as f64, h as f64);
+    }
+    RESIZER.with(|r| {
+        r.borrow_mut()
+            .resize(&src_view, &mut dst, &opts)
+            .expect("resize rgb24")
+    });
+    RgbImage::from_raw(dst_w, dst_h, dst.into_vec()).expect("resized buffer matches dimensions")
+}
+
 /// Elapsed decode (`image::open`) and prescale (resize) time for one clip
-/// load — the two components of the SR-036 clip-boundary stall (PB-002).
+/// load — raw work time, accrued into the SR-036 stage totals. Since the
+/// background prefetch (LLR-060) this overlaps the build; the PB-002 boundary
+/// stall is the clip loop's blocking wait, timed separately.
 // Implements: LLR-050, SR-036
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LoadTimings {
@@ -48,8 +90,8 @@ impl FrameRenderer {
         out: &OutputDef,
         focus: Option<(f32, f32)>,
     ) -> Result<Self> {
-        // Time decode and prescale separately: together they are the serial
-        // clip-boundary stall the PB-002 budget tracks (LLR-050, SR-036).
+        // Time decode and prescale separately (LLR-050, SR-036): raw stage
+        // totals; the PB-002 boundary stall is the caller's blocking wait.
         let t = std::time::Instant::now();
         let img = ::image::open(path).map_err(SlideshowError::Image)?;
         let decode = t.elapsed();
@@ -57,11 +99,11 @@ impl FrameRenderer {
         let seed = seed_from_str(&path.to_string_lossy());
         let plan = ClipPlan::with_focus(w, h, out, seed, focus);
 
-        // Pre-scale once. Triangle is a good speed/quality trade-off for the
-        // up/down-scale that follows per frame.
+        // Pre-scale once, via the SIMD resizer (bilinear ≈ the former Triangle
+        // filter as a speed/quality trade-off for the per-frame scale that
+        // follows). Implements: LLR-061, SR-036
         let t = std::time::Instant::now();
-        let prescaled =
-            ::image::imageops::resize(&img.to_rgb8(), plan.pre_w, plan.pre_h, FilterType::Triangle);
+        let prescaled = simd_resize(&img.to_rgb8(), None, plan.pre_w, plan.pre_h);
         let prescale = t.elapsed();
 
         Ok(Self {
@@ -81,6 +123,15 @@ impl FrameRenderer {
         self.plan.total_frames
     }
 
+    /// True when frames are produced by the SIMD crop+resize fast path (the
+    /// projection is axis-aligned, i.e. rotation is off) rather than the
+    /// generic warp. Exposed for the TC-087 path-selection assertion.
+    // Implements: LLR-061, SR-036
+    #[allow(dead_code)] // consumed by the TC-087 unit test + lib callers only
+    pub fn uses_fast_path(&self) -> bool {
+        self.plan.is_axis_aligned()
+    }
+
     /// Render a contiguous range of frames in parallel, returning raw `rgb24`
     /// buffers in frame order. Rendering in ranges bounds peak memory.
     pub fn render_range(&self, start: u32, end: u32) -> Vec<Vec<u8>> {
@@ -96,6 +147,16 @@ impl FrameRenderer {
         let out_h = self.plan.out_h;
         let render_w = self.plan.render_w;
         let render_h = self.plan.render_h;
+
+        // Fast path (rotation off, the common default): the projection is an
+        // axis-aligned scale+translate, so the frame is exactly "SIMD-resize
+        // the float crop window to the output" — same window as the warp path
+        // (ClipPlan::crop_window), several times faster than a generic warp.
+        // Implements: LLR-061, SR-036
+        if self.plan.is_axis_aligned() {
+            let crop = self.plan.crop_window(i);
+            return simd_resize(self.prescaled.as_ref(), Some(crop), out_w, out_h).into_raw();
+        }
 
         // One sub-pixel warp does the whole pan/zoom/rotation in a single
         // resample (smooth motion, no integer-crop jitter, no double-resample
@@ -150,6 +211,54 @@ mod tests {
             zoom_amount: 0.12,
             ken_burns: true,
         }
+    }
+
+    // Verifies: SR-022, SR-036, LLR-061 (TC-087) — the SIMD resize fast path
+    // is selected iff rotation is off; both paths emit frames of the exact
+    // expected byte size; and the same path-seeded clip renders identically
+    // across loads (plan-level determinism within the implementation —
+    // bit-exactness vs the generic warp resampler is NOT claimed).
+    #[test]
+    fn rotation_off_takes_simd_fast_path_sr022() {
+        let dir = std::env::temp_dir().join("slideshow_test_simd_path");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("grad.png");
+        let img = RgbImage::from_fn(640, 480, |x, y| {
+            ::image::Rgb([(x % 256) as u8, (y % 256) as u8, ((x + y) % 256) as u8])
+        });
+        img.save(&path).unwrap();
+
+        // Rotation off (the common default): axis-aligned projection -> SIMD.
+        let flat = out_def();
+        let fast = FrameRenderer::load(&path, &flat).unwrap();
+        assert!(
+            fast.uses_fast_path(),
+            "rotation off must select the SIMD resize fast path"
+        );
+
+        // Rotation on: generic warp_into path.
+        let mut rot = out_def();
+        rot.max_rotation_degrees = 8.0;
+        let warp = FrameRenderer::load(&path, &rot).unwrap();
+        assert!(
+            !warp.uses_fast_path(),
+            "rotation on must keep the warp_into path"
+        );
+
+        // Both paths emit frames of the exact rgb24 byte size on every frame.
+        for r in [&fast, &warp] {
+            for f in r.render_range(0, 3) {
+                assert_eq!(f.len() as u32, flat.width * flat.height * 3);
+            }
+        }
+
+        // Same seed (path) -> identical output within the implementation.
+        let again = FrameRenderer::load(&path, &flat).unwrap();
+        assert_eq!(
+            fast.render_range(0, 2),
+            again.render_range(0, 2),
+            "same path-seeded clip must render identically across loads"
+        );
     }
 
     #[test]

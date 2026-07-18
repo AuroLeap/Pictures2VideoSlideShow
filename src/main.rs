@@ -523,6 +523,7 @@ async fn run_bench_full(
     for (name, ms) in [
         ("decode", s.decode_ms),
         ("prescale", s.prescale_ms),
+        ("prefetch-stall", s.stall_ms),
         ("render", s.render_ms),
         ("blend", s.blend_ms),
         ("encode-write-stall", s.encode_write_stall_ms),

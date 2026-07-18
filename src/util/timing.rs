@@ -1,6 +1,7 @@
 //! Stage timers and perf-metrics emission (SR-036): cheap per-stage elapsed
-//! accumulation for the build hot path (decode, prescale, render, blend,
-//! encode-write-stall, ffmpeg-wall) surfaced as `--verbose` summary lines,
+//! accumulation for the build hot path (decode, prescale, prefetch-stall,
+//! render, blend, encode-write-stall, ffmpeg-wall) surfaced as `--verbose`
+//! summary lines,
 //! plus the `PB-ID -> number` JSON consumed by `Scripts/check_perf.py` and the
 //! peak-working-set probe for PB-005.
 
@@ -22,6 +23,10 @@ use std::time::Duration;
 pub struct StageTimings {
     decode_ns: AtomicU64,
     prescale_ns: AtomicU64,
+    /// Blocking wait on the prefetched clip at each boundary (LLR-060): the
+    /// PB-002 numerator. Decode/prescale keep accruing their raw (overlapped)
+    /// time above; only this wait is dead time the build actually sees.
+    stall_ns: AtomicU64,
     render_ns: AtomicU64,
     blend_ns: AtomicU64,
     write_ns: AtomicU64,
@@ -48,6 +53,12 @@ impl StageTimings {
     /// Add one clip's prescale (resize-to-plan) time.
     pub fn add_prescale(&self, d: Duration) {
         Self::add(&self.prescale_ns, d);
+    }
+
+    /// Add one clip boundary's blocking wait on the prefetched renderer
+    /// (LLR-060) — the PB-002 stall.
+    pub fn add_stall(&self, d: Duration) {
+        Self::add(&self.stall_ns, d);
     }
 
     /// Add one render batch's Ken Burns warp time.
@@ -82,6 +93,7 @@ impl StageTimings {
         StageSnapshot {
             decode_ms: ms(&self.decode_ns),
             prescale_ms: ms(&self.prescale_ns),
+            stall_ms: ms(&self.stall_ns),
             render_ms: ms(&self.render_ns),
             blend_ms: ms(&self.blend_ns),
             encode_write_stall_ms: ms(&self.write_ns),
@@ -97,6 +109,7 @@ impl StageTimings {
         let s = self.snapshot();
         log::debug!("'{}' stage decode: {:.1} ms", output, s.decode_ms);
         log::debug!("'{}' stage prescale: {:.1} ms", output, s.prescale_ms);
+        log::debug!("'{}' stage prefetch-stall: {:.1} ms", output, s.stall_ms);
         log::debug!("'{}' stage render: {:.1} ms", output, s.render_ms);
         log::debug!("'{}' stage blend: {:.1} ms", output, s.blend_ms);
         log::debug!(
@@ -115,6 +128,8 @@ impl StageTimings {
 pub struct StageSnapshot {
     pub decode_ms: f64,
     pub prescale_ms: f64,
+    /// Blocking wait on prefetched clips (the PB-002 numerator, LLR-060).
+    pub stall_ms: f64,
     pub render_ms: f64,
     pub blend_ms: f64,
     pub encode_write_stall_ms: f64,
@@ -124,13 +139,15 @@ pub struct StageSnapshot {
 }
 
 impl StageSnapshot {
-    /// Mean decode+prescale dead time per image clip boundary in ms (PB-002).
+    /// Mean dead time per image clip boundary in ms (PB-002): the blocking
+    /// wait on the prefetched renderer (LLR-060) — decode/prescale that
+    /// overlapped the build does not count, only the wait the loop saw.
     /// Zero clips yields a defined 0, never a division by zero.
     pub fn boundary_stall_ms_per_photo(&self) -> f64 {
         if self.clips == 0 {
             0.0
         } else {
-            (self.decode_ms + self.prescale_ms) / self.clips as f64
+            self.stall_ms / self.clips as f64
         }
     }
 }
@@ -293,16 +310,21 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // Verifies: SR-036, LLR-050 — nanosecond accumulation across stages and
-    // the PB-002 mean (decode+prescale per loaded image clip).
+    // Verifies: SR-036, LLR-050, LLR-060 — nanosecond accumulation across
+    // stages, and the PB-002 mean is the BLOCKING wait on each prefetched clip
+    // (the number prefetch collapses), not the raw decode+prescale time (which
+    // now overlaps the build and keeps accumulating separately).
     #[test]
-    fn boundary_stall_is_mean_decode_prescale_per_clip_sr036() {
+    fn boundary_stall_is_mean_blocking_wait_per_clip_sr036() {
         let t = StageTimings::new();
-        // Two clips: 30+50 ms decode, 10+10 ms prescale => mean (80+20)/2 = 50.
+        // Two clips: 30+50 ms decode, 10+10 ms prescale accrue raw (overlapped
+        // work), while the loop only BLOCKED 6+4 ms waiting => mean stall 5.
         t.add_decode(Duration::from_millis(30));
         t.add_decode(Duration::from_millis(50));
         t.add_prescale(Duration::from_millis(10));
         t.add_prescale(Duration::from_millis(10));
+        t.add_stall(Duration::from_millis(6));
+        t.add_stall(Duration::from_millis(4));
         t.add_clip();
         t.add_clip();
         t.add_render(Duration::from_millis(200));
@@ -313,12 +335,13 @@ mod tests {
         let s = t.snapshot();
         assert!((s.decode_ms - 80.0).abs() < 1e-6);
         assert!((s.prescale_ms - 20.0).abs() < 1e-6);
+        assert!((s.stall_ms - 10.0).abs() < 1e-6);
         assert!((s.render_ms - 200.0).abs() < 1e-6);
         assert!((s.blend_ms - 5.0).abs() < 1e-6);
         assert!((s.encode_write_stall_ms - 7.0).abs() < 1e-6);
         assert!((s.ffmpeg_wall_ms - 400.0).abs() < 1e-6);
         assert_eq!(s.clips, 2);
-        assert!((s.boundary_stall_ms_per_photo() - 50.0).abs() < 1e-6);
+        assert!((s.boundary_stall_ms_per_photo() - 5.0).abs() < 1e-6);
         // No clips loaded => a defined 0, never a division by zero.
         assert_eq!(
             StageTimings::new().snapshot().boundary_stall_ms_per_photo(),

@@ -92,14 +92,17 @@ sequenceDiagram
     Note over Store: LRU prune to size cap; --no-cache / --clear-cache (LLR-054)
 ```
 
-### Overlapped pipeline (design-time, OBJ-PERF Phases 1b/3)
+### Overlapped pipeline (Phase 1b shipped; Phase 3 design-time)
 
-Planned concurrent per-output flow: a bounded prefetcher (LLR-060) feeds the
-render pool; the mixer's inputs/outputs become bounded channels; an
-encoder-writer thread owns ffmpeg stdin (LLR-063). Bounded channel depths
-replace `RANGE_MEMORY_BUDGET` batching (memory guard via SR-036 metrics), and
-failure semantics are preserved across the thread boundary (LLR-064 — SR-011,
-SR-013, SR-014, SR-015).
+**Implemented today (Phase 1b):** the bounded `ClipPrefetcher` (LLR-060)
+decodes+prescales the next image clip on a background thread and feeds the
+*serial* clip loop in order (errors included → `record_skip`, SR-014); the loop
+itself, mixer, and ffmpeg writes are unchanged and `RANGE_MEMORY_BUDGET`
+batching still bounds render memory. **Still design-time (Phase 3):** the render
+pool/mixer/writer stages below becoming bounded channels with an encoder-writer
+thread owning ffmpeg stdin (LLR-063), channel depths replacing
+`RANGE_MEMORY_BUDGET` (memory guard via SR-036 metrics), and failure semantics
+preserved across that thread boundary (LLR-064 — SR-011, SR-013, SR-015).
 
 ```mermaid
 sequenceDiagram
@@ -274,12 +277,13 @@ _Generated 2026-07-18 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn resolve(configured: Option<&Path>, cache_dir: &Path) -> Option<PathBuf>`  <- LLR-032, SR-027
 - **src/image/mod.rs** — _Frame generation: turn one source image into a sequence of RGB frames_
   - uses: `config`, `error`, `transform`
-  - `pub struct LoadTimings`  <- LLR-050, SR-036
+  - `pub struct LoadTimings`  <- LLR-050, LLR-060, SR-036
   - `pub struct FrameRenderer`
   - `pub fn load(path: &Path, out: &OutputDef) -> Result<Self>`
   - `pub fn load_with_focus(`  <- LLR-037, SR-031
   - `pub fn load_timings(&self) -> LoadTimings`  <- LLR-050, SR-036
   - `pub fn total_frames(&self) -> u32`  <- LLR-050, SR-036
+  - `pub fn uses_fast_path(&self) -> bool`  <- LLR-061, SR-036
   - `pub fn render_range(&self, start: u32, end: u32) -> Vec<Vec<u8>>`
 - **src/lib.rs** — _Library crate root: re-exports the engine's modules so integration tests_
 - **src/logging.rs** — _Logging setup: env_logger with millisecond timestamps; `--verbose`_
@@ -294,7 +298,7 @@ _Generated 2026-07-18 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub struct MediaLoader`
   - `pub fn new(config: InputConfig) -> Self`
 - **src/pipeline/mod.rs** — _Pipeline orchestration: wire media → frame generation → FFmpeg encoding,_
-  - uses: `config`, `error`, `ffmpeg`, `image`, `media`, `roi`, `util`, `video`
+  - uses: `config`, `error`, `ffmpeg`, `media`, `roi`, `util`, `video`
   - `pub struct SkippedInput`  <- LLR-017, SR-014
   - `pub struct WrittenOutput`  <- LLR-023, LLR-024, SR-004
   - `pub struct OutputTimings`  <- LLR-050, LLR-052, SR-036
@@ -302,6 +306,12 @@ _Generated 2026-07-18 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn oversize_outputs(&self) -> Vec<&WrittenOutput>`  <- LLR-013, SR-009
   - `pub struct FrameGenerationPipeline`
   - `pub fn new(`  <- SR-036
+- **src/pipeline/prefetch.rs** — _Background clip prefetch (plan §3 1b): decode+prescale the *next* image_
+  - uses: `config`, `error`, `image`
+  - `pub struct PrefetchJob`  <- LLR-060, SR-031, SR-036
+  - `pub struct ClipPrefetcher`  <- LLR-060, SR-014, SR-036
+  - `pub fn spawn(jobs: Vec<PrefetchJob>, out: OutputDef) -> Self`
+  - `pub fn next(&mut self) -> Option<(usize, Result<FrameRenderer>)>`
 - **src/pipeline/source.rs** — _A uniform pull-based frame source so images and videos can be driven through_
   - uses: `error`, `image`, `util`, `video`
   - `pub trait FrameSource`
@@ -351,6 +361,8 @@ _Generated 2026-07-18 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn new(img_w: u32, img_h: u32, out: &OutputDef, seed: u64) -> Self`
   - `pub fn with_focus(`  <- LLR-037, SR-031
   - `pub fn rotation_deg(&self, i: u32) -> f32`
+  - `pub fn is_axis_aligned(&self) -> bool`  <- LLR-061, SR-036
+  - `pub fn crop_window(&self, i: u32) -> (f32, f32, f32, f32)`  <- LLR-036, LLR-061, SR-031
   - `pub fn projection(&self, i: u32) -> Projection`  <- LLR-036, SR-031
 - **src/util/estimate.rs** — _Pre-run output size estimation and the FAT32 oversize threshold._
   - `pub fn estimate_output_bytes(duration_secs: f64, crf: u32) -> u64`  <- LLR-013, SR-009
@@ -369,14 +381,14 @@ _Generated 2026-07-18 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn new() -> Self`
   - `pub fn add_decode(&self, d: Duration)`
   - `pub fn add_prescale(&self, d: Duration)`
-  - `pub fn add_render(&self, d: Duration)`
+  - `pub fn add_stall(&self, d: Duration)`  <- LLR-060
+  - `pub fn add_render(&self, d: Duration)`  <- LLR-060
   - `pub fn add_blend(&self, d: Duration)`
   - `pub fn add_write(&self, d: Duration)`
   - `pub fn add_clip(&self)`
   - `pub fn set_ffmpeg_wall(&self, d: Duration)`
   - `pub fn snapshot(&self) -> StageSnapshot`
   - `pub fn log_summary(&self, output: &str)`  <- LLR-050, SR-036
-  - `pub struct StageSnapshot`  <- LLR-050, LLR-052, SR-036
 - **src/video/mod.rs** — _Video passthrough: decode an input video to raw `rgb24` frames at the target_
   - uses: `error`
   - `pub struct VideoFrameReader`

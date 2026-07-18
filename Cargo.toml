@@ -4,8 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-image = "0.24"
-imageproc = "0.23"
+image = "0.25"
+imageproc = "0.25"
+# SIMD (SSE4.1/AVX2, runtime-detected) resize for the prescale and the
+# rotation-off render fast path (LLR-061, plan §3 1c): several times faster
+# than the generic per-pixel warp/resize for the axis-aligned common case.
+fast_image_resize = "5"
 rayon = "1.7"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

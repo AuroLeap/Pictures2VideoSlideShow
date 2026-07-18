@@ -220,13 +220,24 @@ impl ClipPlan {
         smoothstep(t)
     }
 
-    /// Floating-point projection mapping the pre-scaled source into the render
-    /// canvas (`render_w` x `render_h`) for frame `i`. Composes the zoom/pan
-    /// (anchored on the focus fraction) with a rotation about the render center.
-    /// The renderer warps the source through this with sub-pixel interpolation,
-    /// then center-crops the constant rotation margin to the output size.
-    // Implements: LLR-036, SR-031
-    pub fn projection(&self, i: u32) -> Projection {
+    /// True when every frame's projection is an axis-aligned scale+translate:
+    /// rotation is off (both endpoints zero) so there is no rotation margin
+    /// and the render canvas equals the output. The renderer then takes the
+    /// SIMD crop+resize fast path instead of the generic warp.
+    // Implements: LLR-061, SR-036
+    pub fn is_axis_aligned(&self) -> bool {
+        self.rot0.abs() <= f32::EPSILON
+            && self.rot1.abs() <= f32::EPSILON
+            && self.render_w == self.out_w
+            && self.render_h == self.out_h
+    }
+
+    /// The float crop window `(left, top, width, height)` in pre-scaled source
+    /// pixels for frame `i` — the region the frame shows, which the renderer
+    /// maps onto the render canvas. Shared by [`ClipPlan::projection`] and the
+    /// axis-aligned SIMD fast path so both paths show the identical window.
+    // Implements: LLR-036, LLR-061, SR-031
+    pub fn crop_window(&self, i: u32) -> (f32, f32, f32, f32) {
         let e = self.eased(i);
 
         let zoom = self.z0 + (self.z1 - self.z0) * e;
@@ -234,8 +245,6 @@ impl ClipPlan {
         // the render size (full detail); smaller zoom shows a larger region.
         let cw_f = (self.render_w as f32 * self.zmax / zoom).min(self.pre_w as f32);
         let ch_f = (self.render_h as f32 * self.zmax / zoom).min(self.pre_h as f32);
-        // Uniform source -> render scale: maps the crop window onto the canvas.
-        let s = zoom / self.zmax;
 
         // Focus fraction (constant for a fixed focus, interpolated for a pan).
         let fx = self.f0.0 + (self.f1.0 - self.f0.0) * e;
@@ -245,6 +254,21 @@ impl ClipPlan {
         // source fraction `f` keeps it at render fraction `f` for all zooms.
         let cl = (self.pre_w as f32 - cw_f).max(0.0) * fx;
         let ct = (self.pre_h as f32 - ch_f).max(0.0) * fy;
+        (cl, ct, cw_f, ch_f)
+    }
+
+    /// Floating-point projection mapping the pre-scaled source into the render
+    /// canvas (`render_w` x `render_h`) for frame `i`. Composes the zoom/pan
+    /// (anchored on the focus fraction) with a rotation about the render center.
+    /// The renderer warps the source through this with sub-pixel interpolation,
+    /// then center-crops the constant rotation margin to the output size.
+    // Implements: LLR-036, SR-031
+    pub fn projection(&self, i: u32) -> Projection {
+        let e = self.eased(i);
+        let zoom = self.z0 + (self.z1 - self.z0) * e;
+        // Uniform source -> render scale: maps the crop window onto the canvas.
+        let s = zoom / self.zmax;
+        let (cl, ct, _, _) = self.crop_window(i);
 
         // Source -> render (pre-rotation): translate the crop origin to (0,0)
         // then scale onto the canvas.
