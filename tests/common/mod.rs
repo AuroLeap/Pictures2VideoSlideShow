@@ -108,6 +108,55 @@ enable_audio = false
     fs::write(config_path, toml).expect("write config");
 }
 
+/// Assert `mp4` satisfies the SR-005 frame-compatible profile via ffprobe:
+/// codec h264, pix_fmt yuv420p, even dimensions, fps in 24..=30, and
+/// faststart (moov atom before mdat). Shared by the encoder-permutation tests
+/// (TC-068) and the fallback test (TC-067) so the profile check lives once.
+// Verifies: SR-005
+pub fn assert_sr005_profile(mp4: &Path) {
+    let probe = std::process::Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=codec_name,width,height,pix_fmt,r_frame_rate",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+        ])
+        .arg(mp4)
+        .output()
+        .expect("ffprobe");
+    let text = String::from_utf8_lossy(&probe.stdout);
+    let mut lines = text.lines();
+    let codec = lines.next().unwrap_or("").trim().to_string();
+    let width: u32 = lines.next().unwrap_or("0").trim().parse().unwrap_or(0);
+    let height: u32 = lines.next().unwrap_or("0").trim().parse().unwrap_or(0);
+    let pix_fmt = lines.next().unwrap_or("").trim().to_string();
+    let rate = lines.next().unwrap_or("").trim().to_string();
+    let fps: u32 = rate.split('/').next().unwrap_or("0").parse().unwrap_or(0);
+
+    assert_eq!(codec, "h264", "codec for {}", mp4.display());
+    assert_eq!(pix_fmt, "yuv420p", "pixel format for {}", mp4.display());
+    assert_eq!(width % 2, 0, "even width for {}", mp4.display());
+    assert_eq!(height % 2, 0, "even height for {}", mp4.display());
+    assert!(
+        (24..=30).contains(&fps),
+        "fps {fps} in 24..=30 for {}",
+        mp4.display()
+    );
+
+    let bytes = fs::read(mp4).expect("read mp4");
+    let moov = bytes.windows(4).position(|w| w == b"moov");
+    let mdat = bytes.windows(4).position(|w| w == b"mdat");
+    assert!(
+        matches!((moov, mdat), (Some(m), Some(d)) if m < d),
+        "faststart: moov ({moov:?}) should precede mdat ({mdat:?}) in {}",
+        mp4.display()
+    );
+}
+
 /// Hash-ish fingerprint of a file: (len, mtime-nanos, full byte content hash).
 /// Sufficient to prove a source file is byte-for-byte unchanged.
 pub fn fingerprint(path: &Path) -> (u64, u128, u64) {

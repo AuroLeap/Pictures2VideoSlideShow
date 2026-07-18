@@ -7,6 +7,8 @@
 //! so a killed run never leaves a complete-looking final file.
 
 pub mod audio;
+pub mod encoder_args;
+pub mod probe;
 pub mod resolve;
 
 use crate::error::{Result, SlideshowError};
@@ -78,14 +80,17 @@ impl FfmpegEncoder {
     /// and encode them to a temp file alongside `output`. Call [`finish`] to
     /// atomically promote it to `output`.
     ///
+    /// `enc` selects the video encoder and quality (SR-034/SR-035); the
+    /// output-side arg block comes verbatim from [`encoder_args::encoder_args`]
+    /// so the SR-005 profile holds for every choice.
     /// `timeout_secs` arms the inactivity watchdog (SR-013); `0` disables it.
-    // Implements: LLR-015, LLR-008, SR-011, SR-013
+    // Implements: LLR-015, LLR-008, LLR-045, SR-011, SR-013, SR-034
     pub fn start(
         output: &Path,
         width: u32,
         height: u32,
         fps: u32,
-        crf: u32,
+        enc: &encoder_args::EncoderSettings,
         timeout_secs: u64,
     ) -> Result<Self> {
         let final_path = output.to_path_buf();
@@ -113,22 +118,10 @@ impl FfmpegEncoder {
             .arg(fps.to_string())
             .arg("-i")
             .arg("pipe:0")
-            // Output encoding.
-            .arg("-an")
-            .arg("-c:v")
-            .arg("libx264")
-            .arg("-preset")
-            .arg("medium")
-            .arg("-crf")
-            .arg(crf.to_string())
-            .arg("-pix_fmt")
-            .arg("yuv420p")
-            .arg("-movflags")
-            .arg("+faststart")
-            // The temp file uses a `.part` extension ffmpeg can't infer a muxer
-            // from, so pin the container explicitly.
-            .arg("-f")
-            .arg("mp4")
+            // Output encoding: the pure per-encoder arg block (`-an` through
+            // `-f mp4`; the temp `.part` extension can't infer a muxer, so the
+            // container is pinned there). Implements: LLR-045, SR-034, SR-035
+            .args(enc.args())
             .arg(&temp_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())

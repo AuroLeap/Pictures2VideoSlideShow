@@ -7,8 +7,31 @@ use std::process::Command;
 
 /// Write a config with one output at the given crf/dims.
 fn write_cfg(cfg: &Path, media: &Path, out: &Path, name: &str, w: u32, h: u32, crf: u32) {
+    write_cfg_enc(cfg, media, out, name, w, h, crf, None, None);
+}
+
+/// [`write_cfg`] plus optional SR-034/SR-035 `encoder` / `x264_preset` fields
+/// (omitted lines keep the serde defaults: software / medium).
+#[allow(clippy::too_many_arguments)]
+fn write_cfg_enc(
+    cfg: &Path,
+    media: &Path,
+    out: &Path,
+    name: &str,
+    w: u32,
+    h: u32,
+    crf: u32,
+    encoder: Option<&str>,
+    x264_preset: Option<&str>,
+) {
     let media_s = media.display().to_string().replace('\\', "/");
     let base_s = out.display().to_string().replace('\\', "/");
+    let enc_line = encoder
+        .map(|e| format!("encoder = \"{e}\"\n"))
+        .unwrap_or_default();
+    let preset_line = x264_preset
+        .map(|p| format!("x264_preset = \"{p}\"\n"))
+        .unwrap_or_default();
     let toml = format!(
         r#"[input]
 media_root = "{media_s}"
@@ -34,7 +57,7 @@ max_rotation_degrees = 8.0
 bulk_video_time_min = 20
 quality_crf = {crf}
 enable_audio = false
-"#
+{enc_line}{preset_line}"#
     );
     std::fs::write(cfg, toml).unwrap();
 }
@@ -149,4 +172,86 @@ fn lower_crf_yields_larger_output_sr008() {
         size_lo > size_hi,
         "crf12 ({size_lo} bytes) should exceed crf44 ({size_hi} bytes)"
     );
+}
+
+/// Build once with the given encoder/preset, assert exit 0, return combined
+/// stdout+stderr, leaving `<out>/<name>.mp4` for profile checks.
+fn run_build_capture(cfg: &Path) -> String {
+    let output = Command::new(common::slideshow_bin())
+        .arg("--config")
+        .arg(cfg)
+        .arg("--non-interactive")
+        .arg("build")
+        .output()
+        .expect("run build");
+    assert!(output.status.success(), "build should exit 0");
+    format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
+}
+
+// Verifies: SR-035, SR-034, LLR-049, LLR-045 (TC-068 software leg) — explicit
+// encoder=software with x264_preset at its boundary values (veryfast, slow)
+// plus unset (default medium) keeps the SR-005 profile, and the per-output
+// encoding line reports the encoder in use (libx264).
+#[test]
+fn software_presets_keep_frame_profile_sr035() {
+    let tmp = common::TempDir::new("preset_profile");
+    let media = tmp.join("media");
+    std::fs::create_dir_all(&media).unwrap();
+    common::write_png(&media.join("a.png"), 320, 240, [60, 180, 90]);
+
+    for (label, preset) in [
+        ("unset", None),
+        ("veryfast", Some("veryfast")),
+        ("slow", Some("slow")),
+    ] {
+        let out = tmp.join(&format!("out_{label}"));
+        std::fs::create_dir_all(&out).unwrap();
+        let cfg = tmp.join(&format!("{label}.toml"));
+        write_cfg_enc(
+            &cfg,
+            &media,
+            &out,
+            "frame",
+            320,
+            240,
+            30,
+            Some("software"),
+            preset,
+        );
+        let log = run_build_capture(&cfg);
+        assert!(
+            log.contains("libx264"),
+            "[{label}] encoding line reports the encoder in use:\n{log}"
+        );
+        common::assert_sr005_profile(&out.join("frame.mp4"));
+    }
+}
+
+// Verifies: SR-034, LLR-045 (TC-068 hardware legs) — every hardware encoder
+// choice still yields an SR-005-profile output (either via the GPU encoder or
+// the probe-driven libx264 fallback, both legal under SR-034).
+#[test]
+#[ignore = "Release tier (TC-068 hardware leg): exercises h264_nvenc/h264_qsv/h264_amf; run locally on GPU hosts with: cargo test --test encode_profile -- --ignored"]
+fn hardware_encoders_keep_frame_profile_sr034() {
+    let tmp = common::TempDir::new("hw_profile");
+    let media = tmp.join("media");
+    std::fs::create_dir_all(&media).unwrap();
+    common::write_png(&media.join("a.png"), 320, 240, [200, 120, 40]);
+
+    for enc in ["h264_nvenc", "h264_qsv", "h264_amf"] {
+        let out = tmp.join(&format!("out_{enc}"));
+        std::fs::create_dir_all(&out).unwrap();
+        let cfg = tmp.join(&format!("{enc}.toml"));
+        write_cfg_enc(&cfg, &media, &out, "frame", 320, 240, 30, Some(enc), None);
+        let log = run_build_capture(&cfg);
+        assert!(
+            log.contains(enc) || log.contains("libx264"),
+            "[{enc}] reports the encoder in use (selected or fallback):\n{log}"
+        );
+        common::assert_sr005_profile(&out.join("frame.mp4"));
+    }
 }

@@ -105,6 +105,22 @@ pub struct OutputDef {
     #[serde(default = "default_audio_sample_rate")]
     pub audio_sample_rate: u32,
 
+    /// H.264 encoder for this output (SR-034 set): `software` (libx264, the
+    /// default — behavior unchanged), `auto` (probe hardware at preflight,
+    /// fall back to software), or an explicit `h264_nvenc`/`h264_qsv`/
+    /// `h264_amf` (probe-checked, falls back with a logged warning).
+    /// Per-output so one build can target different encoders (SR-017).
+    // Implements: SR-034, LLR-047
+    #[serde(default = "default_encoder")]
+    pub encoder: String,
+
+    /// libx264 speed preset, software-encoder path only (SR-035). Default
+    /// `medium` keeps the FFmpeg arg list byte-identical to before; values
+    /// outside [`ALLOWED_X264_PRESETS`] are rejected at validation.
+    // Implements: SR-035, LLR-049
+    #[serde(default = "default_x264_preset")]
+    pub x264_preset: String,
+
     /// Ken Burns zoom amount as a fraction (e.g. 0.12 = up to 12% zoom over the
     /// clip). Direction (zoom in vs out) is randomized per image.
     #[serde(default = "default_zoom_amount")]
@@ -114,6 +130,33 @@ pub struct OutputDef {
     /// statically (cover-fit) with only the fade applied.
     #[serde(default = "default_true")]
     pub ken_burns: bool,
+}
+
+/// The `encoder` values Config::validate accepts (SR-034).
+// Implements: SR-034, LLR-047
+pub const ALLOWED_ENCODERS: [&str; 5] = ["software", "auto", "h264_nvenc", "h264_qsv", "h264_amf"];
+
+/// The `x264_preset` values Config::validate accepts: the libx264 speed
+/// ladder (SR-035; `placebo` deliberately excluded — never a practical trade).
+// Implements: SR-035, LLR-049
+pub const ALLOWED_X264_PRESETS: [&str; 9] = [
+    "ultrafast",
+    "superfast",
+    "veryfast",
+    "faster",
+    "fast",
+    "medium",
+    "slow",
+    "slower",
+    "veryslow",
+];
+
+fn default_encoder() -> String {
+    "software".into()
+}
+
+fn default_x264_preset() -> String {
+    "medium".into()
 }
 
 fn default_zoom_amount() -> f32 {
@@ -203,6 +246,27 @@ impl Config {
                     output.name, output.quality_crf
                 )));
             }
+
+            // Implements: SR-034, LLR-047 — encoder restricted to the SR-034 set.
+            if !ALLOWED_ENCODERS.contains(&output.encoder.as_str()) {
+                return Err(SlideshowError::InvalidConfig(format!(
+                    "Output '{}' has invalid encoder: '{}' (allowed values: {})",
+                    output.name,
+                    output.encoder,
+                    ALLOWED_ENCODERS.join(", ")
+                )));
+            }
+
+            // Implements: SR-035, LLR-049 — x264_preset restricted to the
+            // libx264 speed ladder.
+            if !ALLOWED_X264_PRESETS.contains(&output.x264_preset.as_str()) {
+                return Err(SlideshowError::InvalidConfig(format!(
+                    "Output '{}' has invalid x264_preset: '{}' (allowed values: {})",
+                    output.name,
+                    output.x264_preset,
+                    ALLOWED_X264_PRESETS.join(", ")
+                )));
+            }
         }
 
         Ok(())
@@ -227,8 +291,29 @@ mod tests {
             enable_audio: false,
             audio_bitrate_kbps: 192,
             audio_sample_rate: 48_000,
+            encoder: default_encoder(),
+            x264_preset: default_x264_preset(),
             zoom_amount: 0.12,
             ken_burns: true,
+        }
+    }
+
+    /// A Config whose non-output parts pass validation (media_root = "." always
+    /// exists), so output-field validation is exercised in isolation.
+    fn config_with_outputs(outputs: Vec<OutputDef>) -> Config {
+        Config {
+            input: InputConfig {
+                media_root: PathBuf::from("."),
+                ignore_patterns: vec![],
+                exception_pattern: None,
+                exception_threshold: None,
+                roi_db: None,
+            },
+            output: OutputConfig {
+                base_dir: PathBuf::from("out"),
+            },
+            processing: toml::from_str("").expect("default processing"),
+            outputs,
         }
     }
 
@@ -287,5 +372,97 @@ enable_audio = true
         let back: OutputDef = toml::from_str(&s).expect("reparse");
         assert_eq!(back.audio_bitrate_kbps, 128);
         assert_eq!(back.audio_sample_rate, 44_100);
+    }
+
+    /// Minimal OutputDef TOML with extra lines appended (for the new fields).
+    fn output_toml(extra: &str) -> String {
+        format!(
+            r#"
+name = "f"
+width = 320
+height = 240
+fps = 24
+pic_display_time_secs = 1.0
+fade_time_secs = 0.2
+max_rotation_degrees = 0.0
+bulk_video_time_min = 20
+quality_crf = 28
+enable_audio = false
+{extra}
+"#
+        )
+    }
+
+    // Verifies: SR-034, LLR-047 (TC-066) — `encoder` defaults to software when
+    // omitted, every SR-034 value validates, an invalid value is rejected with
+    // a plain-language error naming the field and allowed set, and the field
+    // is per-output (two [[outputs]] may differ).
+    #[test]
+    fn encoder_field_defaults_validates_and_rejects_sr034() {
+        // Omitted -> software, so existing configs parse unchanged.
+        let od: OutputDef = toml::from_str(&output_toml("")).expect("parse");
+        assert_eq!(od.encoder, "software");
+
+        // Every allowed value passes validation.
+        for value in ALLOWED_ENCODERS {
+            let od: OutputDef =
+                toml::from_str(&output_toml(&format!("encoder = \"{value}\""))).expect("parse");
+            config_with_outputs(vec![od])
+                .validate()
+                .unwrap_or_else(|e| panic!("'{value}' must validate: {e}"));
+        }
+
+        // An invalid value is rejected, naming the field and the allowed set.
+        let od: OutputDef =
+            toml::from_str(&output_toml("encoder = \"hevc_nvenc\"")).expect("parse");
+        let err = config_with_outputs(vec![od])
+            .validate()
+            .expect_err("invalid encoder must be rejected")
+            .to_string();
+        assert!(err.contains("encoder"), "names the field: {err}");
+        assert!(err.contains("hevc_nvenc"), "names the bad value: {err}");
+        for allowed in ALLOWED_ENCODERS {
+            assert!(
+                err.contains(allowed),
+                "lists allowed value {allowed}: {err}"
+            );
+        }
+
+        // Per-output: two outputs with different encoders both validate.
+        let a: OutputDef = toml::from_str(&output_toml("encoder = \"h264_nvenc\"")).expect("parse");
+        let b: OutputDef = toml::from_str(&output_toml("encoder = \"software\"")).expect("parse");
+        assert_ne!(a.encoder, b.encoder);
+        config_with_outputs(vec![a, b])
+            .validate()
+            .expect("per-output encoders validate");
+    }
+
+    // Verifies: SR-035, LLR-049 (TC-070) — `x264_preset` defaults to medium
+    // when omitted; an unsupported value is rejected with a plain-language
+    // error naming the field and the allowed values.
+    #[test]
+    fn x264_preset_rejects_unsupported_sr035() {
+        let od: OutputDef = toml::from_str(&output_toml("")).expect("parse");
+        assert_eq!(od.x264_preset, "medium");
+
+        for value in ALLOWED_X264_PRESETS {
+            let od: OutputDef =
+                toml::from_str(&output_toml(&format!("x264_preset = \"{value}\""))).expect("parse");
+            config_with_outputs(vec![od])
+                .validate()
+                .unwrap_or_else(|e| panic!("'{value}' must validate: {e}"));
+        }
+
+        let od: OutputDef = toml::from_str(&output_toml("x264_preset = \"turbo\"")).expect("parse");
+        let err = config_with_outputs(vec![od])
+            .validate()
+            .expect_err("invalid preset must be rejected")
+            .to_string();
+        assert!(err.contains("x264_preset"), "names the field: {err}");
+        assert!(err.contains("turbo"), "names the bad value: {err}");
+        assert!(
+            err.contains("veryfast") && err.contains("slow"),
+            "lists allowed values: {err}"
+        );
     }
 }

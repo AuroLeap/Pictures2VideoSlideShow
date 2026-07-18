@@ -59,13 +59,47 @@ pub fn exit_code(results: &[CheckResult]) -> i32 {
 /// Run every runtime-prerequisite check for `config`.
 // Implements: LLR-004, LLR-006, SR-002, SR-012
 pub fn run_checks(config: &Config) -> Vec<CheckResult> {
-    vec![
+    let mut checks = vec![
         check_ffmpeg(config),
         check_program("ffprobe", "ffprobe"),
         check_config_valid(config),
         check_media_root(&config.input.media_root),
         check_output_writable(&config.output.base_dir),
-    ]
+    ];
+    checks.extend(check_encoders(config));
+    checks
+}
+
+/// One probe-result line per output requesting a non-software encoder
+/// (SR-034). Deliberately never essential: an unavailable hardware encoder
+/// degrades to software at build time with a logged reason — it must not fail
+/// `validate` or block `build`. `software` outputs (and invalid values, which
+/// the essential config check already rejects) get no line — software is never
+/// probed.
+// Implements: SR-034, LLR-046, LLR-048
+fn check_encoders(config: &Config) -> Vec<CheckResult> {
+    use crate::ffmpeg::encoder_args::EncoderRequest;
+    config
+        .outputs
+        .iter()
+        .filter(|o| EncoderRequest::parse(&o.encoder) != EncoderRequest::Software)
+        .map(|o| {
+            let sel = crate::ffmpeg::probe::selection_for(
+                config.processing.ffmpeg_path.as_deref(),
+                &o.encoder,
+            );
+            let name = format!("Encoder '{}' (output '{}')", o.encoder, o.name);
+            match sel.fallback_reason {
+                None => CheckResult::pass(&name, format!("will use {}", sel.encoder.codec_name())),
+                Some(reason) => CheckResult {
+                    name,
+                    passed: false,
+                    essential: false,
+                    detail: reason,
+                },
+            }
+        })
+        .collect()
 }
 
 /// Resolve FFmpeg per the SR-027 order (configured `ffmpeg_path` → PATH →

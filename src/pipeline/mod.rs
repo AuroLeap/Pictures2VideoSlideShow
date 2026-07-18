@@ -11,6 +11,7 @@ mod source;
 use crate::config::{OutputDef, ProcessingConfig};
 use crate::error::Result;
 use crate::ffmpeg::audio::{AudioClip, AudioParams};
+use crate::ffmpeg::encoder_args::EncoderSettings;
 use crate::ffmpeg::FfmpegEncoder;
 use crate::image::FrameRenderer;
 use crate::media::{Album, MediaFile, MediaType};
@@ -200,8 +201,20 @@ impl FrameGenerationPipeline {
         // Normalize to even dimensions before anything reaches ffmpeg.
         // Implements: LLR-010, SR-006
         let (width, height) = output_def.even_dims();
+
+        // Resolve the encoder actually used (probe + fallback decision); a
+        // hardware request that cannot be honored degrades to software with a
+        // logged reason — never a build failure.
+        // Implements: SR-034, LLR-046, LLR-048
+        let selection = crate::ffmpeg::probe::selection_for(
+            self.processing.ffmpeg_path.as_deref(),
+            &output_def.encoder,
+        );
+        if let Some(reason) = &selection.fallback_reason {
+            log::warn!("Output '{}': {}", output_def.name, reason);
+        }
         log::info!(
-            "Encoding '{}' -> {} ({}x{} @ {}fps, crf {}, {}-frame crossfade)",
+            "Encoding '{}' -> {} ({}x{} @ {}fps, crf {}, {}-frame crossfade, encoder {})",
             output_def.name,
             out_path.display(),
             width,
@@ -209,6 +222,8 @@ impl FrameGenerationPipeline {
             output_def.fps,
             output_def.quality_crf,
             output_def.fade_frames(),
+            // `h264_nvenc` or `libx264 (fallback: <reason>)` per LLR-048.
+            selection.describe(),
         );
 
         if media.is_empty() {
@@ -233,7 +248,12 @@ impl FrameGenerationPipeline {
             width,
             height,
             output_def.fps,
-            output_def.quality_crf,
+            // Implements: SR-034, SR-035, LLR-045, LLR-049
+            &EncoderSettings {
+                choice: selection.encoder,
+                crf: output_def.quality_crf,
+                x264_preset: output_def.x264_preset.clone(),
+            },
             // Inactivity watchdog: abort a wedged ffmpeg after this many seconds
             // of no frame writes (0 disables). SR-013 / LLR-008.
             self.processing.ffmpeg_timeout_secs,

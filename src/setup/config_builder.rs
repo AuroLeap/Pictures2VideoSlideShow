@@ -52,6 +52,9 @@ pub fn build_config(v: &WizardValues) -> Config {
             enable_audio: false,
             audio_bitrate_kbps: 192,
             audio_sample_rate: 48_000,
+            // SR-034/SR-035 defaults: the wizard does not ask about encoders.
+            encoder: "software".into(),
+            x264_preset: "medium".into(),
             zoom_amount: 0.12,
             ken_burns: true,
         })

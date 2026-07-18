@@ -179,6 +179,7 @@ graph LR
     m_config --> m_error
     m_config --> m_roi
     m_ffmpeg --> m_error
+    m_ffmpeg --> m_setup
     m_ffmpeg --> m_util
     m_image --> m_config
     m_image --> m_error
@@ -236,14 +237,37 @@ _Generated 2026-07-18 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub struct AudioParams`
   - `pub fn delay_ms(start_frame: u64, fps: u32) -> u64`  <- LLR-040, SR-032
   - `pub fn mux_audio(`  <- LLR-041, SR-011, SR-032
+- **src/ffmpeg/encoder_args.rs** — _Pure mapping from an encoder choice to the FFmpeg output-side argument_
+  - `pub enum EncoderChoice`  <- LLR-045, LLR-049, SR-034, SR-035
+  - `pub fn codec_name(self) -> &'static str`
+  - `pub enum EncoderRequest`  <- LLR-047, SR-034
+  - `pub fn parse(s: &str) -> Self`  <- LLR-047, SR-034
+  - `pub fn encoder_args(choice: EncoderChoice, crf: u32, x264_preset: &str) -> Vec<String>`  <- LLR-045, LLR-049, SR-005, SR-034, SR-035
+  - `pub struct EncoderSettings`  <- LLR-045, LLR-049, SR-034, SR-035
+  - `pub fn software(crf: u32) -> Self`  <- SR-034
+  - `pub fn args(&self) -> Vec<String>`
 - **src/ffmpeg/mod.rs** — _FFmpeg coordination: spawn an encoder process and stream raw `rgb24` frames_
   - uses: `error`, `util`
   - `pub struct FfmpegEncoder`
-  - `pub fn start(`  <- LLR-008, LLR-015, SR-011, SR-013
+  - `pub fn start(`  <- LLR-008, LLR-015, LLR-045, SR-005, SR-011, SR-013, SR-034, SR-035
   - `pub fn write_frame(&mut self, data: &[u8]) -> Result<()>`  <- LLR-008, SR-013
   - `pub fn finish(self) -> Result<()>`  <- LLR-008, LLR-015, SR-011, SR-013, SR-015
   - `pub fn finish_to_part(mut self) -> Result<PathBuf>`  <- LLR-008, LLR-015, LLR-041, SR-011, SR-013
   - `pub fn promote(src: &Path, final_path: &Path) -> Result<()>`  <- LLR-015, LLR-041, SR-011, SR-015
+- **src/ffmpeg/probe.rs** — _Preflight hardware-encoder probe and fallback selection (SR-034): list the_
+  - uses: `setup`
+  - `pub enum ProbeOutcome`  <- LLR-046, SR-034
+  - `pub fn parse_encoders(listing: &str) -> HashSet<String>`  <- LLR-046, SR-034
+  - `pub fn classify_trial(success: bool, stderr: &str) -> ProbeOutcome`  <- LLR-046, SR-034
+  - `pub fn classify_probe<F: FnOnce() -> (bool, String)>(listed: bool, trial: F) -> ProbeOutcome`  <- LLR-046, SR-034
+  - `pub fn probe_encoder(ffmpeg: &Path, encoder: &str) -> ProbeOutcome`  <- LLR-032, LLR-046, SR-034
+  - `pub struct ProbeCache`  <- LLR-046, SR-017, SR-034
+  - `pub fn new() -> Self`
+  - `pub fn outcome_with<F: FnOnce(&Path, &str) -> ProbeOutcome>(`
+  - `pub fn outcome(&mut self, ffmpeg: &Path, encoder: &str) -> ProbeOutcome`
+  - `pub struct Selection`  <- LLR-048, SR-034
+  - `pub fn describe(&self) -> String`  <- LLR-048
+  - `pub fn select_encoder(`  <- LLR-048, SR-034
 - **src/ffmpeg/resolve.rs** — _FFmpeg resolution order (SR-027): an explicitly configured `ffmpeg_path`_
   - `pub enum Source`
   - `pub fn pick(configured_ok: bool, on_path: bool, cached_ok: bool) -> Option<Source>`  <- LLR-032, SR-027

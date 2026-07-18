@@ -13,6 +13,7 @@
 mod common;
 
 use common::{slideshow_bin, write_config, write_png, TempDir};
+use slideshow_core::ffmpeg::encoder_args::EncoderSettings;
 use slideshow_core::ffmpeg::FfmpegEncoder;
 use std::path::Path;
 
@@ -38,7 +39,8 @@ fn finish_produces_final_mp4_and_no_part_sr011() {
     let tmp = TempDir::new("atomic_ok");
     let out = tmp.join("clip.mp4");
 
-    let mut enc = FfmpegEncoder::start(&out, W, H, FPS, CRF, 120).expect("start ffmpeg");
+    let mut enc = FfmpegEncoder::start(&out, W, H, FPS, &EncoderSettings::software(CRF), 120)
+        .expect("start ffmpeg");
     for _ in 0..FPS {
         enc.write_frame(&solid_frame()).expect("write frame");
     }
@@ -67,7 +69,8 @@ fn failed_encode_leaves_no_final_and_cleans_part_sr011_sr015() {
     // Declare a frame size of W*H*3 but feed ffmpeg a short, misaligned buffer
     // so the rawvideo demuxer/encoder cannot produce a valid stream and ffmpeg
     // exits non-zero (a deterministic encode failure, no flaky timing).
-    let mut enc = FfmpegEncoder::start(&out, W, H, FPS, CRF, 120).expect("start ffmpeg");
+    let mut enc = FfmpegEncoder::start(&out, W, H, FPS, &EncoderSettings::software(CRF), 120)
+        .expect("start ffmpeg");
     let _ = enc.write_frame(&[1u8, 2, 3, 4, 5]); // far too few bytes for one frame
     let result = enc.finish();
 
@@ -94,7 +97,8 @@ fn dropped_encoder_leaves_no_final_or_part_sr011() {
     let out = tmp.join("clip.mp4");
 
     {
-        let mut enc = FfmpegEncoder::start(&out, W, H, FPS, CRF, 120).expect("start ffmpeg");
+        let mut enc = FfmpegEncoder::start(&out, W, H, FPS, &EncoderSettings::software(CRF), 120)
+            .expect("start ffmpeg");
         enc.write_frame(&solid_frame()).expect("write one frame");
         // Drop without finish(): models an abort before finalize.
     }

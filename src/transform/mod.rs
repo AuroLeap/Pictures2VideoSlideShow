@@ -284,6 +284,8 @@ mod tests {
             enable_audio: false,
             audio_bitrate_kbps: 192,
             audio_sample_rate: 48_000,
+            encoder: "software".into(),
+            x264_preset: "medium".into(),
             zoom_amount: 0.12,
             ken_burns: true,
         }
