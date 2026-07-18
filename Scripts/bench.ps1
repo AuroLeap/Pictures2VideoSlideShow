@@ -34,7 +34,13 @@ param(
     # Frame rate for the canonical bench output.
     [int]$Fps = 30,
     # Reuse an already-built release binary.
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    # Skip the quiet-host gate and measure immediately regardless of load.
+    [switch]$SkipQuietWait,
+    # Max minutes to wait for the host to go quiet before measuring anyway.
+    [int]$QuietTimeoutMin = 30,
+    # Total-CPU percentage below which the host counts as quiet.
+    [int]$QuietLoadPct = 20
 )
 
 $ErrorActionPreference = 'Stop'
@@ -84,6 +90,50 @@ enable_audio = false
 
 $exe = Join-Path $repo 'target\release\make_video_slideshow.exe'
 if (-not (Test-Path $exe)) { throw "release binary not found: $exe (run without -SkipBuild)" }
+
+# Quiet-host gate: the fps rows (PB-001/PB-006) are only comparable when no
+# other process holds the CPU — a Defender scan or game skews them 10%+
+# (Round 6/6b evidence). Two consecutive quiet samples 30 s apart are required
+# before the measured legs run; on timeout the bench proceeds with a loud
+# warning so an unattended run still completes (treat those fps rows as
+# load-suspect). Runs AFTER the release build so our own compile load — and
+# any scan it triggers — has finished before sampling starts.
+function Wait-QuietHost {
+    if ($SkipQuietWait) {
+        Write-Host '==> quiet-host gate skipped (-SkipQuietWait)' -ForegroundColor Yellow
+        return
+    }
+    Write-Host "==> quiet-host gate (total CPU < $QuietLoadPct% twice, 30s apart; timeout $QuietTimeoutMin min)" -ForegroundColor Cyan
+    $consecutive = 0
+    $deadline = (Get-Date).AddMinutes($QuietTimeoutMin)
+    while ($true) {
+        $load = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
+        if ($load -lt $QuietLoadPct) {
+            $consecutive++
+            Write-Host ("    load {0:N0}% - quiet ({1}/2)" -f $load, $consecutive)
+            if ($consecutive -ge 2) { return }
+            $sleep = 30
+        } else {
+            $consecutive = 0
+            # Name the busiest process so the operator knows what to wait out.
+            $busy = ''
+            try {
+                $top = (Get-Counter '\Process(*)\% Processor Time' -ErrorAction Stop).CounterSamples |
+                    Where-Object { $_.InstanceName -notin '_total', 'idle' } |
+                    Sort-Object CookedValue -Descending | Select-Object -First 1
+                if ($top) { $busy = " (busiest: $($top.InstanceName) ~$([Math]::Round($top.CookedValue,0))% of one core)" }
+            } catch {}
+            Write-Host ("    load {0:N0}% - waiting{1}" -f $load, $busy)
+            $sleep = 60
+        }
+        if ((Get-Date) -gt $deadline) {
+            Write-Host "    WARNING: host never went quiet within $QuietTimeoutMin min - benching anyway; fps rows are load-suspect" -ForegroundColor Yellow
+            return
+        }
+        Start-Sleep -Seconds $sleep
+    }
+}
+Wait-QuietHost
 
 function Invoke-BenchLeg([string]$ConfigPath, [string]$Label) {
     Write-Host "==> bench --full ($Label)" -ForegroundColor Cyan

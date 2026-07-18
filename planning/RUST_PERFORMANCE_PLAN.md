@@ -238,6 +238,33 @@ JPEG decode + NVENC, plausibly another 2–4×. Combined stack (1+3+4) on a
 GPU-equipped machine: order of 10× cold-build vs today's baseline, plus
 Phase 2's ~O(new photos) rebuilds.
 
+### Phase 4b (contingent): fully GPU-resident pipeline — added 2026-07-18
+
+Peter's question: can decode → render → encode all stay in GPU memory, with
+only the finished bitstream coming back? Yes — NVDEC (video decode) + CUDA/
+graphics interop + NVENC accepting frames from device memory is exactly how
+professional pipelines work, and Vulkan now has native video-encode extensions
+(`VK_KHR_video_encode_h264`). But be precise about **which bottleneck each
+piece removes**, using the shipped Phase-0–3 numbers (1440×900–1080p class):
+
+- **The encode bottleneck is already removed** by Phase 1a: the bench fps rows
+  (PB-001/PB-006) measure the *software* encoder by design; `encoder =
+  "h264_nvenc"` lifts the libx264 ceiling (NVENC does 1080p H.264 at several
+  hundred fps) with zero further work. Any "encoding bottleneck" observed in
+  the budgets is a *software-encode* bottleneck, opted out of via config.
+- **Full residency removes transfer + CPU-render costs, not encode costs.**
+  Transfer math at our resolutions: 1080p rgb24 @135 fps ≈ 0.8 GB/s each way
+  vs ~16–25 GB/s PCIe 4.0 — transfers are ~5% of the bus, nowhere near the
+  bottleneck. So Phase 4a (wgpu render → readback → pipe → NVENC) captures
+  nearly all of the residency win at a fraction of the complexity; Phase 4b
+  (NVDEC + interop + in-VRAM NVENC, or Vulkan video encode) only pays once
+  output targets reach ~4K60 (≈1.5 GB/s per direction plus decode load) or
+  profiling shows readback/upload stalls dominating a Phase-4a build.
+- **Order therefore stays:** flip `encoder` to nvenc (shipped) → measure → if
+  render dominates, Phase 4a (wgpu) → measure → only then Phase 4b. Phase 4b
+  also abandons wgpu portability for vendor interop (CUDA) or bleeding-edge
+  Vulkan video, so it must earn its keep on a PB row, same as everything else.
+
 ---
 
 ## 7. Explicitly rejected / deferred
