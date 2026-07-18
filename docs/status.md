@@ -1469,3 +1469,7 @@ python Scripts/trace.py --strict --no-placeholders
 2. TC-082 — real-frame playback Demonstration of a segmented build → SR-037 Verified.
 3. Quiet-host three-leg `Scripts/bench.ps1` re-witness (game-free host) before any Phase-3 throughput claim or re-baseline; glance at PB-005 (482 MB loaded vs 450.7 run-of-record).
 4. Pre-existing: SR-023 release publish on a `v*` tag; SR-013/SR-024/SR-027 Tier=Release TCs (TC-020/021/033/040) for G3; real-ENOSPC (SR-015) demonstration.
+
+### ORCHESTRATOR — OBJ-PERF — Closure — 2026-07-18
+
+Grind complete: Rounds 1–6b all APPROVE (End User, System Engineer, Software Engineer x5, Test Engineer x4 verdicts above). Phases 0–3 of [RUST_PERFORMANCE_PLAN.md](../planning/RUST_PERFORMANCE_PLAN.md) shipped on branch `Optomizations`; Phase 4 (wgpu) not started, per plan gate. Measured (accepted golden baseline, quiet host, 2026-07-18): streaming 69.4→91.2 fps (+31%), rotation-off 134.6 fps, boundary stall 278→4.2 ms/photo, warm scan 41.5→0.257 s/1k (~160x), warm rebuild +12 photos = 6.43% of cold (15.6x). 211 tests 0 failed, coverage 87.4%, orphans=0 strict. Remaining human items: see SYSTEM-ENGINEER Closure list. Branch not pushed (no remote decision made) — Peter merges/pushes as desired.
