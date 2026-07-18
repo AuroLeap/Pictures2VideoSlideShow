@@ -15,11 +15,22 @@ use rayon::prelude::*;
 use std::path::Path;
 use std::sync::Arc;
 
+/// Elapsed decode (`image::open`) and prescale (resize) time for one clip
+/// load — the two components of the SR-036 clip-boundary stall (PB-002).
+// Implements: LLR-050, SR-036
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LoadTimings {
+    pub decode: std::time::Duration,
+    pub prescale: std::time::Duration,
+}
+
 /// Renders all frames for a single image clip.
 pub struct FrameRenderer {
     /// Pre-scaled source, sized so the max-zoom crop is full detail.
     prescaled: Arc<RgbImage>,
     plan: ClipPlan,
+    /// How long this clip's decode/prescale took, for the stage timers.
+    load_timings: LoadTimings,
 }
 
 impl FrameRenderer {
@@ -37,20 +48,33 @@ impl FrameRenderer {
         out: &OutputDef,
         focus: Option<(f32, f32)>,
     ) -> Result<Self> {
+        // Time decode and prescale separately: together they are the serial
+        // clip-boundary stall the PB-002 budget tracks (LLR-050, SR-036).
+        let t = std::time::Instant::now();
         let img = ::image::open(path).map_err(SlideshowError::Image)?;
+        let decode = t.elapsed();
         let (w, h) = img.dimensions();
         let seed = seed_from_str(&path.to_string_lossy());
         let plan = ClipPlan::with_focus(w, h, out, seed, focus);
 
         // Pre-scale once. Triangle is a good speed/quality trade-off for the
         // up/down-scale that follows per frame.
+        let t = std::time::Instant::now();
         let prescaled =
             ::image::imageops::resize(&img.to_rgb8(), plan.pre_w, plan.pre_h, FilterType::Triangle);
+        let prescale = t.elapsed();
 
         Ok(Self {
             prescaled: Arc::new(prescaled),
             plan,
+            load_timings: LoadTimings { decode, prescale },
         })
+    }
+
+    /// Elapsed decode/prescale time recorded by [`FrameRenderer::load_with_focus`].
+    // Implements: LLR-050, SR-036
+    pub fn load_timings(&self) -> LoadTimings {
+        self.load_timings
     }
 
     pub fn total_frames(&self) -> u32 {

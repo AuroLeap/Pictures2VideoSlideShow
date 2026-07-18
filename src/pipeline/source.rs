@@ -3,8 +3,11 @@
 
 use crate::error::Result;
 use crate::image::FrameRenderer;
+use crate::util::timing::StageTimings;
 use crate::video::VideoFrameReader;
 use std::collections::VecDeque;
+use std::sync::Arc;
+use std::time::Instant;
 
 /// Yields raw `rgb24` frames one at a time until the clip is exhausted.
 pub trait FrameSource {
@@ -20,10 +23,12 @@ pub struct ImageFrameSource {
     next: u32,
     batch: u32,
     buf: VecDeque<Vec<u8>>,
+    /// Per-output stage timers; render batches accumulate into the render stage.
+    timings: Arc<StageTimings>,
 }
 
 impl ImageFrameSource {
-    pub fn new(renderer: FrameRenderer, batch: u32) -> Self {
+    pub fn new(renderer: FrameRenderer, batch: u32, timings: Arc<StageTimings>) -> Self {
         let total = renderer.total_frames();
         Self {
             renderer,
@@ -31,6 +36,7 @@ impl ImageFrameSource {
             next: 0,
             batch: batch.max(1),
             buf: VecDeque::new(),
+            timings,
         }
     }
 }
@@ -39,7 +45,11 @@ impl FrameSource for ImageFrameSource {
     fn next_frame(&mut self) -> Result<Option<Vec<u8>>> {
         if self.buf.is_empty() && self.next < self.total {
             let end = (self.next + self.batch).min(self.total);
+            // One Instant pair per batch, not per frame (LLR-050 cheapness).
+            // Implements: LLR-050, SR-036
+            let t = Instant::now();
             self.buf.extend(self.renderer.render_range(self.next, end));
+            self.timings.add_render(t.elapsed());
             self.next = end;
         }
         Ok(self.buf.pop_front())

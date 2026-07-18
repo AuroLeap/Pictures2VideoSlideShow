@@ -19,11 +19,13 @@ use crate::util::ensure_dir_exists;
 use crate::util::estimate::{
     estimate_output_bytes, human_bytes, is_oversize, OVERSIZE_THRESHOLD_BYTES,
 };
+use crate::util::timing::{StageSnapshot, StageTimings};
 use crate::video::VideoFrameReader;
 use source::{FrameSource, ImageFrameSource, VideoFrameSource};
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 
 /// Soft cap on in-flight frame bytes for image render batches.
@@ -45,6 +47,17 @@ pub struct WrittenOutput {
     pub size_bytes: u64,
 }
 
+/// Per-output stage totals and frame count, captured for the `--verbose`
+/// summary and read by the bench runner (LLR-052).
+// Implements: LLR-050, SR-036
+#[derive(Debug, Clone)]
+pub struct OutputTimings {
+    pub name: String,
+    /// Output frames emitted to the encoder (transitions included).
+    pub frames: u64,
+    pub stages: StageSnapshot,
+}
+
 /// Aggregated result of a build, used to drive the completion summary and the
 /// process exit status.
 // Implements: LLR-017, LLR-023, LLR-024, SR-004, SR-014
@@ -52,6 +65,8 @@ pub struct WrittenOutput {
 pub struct BuildSummary {
     pub written: Vec<WrittenOutput>,
     pub skipped: Vec<SkippedInput>,
+    /// One entry per encoded output, in build order (SR-036).
+    pub timings: Vec<OutputTimings>,
 }
 
 impl BuildSummary {
@@ -77,6 +92,8 @@ pub struct FrameGenerationPipeline {
     roi: Option<RoiDb>,
     /// Inputs skipped across all outputs (deduped by path) for the summary.
     skipped: RefCell<Vec<SkippedInput>>,
+    /// Per-output stage timings collected during encode (SR-036).
+    timings: RefCell<Vec<OutputTimings>>,
 }
 
 impl FrameGenerationPipeline {
@@ -96,6 +113,7 @@ impl FrameGenerationPipeline {
             media_root,
             roi,
             skipped: RefCell::new(Vec::new()),
+            timings: RefCell::new(Vec::new()),
         }
     }
 
@@ -132,6 +150,7 @@ impl FrameGenerationPipeline {
         Ok(BuildSummary {
             written,
             skipped: self.skipped.borrow().clone(),
+            timings: self.timings.borrow().clone(),
         })
     }
 
@@ -202,6 +221,13 @@ impl FrameGenerationPipeline {
         let frame_bytes = (width * height * 3) as usize;
         let batch = (RANGE_MEMORY_BUDGET / frame_bytes.max(1)).max(1) as u32;
 
+        // Per-output stage timers (SR-036): shared with the image sources
+        // (render) and the mixer (blend, encode-write stall); decode/prescale
+        // are read from each clip's load timings below.
+        // Implements: LLR-050, SR-036
+        let stage_timings = Arc::new(StageTimings::new());
+        let enc_start = Instant::now();
+
         let encoder = FfmpegEncoder::start(
             &out_path,
             width,
@@ -213,7 +239,11 @@ impl FrameGenerationPipeline {
             self.processing.ffmpeg_timeout_secs,
         )?;
 
-        let mut mixer = CrossfadeMixer::new(encoder, output_def.fade_frames() as usize);
+        let mut mixer = CrossfadeMixer::new(
+            encoder,
+            output_def.fade_frames() as usize,
+            Arc::clone(&stage_timings),
+        );
 
         let total = media.len();
         let start = Instant::now();
@@ -240,7 +270,15 @@ impl FrameGenerationPipeline {
                     output_def,
                     self.focus_for(&item.path),
                 ) {
-                    Ok(r) => Box::new(ImageFrameSource::new(r, batch)),
+                    Ok(r) => {
+                        // The serial decode+prescale stall at this clip
+                        // boundary (PB-002). Implements: LLR-050, SR-036
+                        let lt = r.load_timings();
+                        stage_timings.add_decode(lt.decode);
+                        stage_timings.add_prescale(lt.prescale);
+                        stage_timings.add_clip();
+                        Box::new(ImageFrameSource::new(r, batch, Arc::clone(&stage_timings)))
+                    }
                     Err(e) => {
                         log::warn!("Skipping image {}: {}", item.path.display(), e);
                         self.record_skip(&item.path, e.to_string());
@@ -297,6 +335,9 @@ impl FrameGenerationPipeline {
         }
 
         let (emitted, part) = mixer.finish()?;
+        // finish() waits for ffmpeg to exit, so this is the encoder's wall time.
+        // Implements: LLR-050, SR-036
+        stage_timings.set_ffmpeg_wall(enc_start.elapsed());
 
         // Finalize: mux source-video audio onto the silent video when enabled and
         // there is audio to add, otherwise atomically promote the silent video.
@@ -339,6 +380,14 @@ impl FrameGenerationPipeline {
             elapsed.as_secs_f64(),
             emitted as f64 / elapsed.as_secs_f64().max(0.001),
         );
+        // Per-stage totals: debug lines under --verbose, and a snapshot the
+        // bench runner reads from the summary. Implements: LLR-050, SR-036
+        stage_timings.log_summary(&output_def.name);
+        self.timings.borrow_mut().push(OutputTimings {
+            name: output_def.name.clone(),
+            frames: emitted,
+            stages: stage_timings.snapshot(),
+        });
 
         let size_bytes = std::fs::metadata(&out_path).map(|m| m.len()).unwrap_or(0);
         Ok(Some(WrittenOutput {
@@ -358,16 +407,37 @@ struct CrossfadeMixer {
     /// the next clip to dissolve into. Empty before the first clip.
     prev_tail: Vec<Vec<u8>>,
     emitted: u64,
+    /// Per-output stage timers (blend and encode-write stall). SR-036.
+    timings: Arc<StageTimings>,
 }
 
 impl CrossfadeMixer {
-    fn new(encoder: FfmpegEncoder, n: usize) -> Self {
+    fn new(encoder: FfmpegEncoder, n: usize, timings: Arc<StageTimings>) -> Self {
         Self {
             encoder,
             n,
             prev_tail: Vec::new(),
             emitted: 0,
+            timings,
         }
+    }
+
+    /// [`blend`] with the elapsed time accumulated into the blend stage.
+    // Implements: LLR-050, SR-036
+    fn timed_blend(&self, a: &[u8], b: &[u8], t: f32) -> Vec<u8> {
+        let s = Instant::now();
+        let out = blend(a, b, t);
+        self.timings.add_blend(s.elapsed());
+        out
+    }
+
+    /// [`scale`] with the elapsed time accumulated into the blend stage.
+    // Implements: LLR-050, SR-036
+    fn timed_scale(&self, a: &[u8], t: f32) -> Vec<u8> {
+        let s = Instant::now();
+        let out = scale(a, t);
+        self.timings.add_blend(s.elapsed());
+        out
     }
 
     /// Drive one clip through the mixer. Returns the number of source frames
@@ -394,7 +464,8 @@ impl CrossfadeMixer {
             let len = head.len().max(1);
             for (k, f) in head.iter().enumerate() {
                 let t = (k + 1) as f32 / len as f32;
-                self.emit(scale(f, t))?;
+                let frame = self.timed_scale(f, t);
+                self.emit(frame)?;
             }
         } else {
             let prev = std::mem::take(&mut self.prev_tail);
@@ -402,7 +473,8 @@ impl CrossfadeMixer {
             // Dissolve overlapping frames.
             for k in 0..m {
                 let t = (k + 1) as f32 / (m + 1) as f32;
-                self.emit(blend(&prev[k], &head[k], t))?;
+                let frame = self.timed_blend(&prev[k], &head[k], t);
+                self.emit(frame)?;
             }
             // If this clip's head ran longer than the previous tail (a short
             // previous clip), emit the surplus head frames as ordinary body.
@@ -444,7 +516,8 @@ impl CrossfadeMixer {
         let len = prev.len();
         for (k, f) in prev.iter().enumerate() {
             let t = 1.0 - (k + 1) as f32 / (len + 1) as f32;
-            self.emit(scale(f, t))?;
+            let frame = self.timed_scale(f, t);
+            self.emit(frame)?;
         }
         let emitted = self.emitted;
         let part = self.encoder.finish_to_part()?;
@@ -452,7 +525,11 @@ impl CrossfadeMixer {
     }
 
     fn emit(&mut self, frame: Vec<u8>) -> Result<()> {
+        // Time the stdin write: when ffmpeg's input buffer is full this is the
+        // encoder-write stall the pipeline blocks on (LLR-050, SR-036).
+        let s = Instant::now();
         self.encoder.write_frame(&frame)?;
+        self.timings.add_write(s.elapsed());
         self.emitted += 1;
         Ok(())
     }

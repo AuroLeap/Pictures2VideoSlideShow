@@ -60,6 +60,56 @@ fn stats_reports_album_statistics() {
     );
 }
 
+/// Verifies: SR-036, LLR-051, LLR-052 — automated smoke of `bench --full`: a
+/// real tiny-corpus build that writes cwd-relative `docs/test/perf-metrics.json`
+/// keyed by PB-ID, with PB-004 honestly absent until SR-037 lands. The
+/// canonical Release-tier bench with PB-comparable numbers is TC-074
+/// (`Scripts/bench.ps1` on the dev box).
+#[test]
+fn bench_full_writes_pb_metrics_sr036() {
+    let (tmp, cfg) = setup();
+    // A second image so a clip boundary (PB-002's subject) actually occurs.
+    write_png(&tmp.join("media").join("b.png"), 96, 72, [10, 200, 50]);
+
+    let mut cmd = Command::new(slideshow_bin());
+    cmd.current_dir(tmp.path()); // metrics land under <cwd>/docs/test
+    cmd.arg("--config").arg(&cfg).arg("--non-interactive");
+    cmd.args(["bench", "--full", "--corpus"])
+        .arg(tmp.join("media"));
+    let out = cmd.output().expect("run bench --full");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "bench --full must exit zero; stdout=\n{stdout}\nstderr=\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("PB-001"),
+        "bench --full must report the PB numbers:\n{stdout}"
+    );
+
+    let metrics = tmp.join("docs").join("test").join("perf-metrics.json");
+    let text = std::fs::read_to_string(&metrics).expect("bench must write perf-metrics.json");
+    let json: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+    let obj = json.as_object().expect("flat {PB-ID: number} object");
+    for pb in ["PB-001", "PB-002", "PB-003"] {
+        assert!(
+            obj.get(pb).is_some_and(|v| v.is_number()),
+            "{pb} must be a numeric entry:\n{text}"
+        );
+    }
+    if cfg!(any(windows, target_os = "linux")) {
+        assert!(
+            obj.get("PB-005").is_some_and(|v| v.is_number()),
+            "PB-005 (peak working set) must be measured on this platform:\n{text}"
+        );
+    }
+    assert!(
+        obj.get("PB-004").is_none(),
+        "PB-004 must be omitted until the segment cache (SR-037) exists:\n{text}"
+    );
+}
+
 /// `bench --images 1`: renders one image's frames and prints the benchmark
 /// block. Exits zero. Exercises `main.rs::run_bench`.
 #[test]

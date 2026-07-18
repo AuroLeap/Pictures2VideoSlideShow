@@ -150,7 +150,7 @@ graph LR
 | `src/pipeline` | `FrameSource` abstraction + `CrossfadeMixer` orchestration + audio-clip capture |
 | `src/setup` | First-run self-check: FFmpeg resolve/fetch, GUI wizard, config builder |
 | `src/preflight` | Runtime-prerequisite checks shared by `validate` and `build` |
-| `src/util` | dirs, size estimation, progress |
+| `src/util` | dirs, size estimation, stage timers + perf-metrics writer (SR-036) |
 
 ## Module dependencies (generated)
 
@@ -174,7 +174,7 @@ graph LR
     m_roi["roi — Optional region-of-interest (ROI) database."]
     m_setup["setup — First-run setup building blocks: the FFmpeg dep…"]
     m_transform["transform — Transform calculations for the Ken Burns (pan +…"]
-    m_util["util — Small shared utilities: filesystem helpers and …"]
+    m_util["util — Small shared utilities: filesystem helpers, out…"]
     m_video["video — Video passthrough: decode an input video to raw…"]
     m_config --> m_error
     m_config --> m_roi
@@ -250,10 +250,12 @@ _Generated 2026-07-17 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn resolve(configured: Option<&Path>, cache_dir: &Path) -> Option<PathBuf>`  <- LLR-032, SR-027
 - **src/image/mod.rs** — _Frame generation: turn one source image into a sequence of RGB frames_
   - uses: `config`, `error`, `transform`
+  - `pub struct LoadTimings`  <- LLR-050, SR-036
   - `pub struct FrameRenderer`
   - `pub fn load(path: &Path, out: &OutputDef) -> Result<Self>`
   - `pub fn load_with_focus(`  <- LLR-037, SR-031
-  - `pub fn total_frames(&self) -> u32`
+  - `pub fn load_timings(&self) -> LoadTimings`  <- LLR-050, SR-036
+  - `pub fn total_frames(&self) -> u32`  <- LLR-050, SR-036
   - `pub fn render_range(&self, start: u32, end: u32) -> Vec<Vec<u8>>`
 - **src/lib.rs** — _Library crate root: re-exports the engine's modules so integration tests_
 - **src/logging.rs** — _Logging setup: env_logger with millisecond timestamps; `--verbose`_
@@ -271,15 +273,16 @@ _Generated 2026-07-17 by `scripts/trace.ps1` from the source tree — do not edi
   - uses: `config`, `error`, `ffmpeg`, `image`, `media`, `roi`, `util`, `video`
   - `pub struct SkippedInput`  <- LLR-017, SR-014
   - `pub struct WrittenOutput`  <- LLR-023, LLR-024, SR-004
+  - `pub struct OutputTimings`  <- LLR-050, LLR-052, SR-036
   - `pub struct BuildSummary`  <- LLR-017, LLR-023, LLR-024, SR-004, SR-014
   - `pub fn oversize_outputs(&self) -> Vec<&WrittenOutput>`  <- LLR-013, SR-009
   - `pub struct FrameGenerationPipeline`
-  - `pub fn new(`
+  - `pub fn new(`  <- SR-036
 - **src/pipeline/source.rs** — _A uniform pull-based frame source so images and videos can be driven through_
-  - uses: `error`, `image`, `video`
+  - uses: `error`, `image`, `util`, `video`
   - `pub trait FrameSource`
   - `pub struct ImageFrameSource`
-  - `pub fn new(renderer: FrameRenderer, batch: u32) -> Self`
+  - `pub fn new(renderer: FrameRenderer, batch: u32, timings: Arc<StageTimings>) -> Self`
   - `pub struct VideoFrameSource`
   - `pub fn new(reader: VideoFrameReader) -> Self`
 - **src/preflight.rs** — _Runtime-prerequisite checks shared by the `validate` command and `build`._
@@ -335,7 +338,21 @@ _Generated 2026-07-17 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn ensure_writable_dir(path: &Path) -> Result<()>`  <- LLR-019, SR-016
   - `pub fn disk_full_error(path: &Path) -> SlideshowError`  <- LLR-018, SR-015
   - `pub fn is_disk_full(err: &io::Error) -> bool`  <- LLR-018, SR-015
-- **src/util/mod.rs** — _Small shared utilities: filesystem helpers and output-size estimation._
+- **src/util/mod.rs** — _Small shared utilities: filesystem helpers, output-size estimation, and_
+- **src/util/timing.rs** — _Stage timers and perf-metrics emission (SR-036): cheap per-stage elapsed_
+  - uses: `error`
+  - `pub struct StageTimings`  <- LLR-050, SR-036
+  - `pub fn new() -> Self`
+  - `pub fn add_decode(&self, d: Duration)`
+  - `pub fn add_prescale(&self, d: Duration)`
+  - `pub fn add_render(&self, d: Duration)`
+  - `pub fn add_blend(&self, d: Duration)`
+  - `pub fn add_write(&self, d: Duration)`
+  - `pub fn add_clip(&self)`
+  - `pub fn set_ffmpeg_wall(&self, d: Duration)`
+  - `pub fn snapshot(&self) -> StageSnapshot`
+  - `pub fn log_summary(&self, output: &str)`  <- LLR-050, SR-036
+  - `pub struct StageSnapshot`  <- LLR-050, LLR-052, SR-036
 - **src/video/mod.rs** — _Video passthrough: decode an input video to raw `rgb24` frames at the target_
   - uses: `error`
   - `pub struct VideoFrameReader`
