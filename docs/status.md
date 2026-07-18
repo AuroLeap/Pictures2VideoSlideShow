@@ -9,9 +9,9 @@ Back to [docs index](README.md) · [README](../README.md).
 ## Current state
 
 - **Active objective:** **OBJ-PERF — engine performance, phases 0–3 of [planning/RUST_PERFORMANCE_PLAN.md](../planning/RUST_PERFORMANCE_PLAN.md)** (measurement → encoder/CPU quick wins → incremental segment cache → pipeline overlap). Prior scope: ✅ PROJECT COMPLETE, FINAL acceptance APPROVED 2026-06-04; this is post-acceptance maintenance work on branch `Optomizations`.
-- **Round:** OBJ-PERF round 4b (Phase 1 render path: prefetch LLR-060, SIMD resize LLR-061, fixed-point blend LLR-062 + image 0.25 upgrade implemented, awaiting Test Engineer verify + new-baseline acceptance) / Phase 2 (segment cache) or SR-038 (probe cache) next
+- **Round:** OBJ-PERF round 4 **closed** (4c 2026-07-18: Phase 1 independently verified — TC-063..TC-068, TC-070, TC-071, TC-086..TC-088 Verified; new perf baseline accepted incl. new PB-006 rotation-off leg; TC-069 NVENC Demonstration stays Draft for Peter) / round 5 next: Phase 2 (segment cache, SR-037) or SR-038 (probe cache)
 - **Mode:** **autonomous** (set by Peter 2026-07-17 for OBJ-PERF: decide-and-record per the process.md §6 dial; gates/harness discipline unchanged; decisions logged below instead of pausing)
-- **Latest measurements (2026-07-18, OBJ-PERF round 4b, `Scripts/run-tests.ps1` + `Scripts/bench.ps1`):** `cargo fmt --check` clean; `cargo clippy -D warnings` clean; `cargo test --all` 147 passed 0 failed 2 ignored; `cargo llvm-cov` line **84.70%** (≥80%); trace SR=38 LLR=64 TC=90 **orphans=0**; committed perf baseline unchanged (Test Engineer owns acceptance); round-4b bench (software, canonical wrapper): **PB-001 83.4 fps** (baseline 74.1 same-day pre-change), **PB-002 4.0 ms/photo** (was 232.4 — under its 50 ms budget for the first time), PB-005 447 MB; `check_perf --tier release` 0 fail / 1 warn (PB-003, pre-existing until SR-038) / 1 skip, exit 0.
+- **Latest measurements (2026-07-18, OBJ-PERF round 4c Test Engineer witness, `Scripts/run-tests.ps1` + two-leg `Scripts/bench.ps1`):** `cargo fmt --check` clean; `cargo clippy -D warnings` clean; `cargo test --all` 153 passed 0 failed 2 ignored (both deliberate: network fetch + Release-tier hardware profile); `cargo llvm-cov` line **84.70%** (≥80%); trace SR=38 LLR=64 TC=90 **orphans=0**, budgets=6 findings=0; witnessed bench (quiet host, repeats 87.5/87.3/87.3 fps): **PB-001 87.3 fps**, **PB-002 4.5 ms/photo** (blocking-wait semantics), PB-003 41.5 s/1k, PB-005 446.0 MB, **PB-006 (new rotation-off leg, LLR-061 fast path) 134.5 fps**; **baseline accepted** 69.4→87.3 / 278.0→4.5 / 43.1→41.5 / 410.5→446.0 / PB-006 new 134.5; `check_perf --tier release` 0 fail / 1 warn (PB-003, pre-existing until SR-038) / 1 skip, exit 0.
 - **Active gate:** G2. G3 requires all Verification=Test SRs to be Status=Verified; SR-013, SR-024, SR-027 remain Implemented/Draft because their Tier=Release TCs require Peter's hardware/interactive/network. Pre-existing; see Constraints.
 - **Kit version:** `9670982 2026-07-01` (ai-template branch MultiRepoSupport; stamped in `docs/kit-version`).
 - **Still open for the human:** SR-023 release publish on a `v*` tag; SR-013/SR-024/SR-027 Tier=Release TCs for G3 advancement; real-ENOSPC (SR-015) demonstration.
@@ -1209,3 +1209,39 @@ Findings:
 - [MINOR] The canonical bench pins `max_rotation_degrees = 15.0`, so PB-001 never exercises the LLR-061 fast path; consider whether a rotation-off leg belongs in the bench procedure (comparability vs coverage trade) → @test-engineer
 - [NOTE] Round brief listed the image-crate upgrade as optional/skippable — it was kept: zero API friction, harness green, decode ~2x in-window; the transient-load false alarm above is documented so nobody re-litigates it → @system-engineer
 - [NOTE] `report.md` dual-writer: `python Scripts/trace.py` re-run last before commit per the R4a convention → @software-engineer (self, done this round)
+
+### TEST-ENGINEER — OBJ-PERF — Round 4c (Phase 1 verify) — 2026-07-18
+Verdict: APPROVE (Phase 1 independently verified; new golden baseline accepted; PB-002 semantics ruled sound; rotation-off bench leg implemented as PB-006)
+Independent verify (all run by me on this clone, quiet host — CPU 4-10%, no parallel cargo/rustc before bench):
+```
+HARNESS PASSED  (pwsh Scripts/run-tests.ps1, exit 0)
+  cargo fmt --check clean; cargo clippy -D warnings clean
+  cargo test --all: 153 passed, 0 failed, 2 ignored (lib 62 + bin 62 + 16 integration targets; ignored = network fetch + Release-tier hardware profile)
+  cargo llvm-cov: TOTAL lines 84.70% >= 80% (encoder_args.rs 98.20%, probe.rs 81.12%, prefetch.rs 100.00%, image/mod.rs 99.32%)
+Check summary (gate G2, tier all): PASS traceability / PASS doc-navigability / PASS design-flows — RESULT: PASS
+Scripts/trace.ps1 -Strict:            Traceability: SR=38 LLR=64 TC=90 orphans=0
+Scripts/trace.py --strict --no-placeholders: SN=31 SR=38 LLR=64 TC=90 orphans=0 integrity=0 placeholders=0 budgets=6 budget-findings=0
+Witnessed bench (Scripts/bench.ps1, TestInput/ 2021 frames, Ryzen 9 5900X / RTX 3080): run1 PB-001=87.5 PB-002=4.2 PB-005=446.5; run2 87.3/4.0/444.4; accepted run3 (two-leg) PB-001=87.3 PB-002=4.5 PB-003=41.5 PB-005=446.0 PB-006=134.5
+check_perf --tier release (post-acceptance): 0 fail, 1 warn (PB-003, pre-existing until SR-038), 1 skip (PB-004) — exit 0
+```
+TC flips (all named tests confirmed present and passing in my own harness run before flipping; "planned" wording trued in Expected):
+- **TC-063..TC-067, TC-070 → Verified** (unit/integration encoder legs: 10 tests across encoder_args/probe/config + tests/encoder_fallback.rs).
+- **TC-068 → Verified** (System: software_presets_keep_frame_profile_sr035, unset/veryfast/slow through the shared SR-005 ffprobe assert).
+- **TC-071 → Verified** (Inspection, performed by me on docs/quick-reference.md: `encoder` row — default software, full value set, fallback "a missing GPU never fails a build" in plain language; `x264_preset` row — default medium, ladder, speed/quality trade stated once; §4 note lists both as omittable serde defaults; §5 GPU gap row correctly says rendering-only. No conflicting restatement elsewhere — architecture.md/report.md hits are generated files).
+- **TC-086, TC-087, TC-088 → Verified** (prefetch order+drop+skip-routing, SIMD fast-path selection, fixed-point blend ±1 LSB — all passing).
+- **TC-069 stays Draft** (NVENC human Demonstration, Tier=Release, Peter's). Pre-work on record: SE's Round-4a local evidence (RTX 3080 validate PASS line, build reporting `encoder h264_nvenc`, SR-005 ffprobe pass incl. faststart via the `--ignored` test) makes this a low-risk formality.
+Baseline decision (process.md §9, accepted via my witnessed run 3 + `check_perf --update-baseline`; three same-day runs within noise, no load skew):
+| PB | old golden | new golden |
+|---|---|---|
+| PB-001 fps | 69.40 | **87.25** (1.26x) |
+| PB-002 ms/photo | 277.99 (old decode+prescale semantics) | **4.45** (blocking-wait semantics — not comparable) |
+| PB-003 s/1k | 43.09 | 41.47 |
+| PB-005 MB | 410.49 | **446.04** (prefetcher ≤2 clips, inside 2048) |
+| PB-006 fps | (new) | **134.52** (rotation-off leg) |
+PB-002 semantics ruling: the registry row correctly states what is now measured (blocking wait on the prefetched clip; decode/prescale accrue as overlapped raw time) and matches the code (`StageTimings::add_stall` at the single `wait.elapsed()` call site, `boundary_stall_ms_per_photo` numerator). The 50 ms budget **stands**: if prefetch ever stops overlapping, the wait reverts toward serial decode+prescale (~240-280 ms) and breaches loudly — a meaningful absolute guard, not a stale number. Row note trued: new-semantics baseline recorded, old 278.0 flagged not-comparable, noise band 4.0-4.5 noted (Gate=warn kept).
+Rotation-off leg (SE's R4b MINOR): **implemented**, not left open. `Scripts/bench.ps1` now runs two legs — rotation-off first (its PB-001 captured as **PB-006** and merged into perf-metrics.json by the wrapper), then the canonical rotation-15 leg (PB-001..005, comparability preserved). New `PB-006` row added to performance-budgets.csv (Refs SR-036;LLR-061, budget 60 fps, higher-better, Gate=warn); TC-074 procedure trued to the two-leg protocol. Witnessed: rotation-off render stage 1778 ms vs 11259 ms canonical — the LLR-061 fast path demonstrably fires (1.54x same-run).
+Findings:
+- [MAJOR] SR status flips are yours, all evidence now on file → **SR-035**: every TC (TC-068 Test, TC-070 Test, TC-071 Inspection doc leg) Verified — flip candidate to Verified. **SR-036**: every TC (TC-072/073/074) Verified since R3/R4c — flip candidate to Verified. **SR-034**: all Test-method TCs (TC-063..TC-068) Verified; only the Demonstration hardware leg TC-069 (Tier=Release, Peter) remains — status per your Demonstration-leg convention (SR-012 precedent) → @system-engineer
+- [MINOR] PB-002 regression band is now ±0.9 ms (20% of 4.45) on a metric whose same-day spread was 4.0-4.5 — expect occasional WARNs from noise alone; Gate=warn absorbs it, but widen Tolerance or floor it if it nags → @test-engineer (self, watch)
+- [NOTE] Bench doubles wall time (~25 s extra) for the PB-006 leg — accepted trade per the R4b finding (coverage over speed; wrapper is Release-tier only) → no action
+- [NOTE] `report.md` dual-writer: trace.py re-run last before commit per convention → done this round
