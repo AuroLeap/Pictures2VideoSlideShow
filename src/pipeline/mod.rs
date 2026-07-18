@@ -4,13 +4,19 @@
 //! Two encode paths share one frame source, the streaming [`CrossfadeMixer`]:
 //! the single-encoder streaming build (`--no-cache`), and the default SR-037
 //! cached build — plan segments against the store, re-encode only miss runs,
-//! assemble by stream-copy concat, then mux/promote. The mixer only ever
-//! holds a rolling window of `fade_frames` at each boundary, so memory stays
-//! bounded regardless of clip length or count — whole videos are never loaded.
+//! assemble by stream-copy concat, then mux/promote. Both paths write through
+//! the Phase-3 [`EncoderWriter`] thread (LLR-063), so rendering overlaps the
+//! encoder pipe writes. The mixer only ever holds a rolling window of
+//! `fade_frames` at each boundary, and every inter-stage buffer/channel is
+//! bounded (see [`writer_channel_depth`]), so memory stays bounded regardless
+//! of clip length or count — whole videos are never loaded.
 
+mod overlap;
 mod prefetch;
 mod segment;
 mod source;
+
+pub use overlap::{writer_channel_depth, EncoderWriter};
 
 use crate::cache::planner::{self, ClipFacts, SegmentPlan};
 use crate::cache::store::SegmentStore;
@@ -37,14 +43,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-/// Where the mixer's output frames go: today's single streaming encoder, or
-/// the segment-rolling sink of the SR-037 segmented build. `roll` is invoked
-/// at each transition midpoint (a segment boundary); single-file sinks ignore
-/// it, which keeps the streaming path byte-identical.
-// Implements: LLR-056, SR-037
-trait FrameSink {
+/// Where the mixer's output frames go: the streaming encoder, the
+/// segment-rolling sink of the SR-037 segmented build, or the [`EncoderWriter`]
+/// thread wrapping either (LLR-063). `roll` is invoked at each transition
+/// midpoint (a segment boundary); single-file sinks ignore it, which keeps the
+/// streaming path byte-identical. Frames pass by value so the overlapped path
+/// can move them into its channel without a copy.
+// Implements: LLR-056, LLR-063, SR-037
+pub trait FrameSink {
     /// Write one raw `rgb24` output frame.
-    fn write(&mut self, frame: &[u8]) -> Result<()>;
+    fn write(&mut self, frame: Vec<u8>) -> Result<()>;
     /// Transition-midpoint marker (plan §4 segment boundary). Default: no-op.
     fn roll(&mut self) -> Result<()> {
         Ok(())
@@ -53,13 +61,10 @@ trait FrameSink {
 
 /// The streaming single-encoder sink: every frame goes to one FFmpeg process.
 impl FrameSink for FfmpegEncoder {
-    fn write(&mut self, frame: &[u8]) -> Result<()> {
-        self.write_frame(frame)
+    fn write(&mut self, frame: Vec<u8>) -> Result<()> {
+        self.write_frame(&frame)
     }
 }
-
-/// Soft cap on in-flight frame bytes for image render batches.
-const RANGE_MEMORY_BUDGET: usize = 64 * 1024 * 1024;
 
 /// One input that could not be turned into frames, with the reason.
 // Implements: LLR-017, SR-014
@@ -266,8 +271,12 @@ impl FrameGenerationPipeline {
 
         self.warn_if_estimated_oversize(output_def, media);
 
+        // One bounded depth sizes both the render batches and the
+        // mixer->writer channel; it replaces the deleted RANGE_MEMORY_BUDGET
+        // as the in-flight-frame memory cap (PB-005). Implements: LLR-063
         let frame_bytes = (width * height * 3) as usize;
-        let batch = (RANGE_MEMORY_BUDGET / frame_bytes.max(1)).max(1) as u32;
+        let depth = writer_channel_depth(output_def.fade_frames() as usize, frame_bytes);
+        let batch = depth as u32;
 
         // Per-output stage timers (SR-036): shared with the image sources
         // (render) and the mixer (blend, encode-write stall); decode/prescale
@@ -292,8 +301,12 @@ impl FrameGenerationPipeline {
             self.processing.ffmpeg_timeout_secs,
         )?;
 
+        // Phase-3 overlap (LLR-063): the writer thread owns ffmpeg stdin;
+        // the mixer only ever blocks on the bounded channel (back-pressure),
+        // which emit() times as the encode-write stall.
+        let writer = EncoderWriter::start(encoder, depth, Arc::clone(&stage_timings));
         let mut mixer = CrossfadeMixer::new(
-            encoder,
+            writer,
             output_def.fade_frames() as usize,
             Arc::clone(&stage_timings),
         );
@@ -305,7 +318,8 @@ impl FrameGenerationPipeline {
 
         // All inputs were skipped/unusable for this output: abort without
         // finalizing so no complete-looking (empty) `<name>.mp4` is produced.
-        // Dropping the mixer drops the encoder, whose Drop removes the `.part`.
+        // Dropping the mixer drops the writer (joins its thread), which drops
+        // the encoder, whose Drop removes the `.part` (LLR-064).
         // Implements: LLR-017, SR-014
         if produced_total == 0 {
             log::warn!(
@@ -316,7 +330,10 @@ impl FrameGenerationPipeline {
             return Ok(None);
         }
 
-        let (emitted, encoder) = mixer.finish()?;
+        let (emitted, writer) = mixer.finish()?;
+        // Join re-raises any writer-thread failure with serial semantics
+        // (LLR-064) and hands the encoder back for finalize.
+        let encoder = writer.join()?;
         let part = encoder.finish_to_part()?;
         // finish_to_part waits for ffmpeg to exit: the encoder's wall time.
         // Implements: LLR-050, SR-036
@@ -644,9 +661,11 @@ impl FrameGenerationPipeline {
             crf: output_def.quality_crf,
             x264_preset: output_def.x264_preset.clone(),
         };
+        // Same bounded depth as the streaming path (LLR-063): sizes render
+        // batches and each run's mixer->writer channel.
         let fade = output_def.fade_frames() as usize;
         let frame_bytes = (width * height * 3) as usize;
-        let batch = (RANGE_MEMORY_BUDGET / frame_bytes.max(1)).max(1) as u32;
+        let batch = writer_channel_depth(fade, frame_bytes) as u32;
         let stage_timings = Arc::new(StageTimings::new());
         let start = Instant::now();
 
@@ -878,7 +897,11 @@ impl FrameGenerationPipeline {
             enc.clone(),
             self.processing.ffmpeg_timeout_secs,
         )?;
-        let mut mixer = CrossfadeMixer::new(sink, fade, Arc::clone(stage_timings));
+        // The segmented sink goes through the same writer thread as the
+        // streaming path (LLR-063); rolls queue in-order with the frames so
+        // segment boundaries land on exactly the serial frame.
+        let writer = EncoderWriter::start(sink, batch as usize, Arc::clone(stage_timings));
+        let mut mixer = CrossfadeMixer::new(writer, fade, Arc::clone(stage_timings));
         let outcome = self.drive_clips(output_def, sub, &mut mixer, batch, stage_timings)?;
 
         // Record every actual video frame count first — even if we replan,
@@ -903,7 +926,10 @@ impl FrameGenerationPipeline {
             return Ok(RunOutcome::Skipped(skipped));
         }
 
-        let (_emitted, sink) = mixer.finish()?;
+        let (_emitted, writer) = mixer.finish()?;
+        // Join re-raises any writer-thread failure (LLR-064) before the run's
+        // segments are trusted.
+        let sink = writer.join()?;
         let (seg_paths, _sink_boundaries) = sink.finish_all()?;
 
         // Ground truth for this run: the layout over the ACTUAL counts. Its
@@ -1047,7 +1073,7 @@ pub(crate) fn mixer_test_probe(counts: &[u64], fade: usize) -> MixerProbe {
         rolls: Vec<u64>,
     }
     impl FrameSink for CountSink {
-        fn write(&mut self, _frame: &[u8]) -> Result<()> {
+        fn write(&mut self, _frame: Vec<u8>) -> Result<()> {
             self.written += 1;
             Ok(())
         }
@@ -1225,10 +1251,14 @@ impl<S: FrameSink> CrossfadeMixer<S> {
     }
 
     fn emit(&mut self, frame: Vec<u8>) -> Result<()> {
-        // Time the sink write: when ffmpeg's input buffer is full this is the
-        // encoder-write stall the pipeline blocks on (LLR-050, SR-036).
+        // Time the sink write: the time the mixer blocks on the encode side.
+        // Through the EncoderWriter this is the bounded-channel back-pressure
+        // wait (the raw pipe time accrues on the writer thread as pipe-write);
+        // for a direct sink it is the pipe write itself. Same meaning either
+        // way: dead time the pipeline spends blocked on the encoder
+        // (LLR-050, LLR-063, SR-036).
         let s = Instant::now();
-        self.sink.write(&frame)?;
+        self.sink.write(frame)?;
         self.timings.add_write(s.elapsed());
         self.emitted += 1;
         Ok(())

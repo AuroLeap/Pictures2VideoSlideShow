@@ -582,6 +582,7 @@ async fn run_bench_full(
         ("render", s.render_ms),
         ("blend", s.blend_ms),
         ("encode-write-stall", s.encode_write_stall_ms),
+        ("pipe-write", s.pipe_write_ms),
         ("ffmpeg-wall", s.ffmpeg_wall_ms),
     ] {
         println!(

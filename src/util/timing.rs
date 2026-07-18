@@ -1,7 +1,7 @@
 //! Stage timers and perf-metrics emission (SR-036): cheap per-stage elapsed
 //! accumulation for the build hot path (decode, prescale, prefetch-stall,
-//! render, blend, encode-write-stall, ffmpeg-wall) surfaced as `--verbose`
-//! summary lines,
+//! render, blend, encode-write-stall, pipe-write, ffmpeg-wall) surfaced as
+//! `--verbose` summary lines,
 //! plus the `PB-ID -> number` JSON consumed by `Scripts/check_perf.py` and the
 //! peak-working-set probe for PB-005.
 
@@ -11,7 +11,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-/// Per-output elapsed-time accumulators for the six SR-036 build stages.
+/// Per-output elapsed-time accumulators for the SR-036 build stages.
 ///
 /// Cheap by design: each instrumentation point is one `Instant::now()` pair
 /// and one relaxed atomic add of the elapsed nanoseconds — no syscalls or
@@ -29,7 +29,13 @@ pub struct StageTimings {
     stall_ns: AtomicU64,
     render_ns: AtomicU64,
     blend_ns: AtomicU64,
+    /// The mixer's blocking wait on the encode side: bounded-channel
+    /// back-pressure through the LLR-063 writer thread (or the raw pipe write
+    /// for a direct sink) — the dead time rendering actually loses to encode.
     write_ns: AtomicU64,
+    /// Raw ffmpeg-stdin pipe time on the writer thread (LLR-063) — overlapped
+    /// work, accrued separately like decode/prescale under prefetch.
+    pipe_ns: AtomicU64,
     ffmpeg_wall_ns: AtomicU64,
     /// Image clips loaded — the "per photo" denominator of the PB-002
     /// boundary-stall mean (videos stream and are not boundary stalls).
@@ -71,9 +77,16 @@ impl StageTimings {
         Self::add(&self.blend_ns, d);
     }
 
-    /// Add one frame's encoder-stdin write (stall) time.
+    /// Add one frame's blocking wait on the encode side (the mixer-visible
+    /// encode-write stall; channel back-pressure under LLR-063).
     pub fn add_write(&self, d: Duration) {
         Self::add(&self.write_ns, d);
+    }
+
+    /// Add one frame's raw ffmpeg-stdin pipe write on the writer thread
+    /// (LLR-063 overlapped time).
+    pub fn add_pipe(&self, d: Duration) {
+        Self::add(&self.pipe_ns, d);
     }
 
     /// Count one loaded image clip (the PB-002 mean denominator).
@@ -97,6 +110,7 @@ impl StageTimings {
             render_ms: ms(&self.render_ns),
             blend_ms: ms(&self.blend_ns),
             encode_write_stall_ms: ms(&self.write_ns),
+            pipe_write_ms: ms(&self.pipe_ns),
             ffmpeg_wall_ms: ms(&self.ffmpeg_wall_ns),
             clips: self.clips.load(Ordering::Relaxed),
         }
@@ -117,6 +131,7 @@ impl StageTimings {
             output,
             s.encode_write_stall_ms
         );
+        log::debug!("'{}' stage pipe-write: {:.1} ms", output, s.pipe_write_ms);
         log::debug!("'{}' stage ffmpeg-wall: {:.1} ms", output, s.ffmpeg_wall_ms);
     }
 }
@@ -132,7 +147,10 @@ pub struct StageSnapshot {
     pub stall_ms: f64,
     pub render_ms: f64,
     pub blend_ms: f64,
+    /// Blocking wait on the encode side (channel back-pressure, LLR-063).
     pub encode_write_stall_ms: f64,
+    /// Raw pipe writes on the LLR-063 writer thread (overlapped time).
+    pub pipe_write_ms: f64,
     pub ffmpeg_wall_ms: f64,
     /// Image clips loaded for this output.
     pub clips: u64,
@@ -329,7 +347,10 @@ mod tests {
         t.add_clip();
         t.add_render(Duration::from_millis(200));
         t.add_blend(Duration::from_millis(5));
+        // Back-pressure wait (mixer side) vs raw pipe time (writer thread,
+        // LLR-063) accrue independently, like stall vs decode/prescale.
         t.add_write(Duration::from_millis(7));
+        t.add_pipe(Duration::from_millis(9));
         t.set_ffmpeg_wall(Duration::from_millis(400));
 
         let s = t.snapshot();
@@ -339,6 +360,7 @@ mod tests {
         assert!((s.render_ms - 200.0).abs() < 1e-6);
         assert!((s.blend_ms - 5.0).abs() < 1e-6);
         assert!((s.encode_write_stall_ms - 7.0).abs() < 1e-6);
+        assert!((s.pipe_write_ms - 9.0).abs() < 1e-6);
         assert!((s.ffmpeg_wall_ms - 400.0).abs() < 1e-6);
         assert_eq!(s.clips, 2);
         assert!((s.boundary_stall_ms_per_photo() - 5.0).abs() < 1e-6);

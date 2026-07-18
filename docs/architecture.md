@@ -101,17 +101,25 @@ sequenceDiagram
     Note over Store: LRU prune to size cap; --no-cache / --clear-cache (LLR-054)
 ```
 
-### Overlapped pipeline (Phase 1b shipped; Phase 3 design-time)
+### Overlapped pipeline (Phases 1b + 3 shipped)
 
-**Implemented today (Phase 1b):** the bounded `ClipPrefetcher` (LLR-060)
-decodes+prescales the next image clip on a background thread and feeds the
-*serial* clip loop in order (errors included → `record_skip`, SR-014); the loop
-itself, mixer, and ffmpeg writes are unchanged and `RANGE_MEMORY_BUDGET`
-batching still bounds render memory. **Still design-time (Phase 3):** the render
-pool/mixer/writer stages below becoming bounded channels with an encoder-writer
-thread owning ffmpeg stdin (LLR-063), channel depths replacing
-`RANGE_MEMORY_BUDGET` (memory guard via SR-036 metrics), and failure semantics
-preserved across that thread boundary (LLR-064 — SR-011, SR-013, SR-015).
+**Implemented (Phase 1b + Phase 3, TC-089/TC-090):** the bounded
+`ClipPrefetcher` (LLR-060) decodes+prescales the next image clip on a
+background thread and feeds the clip loop in order (errors included →
+`record_skip`, SR-014); the render pool stays rayon inside the mixer thread,
+pulling bounded batches; and the `EncoderWriter` thread (LLR-063) owns the
+ffmpeg stdin behind a bounded channel (`writer_channel_depth`: ~2× fade
+frames, byte-capped), so rendering never blocks on pipe writes and vice
+versa. That depth — not the deleted `RANGE_MEMORY_BUDGET` — bounds in-flight
+frame memory (PB-005 guard). Both build paths route through the writer: the
+streaming encoder and the SR-037 `SegmentedEncoderSink` (rolls queue in-order
+with frames). Failure semantics are preserved across the thread boundary
+(LLR-064 — SR-011, SR-013, SR-015): a writer error disconnects the channel
+(senders unblock, no deadlock), the inner sink drops on the thread (encoder
+Drop kills ffmpeg, removes the `.part`), and `EncoderWriter::join` re-raises
+the error in `encode_output` exactly as the serial path did. The mixer-side
+`encode-write-stall` timer now measures channel back-pressure; the raw pipe
+time accrues separately as `pipe-write` on the writer thread (SR-036).
 
 ```mermaid
 sequenceDiagram
@@ -124,7 +132,7 @@ sequenceDiagram
     Note over Pre,Wr: all channels bounded — peak memory capped (LLR-063, SR-036)
     Pre->>Pool: decoded+prescaled clip N+1 (lookahead 1-2)
     Pre-->>Mix: prefetch error, in order -> record_skip (SR-014)
-    Pool->>Mix: ordered rendered frames (bounded channel)
+    Pool->>Mix: ordered rendered frames (bounded batch pull, rayon in mixer thread)
     Mix->>Wr: blended frames (bounded channel, ~2x fade_frames)
     Wr->>FF: write_frame — sole watchdog-activity bump (SR-013)
     FF-->>Wr: disk-full / broken-pipe error (SR-015)
@@ -376,6 +384,7 @@ _Generated 2026-07-18 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn insert(&mut self, rel: String, entry: ProbeEntry)`
 - **src/pipeline/mod.rs** — _Pipeline orchestration: wire media → frame generation → FFmpeg encoding,_
   - uses: `cache`, `config`, `error`, `ffmpeg`, `media`, `roi`, `util`, `video`
+  - `pub trait FrameSink`  <- LLR-056, LLR-063, SR-037
   - `pub struct SkippedInput`  <- LLR-017, SR-014
   - `pub struct WrittenOutput`  <- LLR-023, LLR-024, SR-004
   - `pub struct OutputTimings`  <- LLR-050, LLR-052, SR-036
@@ -385,6 +394,12 @@ _Generated 2026-07-18 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn new(`  <- SR-036
   - `pub fn execute_segmented(`  <- LLR-040, LLR-041, LLR-053, LLR-054, LLR-055, LLR-056, LLR-057, SR-011, SR-013, SR-014, SR-032, SR-037
   - `pub struct SegmentedBuild`  <- LLR-055, LLR-056, SR-037
+- **src/pipeline/overlap.rs** — _Encoder-writer thread (Phase 3 pipeline overlap, plan §5): the mixer emits_
+  - uses: `error`, `ffmpeg`, `util`
+  - `pub fn writer_channel_depth(fade_frames: usize, frame_bytes: usize) -> usize`  <- LLR-063, SR-036
+  - `pub struct EncoderWriter<S: FrameSink + Send + 'static>`  <- LLR-063, LLR-064, SR-011, SR-013, SR-015, SR-036
+  - `pub fn start(sink: S, depth: usize, timings: Arc<StageTimings>) -> Self`  <- SR-036
+  - `pub fn join(mut self) -> Result<S>`  <- LLR-064, SR-011, SR-013, SR-015
 - **src/pipeline/prefetch.rs** — _Background clip prefetch (plan §3 1b): decode+prescale the *next* image_
   - uses: `config`, `error`, `image`
   - `pub struct PrefetchJob`  <- LLR-060, SR-031, SR-036
@@ -470,11 +485,11 @@ _Generated 2026-07-18 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn add_stall(&self, d: Duration)`  <- LLR-060
   - `pub fn add_render(&self, d: Duration)`  <- LLR-060
   - `pub fn add_blend(&self, d: Duration)`
-  - `pub fn add_write(&self, d: Duration)`
-  - `pub fn add_clip(&self)`
+  - `pub fn add_write(&self, d: Duration)`  <- LLR-063
+  - `pub fn add_pipe(&self, d: Duration)`  <- LLR-063
+  - `pub fn add_clip(&self)`  <- LLR-063
   - `pub fn set_ffmpeg_wall(&self, d: Duration)`
   - `pub fn snapshot(&self) -> StageSnapshot`
-  - `pub fn log_summary(&self, output: &str)`  <- LLR-050, SR-036
 - **src/video/mod.rs** — _Video passthrough: decode an input video to raw `rgb24` frames at the target_
   - uses: `error`
   - `pub struct VideoFrameReader`

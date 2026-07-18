@@ -104,11 +104,11 @@ impl SegmentedEncoderSink {
 }
 
 impl FrameSink for SegmentedEncoderSink {
-    fn write(&mut self, frame: &[u8]) -> Result<()> {
+    fn write(&mut self, frame: Vec<u8>) -> Result<()> {
         self.current
             .as_mut()
             .expect("segment encoder open while frames are written")
-            .write_frame(frame)?;
+            .write_frame(&frame)?;
         self.frames += 1;
         Ok(())
     }
