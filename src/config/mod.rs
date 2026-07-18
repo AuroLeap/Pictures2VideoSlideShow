@@ -155,7 +155,7 @@ impl OutputDef {
 }
 
 impl Config {
-    pub fn from_file(path: &PathBuf) -> Result<Self> {
+    pub fn from_file(path: &std::path::Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| SlideshowError::Config(format!("Failed to read config: {}", e)))?;
 
@@ -180,6 +180,19 @@ impl Config {
             return Err(SlideshowError::InvalidConfig(
                 "At least one output definition is required".to_string(),
             ));
+        }
+
+        // Duplicate names would make two definitions write the same
+        // `<name>.mp4`, silently discarding one encode (SR-017: N distinct MP4s).
+        // Implements: SR-017, LLR-003
+        let mut seen = std::collections::HashSet::new();
+        for output in &self.outputs {
+            if !seen.insert(output.name.as_str()) {
+                return Err(SlideshowError::InvalidConfig(format!(
+                    "Duplicate output name '{}': each [[outputs]] block needs a unique name (it becomes <name>.mp4)",
+                    output.name
+                )));
+            }
         }
 
         for output in &self.outputs {
@@ -245,6 +258,37 @@ mod tests {
     fn even_dims_never_zero_sr006() {
         // Odd 1 rounds down to 0 naively; must be clamped up to the even minimum.
         assert_eq!(sample_output(1, 1).even_dims(), (2, 2));
+    }
+
+    // Verifies: SR-017, LLR-003 — two [[outputs]] blocks with the same name are
+    // rejected (they would silently overwrite the same <name>.mp4).
+    #[test]
+    fn validate_rejects_duplicate_output_names_sr017() {
+        let config = Config {
+            input: InputConfig {
+                media_root: PathBuf::from("."),
+                ignore_patterns: vec![],
+                exception_pattern: None,
+                exception_threshold: None,
+                roi_db: None,
+            },
+            output: OutputConfig {
+                base_dir: PathBuf::from("out"),
+            },
+            processing: ProcessingConfig {
+                temp_dir: None,
+                max_workers: None,
+                use_parallelism: true,
+                dry_run: false,
+                verbose: false,
+                ffmpeg_timeout_secs: 120,
+                ffmpeg_path: None,
+                default_focus: None,
+            },
+            outputs: vec![sample_output(640, 480), sample_output(1280, 720)],
+        };
+        let err = config.validate().unwrap_err().to_string();
+        assert!(err.contains("Duplicate output name"), "got: {err}");
     }
 
     // Verifies: SR-003 — the [processing] flags documented with defaults in

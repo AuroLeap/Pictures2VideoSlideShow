@@ -1020,3 +1020,19 @@ Decisions (dial: recorded, reversible):
   remain human-paused as always.
 Verification: python Scripts/check.py PASS (G2 process steps);
 pwsh Scripts/run-tests.ps1 HARNESS PASSED (coverage 82.22% ≥ 80, orphans=0).
+
+### MAINTENANCE — review-fix pass — 2026-07-17
+
+Applied the fix set from [review-2026-07-17.md](review-2026-07-17.md) (C1–C2, H1–H4, M1–M4 doc legs):
+- **C1**: removed redistributed non-commercial-only third-party scripts (`Scripts/autocolor`, `autogamma`, `autotone` — Fred Weinhaus, incompatible with MIT). **C2**: removed `Scripts/ContReportPath` (3.6 MB personal media inventory; history purge still pending — owner decision).
+- **H1**: `build --output <name>` now honored — filter resolved before scan/encode; unknown name fails fast naming available outputs. New LLR-045; TC-063/TC-064.
+- **H2**: ignore patterns match the path relative to media_root (folder exclusion works; media-root path never matches). TC-066.
+- **H3**: bin is a thin shell over the lib crate (no module re-declaration; crate compiled once).
+- **H4**: dropped unused deps (tokio/futures/once_cell/regex/lazy_static); pipeline/scan de-asynced (`execute`, `scan_and_index` now sync — no runtime needed).
+- **M2**: duplicate `[[outputs]].name` rejected by `Config::validate`. TC-065.
+- **M3**: `RUST_LOG` wins over `--verbose` default. **M4**: stale BLOCKER narrative on the passing all-skipped test replaced with regression-test doc.
+- **M1 (doc leg)**: `exception_pattern`/`exception_threshold` documented as inert in the Rust engine (Quick Reference §4 + §5 gap row); implement-or-remove decision deferred.
+- **Hook repair**: `.githooks/pre-commit` no longer runs `gen_arch_map.py --check` (cannot parse the Rust map's trace.ps1 markers — failed unconditionally); `core.hooksPath` enabled locally so `trace.py --strict-integrity` guards every commit again. Stale `src/.gitkeep`/`tests/.gitkeep` removed.
+- Deferred items + reasons: [review-2026-07-17.md §0](review-2026-07-17.md).
+
+Verification (pwsh Scripts/run-tests.ps1): fmt/clippy clean; `cargo test --all` 0 failed; coverage line **81.58%** ≥ 80; trace SR=33 LLR=45 TC=66 **orphans=0**. HARNESS PASSED.

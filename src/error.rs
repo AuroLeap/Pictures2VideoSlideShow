@@ -33,7 +33,6 @@ pub enum SlideshowError {
     InvalidConfig(String),
 
     #[error("Processing error: {0}")]
-    #[allow(dead_code)] // part of the error taxonomy; reserved for future use
     Processing(String),
 
     #[error("Anyhow error: {0}")]

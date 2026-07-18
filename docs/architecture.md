@@ -124,7 +124,6 @@ graph LR
     m_image --> m_config
     m_image --> m_error
     m_image --> m_transform
-    m_main --> m_error
     m_media --> m_config
     m_media --> m_error
     m_pipeline --> m_config
@@ -152,7 +151,7 @@ graph LR
 ## Module map (generated)
 
 <!-- BEGIN GENERATED MODULE MAP (scripts/trace.ps1) -->
-_Generated 2026-07-02 by `scripts/trace.ps1` from the source tree — do not edit by hand. Each file's summary is its first `//!` line; `<- SR/LLR` are the `Implements:` back-links found at the item; `uses:` lists in-tree modules the file references (`crate::`)._
+_Generated 2026-07-17 by `scripts/trace.ps1` from the source tree — do not edit by hand. Each file's summary is its first `//!` line; `<- SR/LLR` are the `Implements:` back-links found at the item; `uses:` lists in-tree modules the file references (`crate::`)._
 
 - **src/config/location.rs** — _Config file location (SR-030): the config lives beside the executable when_
   - `pub fn choose_config_dir(`  <- LLR-035, SR-030
@@ -167,7 +166,7 @@ _Generated 2026-07-02 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn total_frames(&self) -> u32`
   - `pub fn fade_frames(&self) -> u32`
   - `pub fn even_dims(&self) -> (u32, u32)`  <- LLR-010, SR-005, SR-006
-  - `pub fn from_file(path: &PathBuf) -> Result<Self>`
+  - `pub fn from_file(path: &std::path::Path) -> Result<Self>`
   - `pub fn validate(&self) -> Result<()>`
 - **src/error.rs** — _The crate-wide error type: every failure maps to a `SlideshowError`_
   - `pub enum SlideshowError`
@@ -200,7 +199,6 @@ _Generated 2026-07-02 by `scripts/trace.ps1` from the source tree — do not edi
 - **src/logging.rs** — _Logging setup: env_logger with millisecond timestamps; `--verbose`_
   - `pub fn init_logging(verbose: bool) -> std::io::Result<()>`
 - **src/main.rs** — _Binary entry point (`make_video_slideshow`): CLI parsing (build /_
-  - uses: `error`
 - **src/media/mod.rs** — _Media scanning and indexing: walk the input directory in parallel, classify_
   - uses: `config`, `error`
   - `pub struct MediaFile`
@@ -208,6 +206,7 @@ _Generated 2026-07-02 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub struct Album`
   - `pub struct MediaLoader`
   - `pub fn new(config: InputConfig) -> Self`
+  - `pub fn scan_and_index(&self) -> Result<Album>`
 - **src/pipeline/mod.rs** — _Pipeline orchestration: wire media → frame generation → FFmpeg encoding,_
   - uses: `config`, `error`, `ffmpeg`, `image`, `media`, `roi`, `util`, `video`
   - `pub struct SkippedInput`  <- LLR-017, SR-014
@@ -216,6 +215,7 @@ _Generated 2026-07-02 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn oversize_outputs(&self) -> Vec<&WrittenOutput>`  <- LLR-013, SR-009
   - `pub struct FrameGenerationPipeline`
   - `pub fn new(`
+  - `pub fn execute(&self) -> Result<BuildSummary>`  <- LLR-017, LLR-019, LLR-023, LLR-024, SR-004, SR-014
 - **src/pipeline/source.rs** — _A uniform pull-based frame source so images and videos can be driven through_
   - uses: `error`, `image`, `video`
   - `pub trait FrameSource`

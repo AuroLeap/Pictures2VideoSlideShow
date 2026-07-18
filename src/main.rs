@@ -6,27 +6,17 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-mod config;
-mod error;
-mod ffmpeg;
-mod image;
-mod logging;
-mod media;
-mod pipeline;
-mod preflight;
-mod roi;
-mod setup;
-mod transform;
-mod util;
-mod video;
+// The binary is a thin shell over the library crate — modules are compiled
+// once (in the lib) and imported here, never re-declared.
+use slideshow_core::{config, error, media, pipeline, preflight, roi, setup};
 
 use config::Config;
-use logging::init_logging;
+use slideshow_core::logging::init_logging;
+use slideshow_core::util::estimate::human_bytes;
 use std::io::IsTerminal;
-use util::estimate::human_bytes;
 
 #[derive(Parser, Debug)]
-#[command(name = "slideshow")]
+#[command(name = "make_video_slideshow", version)]
 #[command(about = "Convert photos/videos to slideshow for digital frames", long_about = None)]
 struct Args {
     /// Configuration file path (TOML/JSON). When omitted, defaults to the
@@ -80,14 +70,16 @@ enum Commands {
     },
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let args = Args::parse();
 
     // Initialize logging
     init_logging(args.verbose)?;
 
-    log::info!("Slideshow Engine v0.1.0 starting...");
+    log::info!(
+        "Slideshow Engine v{} starting...",
+        env!("CARGO_PKG_VERSION")
+    );
     log::debug!("Arguments: {:?}", args);
 
     let non_interactive = args.non_interactive;
@@ -132,9 +124,13 @@ async fn main() -> Result<()> {
 
     // Execute command
     match args.command {
-        None | Some(Commands::Build { .. }) => {
+        None => {
             log::info!("Starting slideshow generation pipeline...");
-            run_build(&config, non_interactive).await?;
+            run_build(&config, non_interactive, None)?;
+        }
+        Some(Commands::Build { output }) => {
+            log::info!("Starting slideshow generation pipeline...");
+            run_build(&config, non_interactive, output.as_deref())?;
         }
         Some(Commands::Validate) => {
             log::info!("Validating runtime prerequisites...");
@@ -142,11 +138,11 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Stats) => {
             log::info!("Collecting project statistics...");
-            run_stats(&config).await?;
+            run_stats(&config)?;
         }
         Some(Commands::Bench { images }) => {
             log::info!("Running benchmark with {} images...", images);
-            run_bench(&config, images).await?;
+            run_bench(&config, images)?;
         }
     }
 
@@ -184,7 +180,11 @@ fn print_check_results(results: &[preflight::CheckResult]) {
     }
 }
 
-async fn run_build(config: &Config, non_interactive: bool) -> Result<()> {
+/// Run `build`. `only_output` (the `build --output <name>` filter) restricts
+/// the run to the one named output definition; an unknown name is a hard error
+/// listing the available definitions, never a silent full build.
+// Implements: SR-017, LLR-045
+fn run_build(config: &Config, non_interactive: bool, only_output: Option<&str>) -> Result<()> {
     // Resolve FFmpeg (configured path -> PATH -> per-user cache), with the
     // offline/use-existing fallback and a gated auto-fetch. Fails fast with an
     // actionable message in automation rather than blocking.
@@ -204,10 +204,35 @@ async fn run_build(config: &Config, non_interactive: bool) -> Result<()> {
         std::process::exit(1);
     }
 
+    // Resolve the `build --output <name>` filter up front so a typo'd name
+    // fails fast, before any scanning or encoding starts.
+    // Implements: SR-017, LLR-045
+    let outputs: Vec<config::OutputDef> = match only_output {
+        Some(name) => {
+            let selected: Vec<_> = config
+                .outputs
+                .iter()
+                .filter(|o| o.name == name)
+                .cloned()
+                .collect();
+            if selected.is_empty() {
+                let available: Vec<_> = config.outputs.iter().map(|o| o.name.as_str()).collect();
+                return Err(error::SlideshowError::InvalidConfig(format!(
+                    "no output definition named '{}'; available outputs: {}",
+                    name,
+                    available.join(", ")
+                ))
+                .into());
+            }
+            selected
+        }
+        None => config.outputs.clone(),
+    };
+
     // 1. Load media
     log::info!("Loading media files...");
     let media_loader = media::MediaLoader::new(config.input.clone());
-    let album = media_loader.scan_and_index().await?;
+    let album = media_loader.scan_and_index()?;
     log::info!(
         "Found {} media files, total size: {} MB",
         album.media_files.len(),
@@ -233,13 +258,13 @@ async fn run_build(config: &Config, non_interactive: bool) -> Result<()> {
     // 3. Process all output definitions in one pipeline.
     let pipeline = pipeline::FrameGenerationPipeline::new(
         album,
-        config.outputs.clone(),
+        outputs,
         config.processing.clone(),
         config.output.base_dir.clone(),
         config.input.media_root.clone(),
         roi,
     );
-    let summary = pipeline.execute().await?;
+    let summary = pipeline.execute()?;
 
     print_completion_summary(&summary);
 
@@ -284,9 +309,9 @@ fn print_completion_summary(summary: &pipeline::BuildSummary) {
     }
 }
 
-async fn run_stats(config: &Config) -> Result<()> {
+fn run_stats(config: &Config) -> Result<()> {
     let media_loader = media::MediaLoader::new(config.input.clone());
-    let album = media_loader.scan_and_index().await?;
+    let album = media_loader.scan_and_index()?;
 
     println!("\n=== Project Statistics ===");
     println!("Media files: {}", album.media_files.len());
@@ -307,22 +332,20 @@ async fn run_stats(config: &Config) -> Result<()> {
     Ok(())
 }
 
-async fn run_bench(config: &Config, num_images: usize) -> Result<()> {
+fn run_bench(config: &Config, num_images: usize) -> Result<()> {
     let media_loader = media::MediaLoader::new(config.input.clone());
-    let album = media_loader.scan_and_index().await?;
+    let album = media_loader.scan_and_index()?;
 
     let first_image = album
         .media_files
         .iter()
         .find(|m| m.file_type == media::MediaType::Image)
-        .ok_or_else(|| {
-            crate::error::SlideshowError::Media("No images found to benchmark".into())
-        })?;
+        .ok_or_else(|| error::SlideshowError::Media("No images found to benchmark".into()))?;
 
     let output_def = config
         .outputs
         .first()
-        .ok_or_else(|| crate::error::SlideshowError::InvalidConfig("No output defined".into()))?;
+        .ok_or_else(|| error::SlideshowError::InvalidConfig("No output defined".into()))?;
 
     log::info!(
         "Benchmarking frame generation on {} ({} simulated images)...",
@@ -330,7 +353,7 @@ async fn run_bench(config: &Config, num_images: usize) -> Result<()> {
         num_images
     );
 
-    let renderer = image::FrameRenderer::load(&first_image.path, output_def)?;
+    let renderer = slideshow_core::image::FrameRenderer::load(&first_image.path, output_def)?;
     let frames_per_image = renderer.total_frames();
 
     let start = std::time::Instant::now();

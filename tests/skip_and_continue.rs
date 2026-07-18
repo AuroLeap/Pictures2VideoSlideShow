@@ -97,14 +97,9 @@ fn build_skips_bad_and_continues_exit_zero_sr014() {
 /// produced, the run MUST exit non-zero with the plain "no outputs produced"
 /// message and leave no MP4.
 ///
-/// IGNORED — documents a confirmed SR-014 conformance gap (BLOCKER, see
-/// docs/status.md TEST-ENGINEER OBJ3 finding): when every input is skipped the
-/// pipeline still opens an encoder, feeds it 0 frames, and `finish()` succeeds,
-/// producing an empty `<name>.mp4` that is counted in `summary.written`. So the
-/// run exits ZERO (wrong) instead of emitting "no outputs produced" and exiting
-/// non-zero. The fix belongs in `pipeline::encode_output` (treat a 0-frame
-/// encode as not-written / a skip). Unignore once `@software-engineer` lands
-/// the fix; then flip TC-023 all-bad leg to Verified.
+/// Regression test for the historical all-skipped bug (an empty-but-
+/// complete-looking `<name>.mp4` finalized with exit 0); the guard now lives in
+/// `pipeline::encode_output` (`produced_total == 0` aborts without finalizing).
 /// Verifies: SR-014, LLR-017 (TC-023 all-bad leg).
 #[test]
 fn build_all_bad_exits_nonzero_no_outputs_sr014() {

@@ -52,7 +52,7 @@ impl MediaLoader {
 
     /// Scan and index the input tree. The walk is collected first, then files
     /// are probed in parallel with rayon.
-    pub async fn scan_and_index(&self) -> Result<Album> {
+    pub fn scan_and_index(&self) -> Result<Album> {
         log::info!(
             "Starting media scan from: {}",
             self.config.media_root.display()
@@ -97,17 +97,17 @@ impl MediaLoader {
     }
 
     /// A file is ignored if any configured pattern appears (case-insensitively)
-    /// in its file name.
+    /// anywhere in its path **relative to `media_root`** — so a pattern can
+    /// exclude a whole folder (SR-018 `target={file,folder}`), while a pattern
+    /// that happens to occur in the media root's own path never wipes the album.
+    // Implements: SR-018, LLR-021
     fn is_ignored(&self, path: &Path) -> bool {
-        let name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
-            .to_lowercase();
+        let rel = path.strip_prefix(&self.config.media_root).unwrap_or(path);
+        let hay = rel.to_string_lossy().to_lowercase();
         self.config
             .ignore_patterns
             .iter()
-            .any(|pat| !pat.is_empty() && name.contains(&pat.to_lowercase()))
+            .any(|pat| !pat.is_empty() && hay.contains(&pat.to_lowercase()))
     }
 }
 
@@ -219,6 +219,22 @@ mod tests {
         let l = loader(&["DNP"]);
         assert!(l.is_ignored(&PathBuf::from("/a/b/Family_DNP.jpg")));
         assert!(l.is_ignored(&PathBuf::from("/a/b/family_dnp.jpg")));
+    }
+
+    // Verifies: SR-018, LLR-021 — a pattern naming a FOLDER excludes the files
+    // inside it (path match, not just file-name match), while the media root's
+    // own path is never matched against patterns.
+    #[test]
+    fn ignore_pattern_matches_folders_sr018() {
+        let mut l = loader(&["private"]);
+        l.config.media_root = PathBuf::from("/media/root");
+        // File inside an ignored folder is excluded even though its own name
+        // does not contain the pattern.
+        assert!(l.is_ignored(&PathBuf::from("/media/root/Private Album/img1.jpg")));
+        // The pattern occurring only in the media root itself must NOT match.
+        let mut r = loader(&["root"]);
+        r.config.media_root = PathBuf::from("/media/root");
+        assert!(!r.is_ignored(&PathBuf::from("/media/root/holiday/img2.jpg")));
     }
 
     // Verifies: SR-018, LLR-021 — non-matching files are not ignored; empty
