@@ -1,0 +1,47 @@
+name: CI
+
+# Mirrors scripts/run-tests.ps1. Gates rely on this (see docs/process.md).
+on:
+  push:
+    branches: [main, dev, rust-rewrite]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install ffmpeg
+        run: choco install ffmpeg -y
+
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests + coverage report
+        run: cargo llvm-cov --all --lcov --output-path lcov.info --fail-under-lines 80
+
+      - name: Traceability report
+        shell: pwsh
+        run: ./scripts/trace.ps1
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            lcov.info
+            docs/test/report.md

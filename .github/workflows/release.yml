@@ -1,0 +1,65 @@
+name: Release
+
+# Build the prebuilt Windows binary and publish it to GitHub Releases on a tag.
+# Implements: SR-023, LLR-025 (FFmpeg is NOT bundled — fetched at runtime per SR-027).
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build/publish (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write # required to create/upload the GitHub Release
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binary
+        run: cargo build --release --bin make_video_slideshow
+
+      - name: Stage artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/release/make_video_slideshow.exe dist/
+          # Ship the license alongside the binary.
+          if (Test-Path LICENSE) { Copy-Item LICENSE dist/ }
+          # Bundle the one-click demo kit FLAT beside the exe so demo.bat finds it
+          # as a sibling (LLR-043 / SR-033). FFmpeg is still NOT bundled (SR-023).
+          Copy-Item demo/demo.bat        dist/
+          Copy-Item demo/demo_config.toml dist/
+          Copy-Item demo/focus.json      dist/
+          Copy-Item demo/README.md       dist/DEMO.md
+
+      - name: Package demo zip
+        shell: pwsh
+        run: |
+          # A single "download, extract, run demo.bat" archive: exe + demo kit
+          # (+ LICENSE), all flat so the demo runs from the extracted folder.
+          $tag = '${{ github.event.inputs.tag }}'
+          if (-not $tag) { $tag = '${{ github.ref_name }}' }
+          $zip = "make_video_slideshow-$tag.zip"
+          Compress-Archive -Path dist/* -DestinationPath $zip -Force
+          "ZIP=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          # On a tag push the tag is inferred; workflow_dispatch supplies it explicitly.
+          tag_name: ${{ github.event.inputs.tag }}
+          files: |
+            dist/make_video_slideshow.exe
+            dist/LICENSE
+            ${{ env.ZIP }}
+          fail_on_unmatched_files: true
+          generate_release_notes: true

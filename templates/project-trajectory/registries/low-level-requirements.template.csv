@@ -1,0 +1,2 @@
+LLR-ID,SR-Refs,Title,Module,CodeSymbol,Detail,TestRefs,Status
+LLR-000,SR-000,EXAMPLE - delete on first real entry,path/to/module,function_or_type,"Decomposition/implementation detail — NOT a paraphrase of the SR (reference it by id). Name the real (or planned) module + symbol.",(see TC),Planned

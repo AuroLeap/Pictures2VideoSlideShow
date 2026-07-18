@@ -1,0 +1,36 @@
+[input]
+media_root = "TestInput"
+ignore_patterns = ["DNP"]
+# Optional region-of-interest database (JSON) that anchors the Ken Burns zoom
+# per image. Keyed by each image's path relative to media_root; each value is a
+# normalized point {"x":0.5,"y":0.4} or bounding box {"bbox":[x,y,w,h]} (its
+# center is used). Without an entry an image keeps the default smooth pan.
+# roi_db = "focus.json"
+
+[output]
+base_dir = "TestOut/RustOut"
+
+[processing]
+use_parallelism = true
+dry_run = false
+verbose = false
+# Optional default Ken Burns focus [x, y] in normalized [0,1] image coords,
+# applied to images that have no ROI database entry. Omit to keep the default
+# two-point pan. ROI entries take precedence over this.
+# default_focus = [0.5, 0.4]
+
+[[outputs]]
+name = "test-1440x900"
+width = 1440
+height = 900
+fps = 30
+pic_display_time_secs = 6.0
+fade_time_secs = 0.5
+max_rotation_degrees = 15.0
+bulk_video_time_min = 20
+quality_crf = 28
+# Set true to carry source-video audio into the output (images stay silent),
+# synced per clip across the dissolves. AAC; bitrate/sample-rate optional below.
+enable_audio = false
+# audio_bitrate_kbps = 192
+# audio_sample_rate = 48000

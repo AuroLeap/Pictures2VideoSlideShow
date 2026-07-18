@@ -1,0 +1,82 @@
+#!/bin/sh
+# Pre-commit hook — the agent-neutral *process floor*.
+#
+# Runs only the fast, always-valid kit checks so a stale code map, a duplicated
+# or malformed requirement id, or unformatted code never lands in a commit —
+# regardless of which agent (or human) made it. Enforcement lives here (git) and
+# in CI, not in any one agent's hook config, so it holds for Claude, Gemini,
+# Codex, and bare git alike.
+#
+# This is the universal *floor*; the full gate bar (placeholder rejection, schema
+# checks, tests, coverage) is gate-scoped and lives in check.py / CI. Those
+# heavier checks are deliberately NOT here: they would block legitimate
+# early-stage (G0/G1) commits. See process.md §7 (process vs product checks).
+#
+# Enable:  git config core.hooksPath .githooks   (setup.sh / setup.ps1 do this)
+# Disable: git config --unset core.hooksPath
+#
+# One POSIX hook covers every platform: Git for Windows runs hooks through its
+# bundled sh, so this same file works on Windows, Linux, and macOS.
+set -e
+
+# Find a Python 3 interpreter the same way setup.sh does (python3 then python).
+# Probe by *running* the candidate, not just finding it: on Windows, `python3`
+# often resolves to the Microsoft Store app-execution alias, which exists on
+# PATH but exits nonzero when Python isn't installed through it — existence
+# alone would wedge every commit on such machines.
+PY=""
+for cand in python3 python; do
+  if command -v "$cand" >/dev/null 2>&1 && "$cand" -c "" >/dev/null 2>&1; then
+    PY="$cand"; break
+  fi
+done
+if [ -z "$PY" ]; then
+  echo "pre-commit: Python 3 not found on PATH; skipping process checks." >&2
+  exit 0
+fi
+
+# Locate the scripts directory relative to the repo root rather than using a
+# bare "scripts/" cwd-relative string. NTFS is case-preserving: a repo whose
+# existing directory is "Scripts/" keeps that name, and bare "scripts/" fails
+# on case-sensitive Linux CI even though Windows never notices. Resolve from
+# the hook's own location (.githooks/../) and accept either casing.
+REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
+SCRIPTS_DIR=""
+for sd in scripts Scripts; do
+  if [ -d "$REPO_ROOT/$sd" ]; then
+    SCRIPTS_DIR="$REPO_ROOT/$sd"; break
+  fi
+done
+if [ -z "$SCRIPTS_DIR" ]; then
+  echo "pre-commit: cannot find scripts/ dir under $REPO_ROOT; skipping process checks." >&2
+  exit 0
+fi
+
+# 1. Code map must be fresh — protects the GENERATED regions from hand-edits and
+#    catches a map that has drifted from the source.
+#    EDIT FOR A NON-PYTHON STACK: this line drives the *Python* generator. A
+#    PowerShell repo swaps it for the reference port (ship it as
+#    scripts/gen_arch_map.ps1; the kit provides scripts/gen_arch_map.reference.ps1):
+#        pwsh -NoProfile -File scripts/gen_arch_map.ps1 -Check
+#    Any generator that fills the same marker block works — the block is the whole
+#    contract (ADOPTING.md §3). Drop this step only if you also drop the arch-map.
+"$PY" "$SCRIPTS_DIR/gen_arch_map.py" --check
+
+# 2. Traceability *integrity*: no duplicate / malformed ids — wrong at any
+#    stage, so safe to enforce on every commit. Deliberately NOT the full
+#    --strict orphan check: orphans are a G2+ gate criterion (a mid-G1 registry
+#    legitimately holds SRs with no LLR/TC yet), and --no-placeholders is
+#    likewise gate-scoped in check.py. The floor must never block a legitimate
+#    early-stage commit.
+"$PY" "$SCRIPTS_DIR/trace.py" --strict-integrity
+
+# 3. Format check on staged Python files — product tooling, so run it only if
+#    ruff is importable by this interpreter (matching check.py's detection); skip
+#    silently otherwise, so a non-Python or not-yet-set-up repo can still commit.
+if "$PY" -c "import importlib.util as u, sys; sys.exit(0 if u.find_spec('ruff') else 1)" >/dev/null 2>&1; then
+  staged=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep '\.py$' || true)
+  if [ -n "$staged" ]; then
+    # shellcheck disable=SC2086  # word-splitting is intended: one arg per file.
+    "$PY" -m ruff format --check $staged
+  fi
+fi

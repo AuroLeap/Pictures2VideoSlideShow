@@ -1,0 +1,2 @@
+IF-ID,Direction,ThisProject,Counterpart,Contract,SR-Refs,Version,Stability,Status
+IF-000,Provides,EXAMPLE - delete on first real entry,name-of-other-project-or-repo,"The shared contract in one testable line: API endpoint / CLI / file schema / event / library symbol. Link the contract spec by path or URL.",SR-000,v1,Experimental,Draft

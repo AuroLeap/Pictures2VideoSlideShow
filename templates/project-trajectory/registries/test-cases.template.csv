@@ -1,0 +1,2 @@
+TC-ID,Verifies,Level,Method,Tier,Parameters,Expected,Automated,Status
+TC-000,SR-000;LLR-000,Unit,EXAMPLE - delete on first real entry,Smoke,"param=a; other=x","Cite the verified requirement's AcceptanceCriteria by id (do not paraphrase).",No,Draft

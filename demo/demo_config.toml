@@ -1,0 +1,43 @@
+# Demo configuration for make_video_slideshow.exe.
+#
+# Run it via demo.bat (which downloads the sample media first). All paths below
+# are RELATIVE to the folder this file sits in — demo.bat does `cd` to that
+# folder before invoking the exe, so "demo-media", "focus.json", and
+# "demo-output" all resolve next to the exe. This is a complete, valid example
+# config you can copy and adapt for your own media.
+
+[input]
+# Folder of sample photos & videos that demo.bat downloads (Wikimedia Commons,
+# public-domain / CC0 — see README.md for the manifest).
+media_root = "demo-media"
+ignore_patterns = []
+# Region-of-interest focus database: pins the Ken Burns zoom on a chosen point
+# or box per image (keyed by each image's path relative to media_root). See
+# focus.json next to this file.
+roi_db = "focus.json"
+
+[output]
+# One <name>.mp4 is written here per [[outputs]] block below.
+base_dir = "demo-output"
+
+[processing]
+use_parallelism = true
+# Default Ken Burns focus for images that have NO focus.json entry (normalized
+# 0-1; slightly above centre keeps subjects framed). focus.json entries override
+# this per image.
+default_focus = [0.5, 0.4]
+
+[[outputs]]
+name = "demo-1280x800"
+width = 1280
+height = 800
+fps = 30
+pic_display_time_secs = 5.0
+fade_time_secs = 0.5
+max_rotation_degrees = 8.0
+bulk_video_time_min = 20
+quality_crf = 28
+# Carry the source video clips' audio into the slideshow (images stay silent).
+# The sample clouds clips are silent, so the demo output is silent too — flip
+# this on with your own audio-bearing videos to hear it.
+enable_audio = true
