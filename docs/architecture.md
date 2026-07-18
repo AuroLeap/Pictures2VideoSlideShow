@@ -60,13 +60,17 @@ sequenceDiagram
     Main-->>U: per-prereq pass/fail + exit code (SR-002)
 ```
 
-### Warm build with segment cache (SR-037; design-time, OBJ-PERF Phase 2)
+### Warm build with segment cache (SR-037; OBJ-PERF Phase 2 — spike shipped)
 
-Planned flow for the incremental rebuild: the planner partitions the album into
-keyed segments (LLR-053, LLR-055), only misses are rendered, and assembly is a
-stream-copy concat routed through the **existing** watchdog, disk-full mapping,
-and atomic promote (LLR-056 — SR-011, SR-013, SR-015). Audio delays are mapped
-through the concat timeline into the unchanged mux (LLR-057, LLR-040, SR-032).
+**Implemented (Round 5a spike, TC-079 green):** the segmented encode + concat
+assembly surface — `CrossfadeMixer` writes through a `FrameSink` (streaming
+encoder or `SegmentedEncoderSink`), rolling to a fresh MPEG-TS segment at each
+transition midpoint; `concat_segments` assembles by stream-copy through the
+**existing** watchdog, disk-full mapping, and atomic promote (LLR-056 —
+SR-011, SR-013, SR-015). `.ts` is the validated segment container (LLR-054).
+**Still design-time (Round 5b):** the keyed store, hit/miss planner, and
+warm-only re-encode (LLR-053/054/055), and audio delays mapped through the
+concat timeline into the unchanged mux (LLR-057, LLR-040, SR-032).
 
 ```mermaid
 sequenceDiagram
@@ -240,21 +244,27 @@ _Generated 2026-07-18 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub struct AudioParams`
   - `pub fn delay_ms(start_frame: u64, fps: u32) -> u64`  <- LLR-040, SR-032
   - `pub fn mux_audio(`  <- LLR-041, SR-011, SR-032
+- **src/ffmpeg/concat.rs** — _Stream-copy concat assembly of per-clip segments into one MP4 (SR-037):_
+  - uses: `error`, `util`
+  - `pub fn concat_segments(`  <- LLR-056, SR-005, SR-011, SR-013, SR-015, SR-037
 - **src/ffmpeg/encoder_args.rs** — _Pure mapping from an encoder choice to the FFmpeg output-side argument_
   - `pub enum EncoderChoice`  <- LLR-045, LLR-049, SR-034, SR-035
   - `pub fn codec_name(self) -> &'static str`
   - `pub enum EncoderRequest`  <- LLR-047, SR-034
   - `pub fn parse(s: &str) -> Self`  <- LLR-047, SR-034
   - `pub fn encoder_args(choice: EncoderChoice, crf: u32, x264_preset: &str) -> Vec<String>`  <- LLR-045, LLR-049, SR-005, SR-034, SR-035
+  - `pub fn segment_encoder_args(choice: EncoderChoice, crf: u32, x264_preset: &str) -> Vec<String>`  <- LLR-054, LLR-056, SR-005, SR-037
   - `pub struct EncoderSettings`  <- LLR-045, LLR-049, SR-034, SR-035
   - `pub fn software(crf: u32) -> Self`  <- SR-034
   - `pub fn args(&self) -> Vec<String>`
+  - `pub fn segment_args(&self) -> Vec<String>`  <- SR-037
 - **src/ffmpeg/mod.rs** — _FFmpeg coordination: spawn an encoder process and stream raw `rgb24` frames_
   - uses: `error`, `util`
   - `pub struct FfmpegEncoder`
   - `pub fn start(`  <- LLR-008, LLR-015, LLR-045, SR-005, SR-011, SR-013, SR-034, SR-035
+  - `pub fn start_segment(`  <- LLR-056, SR-011, SR-013, SR-037
   - `pub fn write_frame(&mut self, data: &[u8]) -> Result<()>`  <- LLR-008, SR-013
-  - `pub fn finish(self) -> Result<()>`  <- LLR-008, LLR-015, SR-011, SR-013, SR-015
+  - `pub fn finish(self) -> Result<()>`  <- LLR-008, LLR-015, SR-011, SR-013, SR-015, SR-037
   - `pub fn finish_to_part(mut self) -> Result<PathBuf>`  <- LLR-008, LLR-015, LLR-041, SR-011, SR-013
   - `pub fn promote(src: &Path, final_path: &Path) -> Result<()>`  <- LLR-015, LLR-041, SR-011, SR-015
 - **src/ffmpeg/probe.rs** — _Preflight hardware-encoder probe and fallback selection (SR-034): list the_
@@ -306,12 +316,19 @@ _Generated 2026-07-18 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn oversize_outputs(&self) -> Vec<&WrittenOutput>`  <- LLR-013, SR-009
   - `pub struct FrameGenerationPipeline`
   - `pub fn new(`  <- SR-036
+  - `pub fn execute_segmented(`  <- LLR-056, LLR-057, SR-011, SR-013, SR-014, SR-037
+  - `pub struct SegmentedBuild`  <- LLR-056, SR-037
 - **src/pipeline/prefetch.rs** — _Background clip prefetch (plan §3 1b): decode+prescale the *next* image_
   - uses: `config`, `error`, `image`
   - `pub struct PrefetchJob`  <- LLR-060, SR-031, SR-036
   - `pub struct ClipPrefetcher`  <- LLR-060, SR-014, SR-036
   - `pub fn spawn(jobs: Vec<PrefetchJob>, out: OutputDef) -> Self`
   - `pub fn next(&mut self) -> Option<(usize, Result<FrameRenderer>)>`
+- **src/pipeline/segment.rs** — _Segment-rolling frame sink (SR-037 spike foundation): encodes the mixer's_
+  - uses: `error`, `ffmpeg`
+  - `pub struct SegmentedEncoderSink`  <- LLR-056, SR-011, SR-013, SR-037
+  - `pub fn start(`
+  - `pub fn finish_all(mut self) -> Result<(Vec<PathBuf>, Vec<u64>)>`
 - **src/pipeline/source.rs** — _A uniform pull-based frame source so images and videos can be driven through_
   - uses: `error`, `image`, `util`, `video`
   - `pub trait FrameSource`

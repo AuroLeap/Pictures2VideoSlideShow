@@ -77,6 +77,43 @@ impl EncoderRequest {
 ///   `-f mp4`, `-an` appear for every choice.
 // Implements: LLR-045, LLR-049, SR-034, SR-035
 pub fn encoder_args(choice: EncoderChoice, crf: u32, x264_preset: &str) -> Vec<String> {
+    let mut args = quality_args(choice, crf, x264_preset);
+    args.extend([
+        "-pix_fmt".into(),
+        "yuv420p".into(),
+        "-movflags".into(),
+        "+faststart".into(),
+        "-f".into(),
+        "mp4".into(),
+    ]);
+    args
+}
+
+/// Output-side args for an intermediate per-clip segment (SR-037): identical
+/// codec/quality/`yuv420p` stream as [`encoder_args`] — so a concat of
+/// segments still carries the SR-005 stream profile — but muxed as MPEG-TS
+/// (self-contained timestamps, concat-friendly; the LLR-054 segment
+/// container). `+faststart` is an MP4 muxer flag and is applied at final
+/// concat assembly instead ([`crate::ffmpeg::concat::concat_segments`]).
+// Implements: LLR-056, SR-037, SR-005
+// lib-API: SR-037 segmented path (tests/concat_seam.rs; bin wiring 5b).
+#[allow(dead_code)]
+pub fn segment_encoder_args(choice: EncoderChoice, crf: u32, x264_preset: &str) -> Vec<String> {
+    let mut args = quality_args(choice, crf, x264_preset);
+    args.extend([
+        "-pix_fmt".into(),
+        "yuv420p".into(),
+        "-f".into(),
+        "mpegts".into(),
+    ]);
+    args
+}
+
+/// The container-independent `-an -c:v <codec>` + per-encoder quality block
+/// shared by [`encoder_args`] (final MP4) and [`segment_encoder_args`]
+/// (MPEG-TS segments) so the SR-034 quality mapping lives once.
+// Implements: LLR-045, SR-034
+fn quality_args(choice: EncoderChoice, crf: u32, x264_preset: &str) -> Vec<String> {
     let mut args: Vec<String> = vec!["-an".into(), "-c:v".into(), choice.codec_name().into()];
     match choice {
         EncoderChoice::Software => {
@@ -90,14 +127,6 @@ pub fn encoder_args(choice: EncoderChoice, crf: u32, x264_preset: &str) -> Vec<S
             args.extend(["-global_quality".into(), crf.to_string()]);
         }
     }
-    args.extend([
-        "-pix_fmt".into(),
-        "yuv420p".into(),
-        "-movflags".into(),
-        "+faststart".into(),
-        "-f".into(),
-        "mp4".into(),
-    ]);
     args
 }
 
@@ -130,6 +159,12 @@ impl EncoderSettings {
     /// The [`encoder_args`] block for these settings.
     pub fn args(&self) -> Vec<String> {
         encoder_args(self.choice, self.crf, &self.x264_preset)
+    }
+
+    /// The [`segment_encoder_args`] block for these settings (SR-037 segments).
+    #[allow(dead_code)] // lib-API: SR-037 segmented path (bin wiring 5b)
+    pub fn segment_args(&self) -> Vec<String> {
+        segment_encoder_args(self.choice, self.crf, &self.x264_preset)
     }
 }
 
@@ -209,6 +244,28 @@ mod tests {
             assert!(
                 has_pair(&a, "-c:v", choice.codec_name()),
                 "{choice:?}: {a:?}"
+            );
+        }
+    }
+
+    // Verifies: SR-037, SR-005, LLR-056 (TC-079) — segment args share the
+    // exact quality block with the final-output args (same stream for every
+    // encoder choice) but pin the MPEG-TS container with no MP4-only flags.
+    #[test]
+    fn segment_args_share_quality_block_and_pin_mpegts_sr037() {
+        for choice in ALL {
+            let seg = segment_encoder_args(choice, 28, "medium");
+            let full = encoder_args(choice, 28, "medium");
+            // Identical prefix up to the container tail: one quality fact.
+            let q = quality_args(choice, 28, "medium");
+            assert!(seg.starts_with(&q), "{choice:?}: {seg:?}");
+            assert!(full.starts_with(&q), "{choice:?}: {full:?}");
+            // MPEG-TS container, yuv420p kept, no MP4-only faststart flag.
+            assert!(has_pair(&seg, "-f", "mpegts"), "{choice:?}: {seg:?}");
+            assert!(has_pair(&seg, "-pix_fmt", "yuv420p"), "{choice:?}: {seg:?}");
+            assert!(
+                !seg.contains(&"-movflags".to_string()),
+                "faststart is applied at concat assembly, not per segment: {seg:?}"
             );
         }
     }

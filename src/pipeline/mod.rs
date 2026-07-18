@@ -7,6 +7,7 @@
 //! bounded regardless of clip length or count — whole videos are never loaded.
 
 mod prefetch;
+mod segment;
 mod source;
 
 use crate::config::{OutputDef, ProcessingConfig};
@@ -23,12 +24,34 @@ use crate::util::estimate::{
 use crate::util::timing::{StageSnapshot, StageTimings};
 use crate::video::VideoFrameReader;
 use prefetch::{ClipPrefetcher, PrefetchJob};
+use segment::SegmentedEncoderSink;
 use source::{FrameSource, ImageFrameSource, VideoFrameSource};
 use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
+
+/// Where the mixer's output frames go: today's single streaming encoder, or
+/// the segment-rolling sink of the SR-037 segmented build. `roll` is invoked
+/// at each transition midpoint (a segment boundary); single-file sinks ignore
+/// it, which keeps the streaming path byte-identical.
+// Implements: LLR-056, SR-037
+trait FrameSink {
+    /// Write one raw `rgb24` output frame.
+    fn write(&mut self, frame: &[u8]) -> Result<()>;
+    /// Transition-midpoint marker (plan §4 segment boundary). Default: no-op.
+    fn roll(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
+/// The streaming single-encoder sink: every frame goes to one FFmpeg process.
+impl FrameSink for FfmpegEncoder {
+    fn write(&mut self, frame: &[u8]) -> Result<()> {
+        self.write_frame(frame)
+    }
+}
 
 /// Soft cap on in-flight frame bytes for image render batches.
 const RANGE_MEMORY_BUDGET: usize = 64 * 1024 * 1024;
@@ -268,106 +291,8 @@ impl FrameGenerationPipeline {
 
         let total = media.len();
         let start = Instant::now();
-        // Source frames contributed across all clips for this output; if zero
-        // (every input skipped/unusable) we must NOT finalize an empty file.
-        // Implements: LLR-017, SR-014
-        let mut produced_total: u64 = 0;
-
-        // Audio-bearing video clips and their output start frames, for the
-        // optional audio passthrough mux after the silent video is built.
-        // Implements: SR-032, LLR-040
-        let mut audio_clips: Vec<AudioClip> = Vec::new();
-
-        // Background prefetch of every image clip, in media order, with the
-        // Ken Burns focus resolved here (main thread, ROI db) so the worker
-        // only decodes+prescales. The loop below joins each result at its item,
-        // timing the blocking wait as the PB-002 boundary stall.
-        // Implements: LLR-060, SR-014, SR-036
-        let jobs: Vec<PrefetchJob> = media
-            .iter()
-            .enumerate()
-            .filter(|(_, m)| m.file_type == MediaType::Image)
-            .map(|(index, m)| PrefetchJob {
-                index,
-                path: m.path.clone(),
-                focus: self.focus_for(&m.path),
-            })
-            .collect();
-        let mut prefetcher = ClipPrefetcher::spawn(jobs, output_def.clone());
-
-        for (idx, item) in media.iter().enumerate() {
-            let name = item
-                .path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-
-            let mut src: Box<dyn FrameSource> = match item.file_type {
-                MediaType::Image => {
-                    // Join the prefetched load for THIS item: the worker feeds
-                    // results in media order, so the received index always
-                    // matches. Only the blocking wait is boundary dead time
-                    // (PB-002); decode/prescale accrue their raw overlapped
-                    // time below. Implements: LLR-060, LLR-050, SR-036
-                    let wait = Instant::now();
-                    let (job_idx, result) = prefetcher
-                        .next()
-                        .expect("prefetcher yields one result per image item");
-                    stage_timings.add_stall(wait.elapsed());
-                    debug_assert_eq!(job_idx, idx, "prefetch results must arrive in media order");
-                    match result {
-                        Ok(r) => {
-                            let lt = r.load_timings();
-                            stage_timings.add_decode(lt.decode);
-                            stage_timings.add_prescale(lt.prescale);
-                            stage_timings.add_clip();
-                            Box::new(ImageFrameSource::new(r, batch, Arc::clone(&stage_timings)))
-                        }
-                        // A failed prefetch surfaces here, at its own item, and
-                        // routes through the same skip path as a serial load
-                        // failure. Implements: LLR-060, LLR-016, LLR-017, SR-014
-                        Err(e) => {
-                            log::warn!("Skipping image {}: {}", item.path.display(), e);
-                            self.record_skip(&item.path, e.to_string());
-                            continue;
-                        }
-                    }
-                }
-                MediaType::Video => {
-                    match VideoFrameReader::open(&item.path, width, height, output_def.fps) {
-                        Ok(rd) => Box::new(VideoFrameSource::new(rd)),
-                        Err(e) => {
-                            log::warn!("Skipping video {}: {}", item.path.display(), e);
-                            self.record_skip(&item.path, e.to_string());
-                            continue;
-                        }
-                    }
-                }
-            };
-
-            // Capture this clip's output start frame BEFORE mixing it in; for an
-            // audio-bearing video that frame is the clip's audio delay (LLR-040).
-            let start_frame = mixer.emitted();
-            let clip_frames = mixer.add_clip(src.as_mut())?;
-            if output_def.enable_audio && item.file_type == MediaType::Video && item.has_audio {
-                audio_clips.push(AudioClip {
-                    source: item.path.clone(),
-                    start_frame,
-                });
-            }
-            produced_total += clip_frames;
-            log::info!(
-                "  [{}/{}] {} {} ({} frames)",
-                idx + 1,
-                total,
-                match item.file_type {
-                    MediaType::Image => "[img]",
-                    MediaType::Video => "[vid]",
-                },
-                name,
-                clip_frames,
-            );
-        }
+        let (produced_total, audio_clips) =
+            self.drive_clips(output_def, media, &mut mixer, batch, &stage_timings)?;
 
         // All inputs were skipped/unusable for this output: abort without
         // finalizing so no complete-looking (empty) `<name>.mp4` is produced.
@@ -382,8 +307,9 @@ impl FrameGenerationPipeline {
             return Ok(None);
         }
 
-        let (emitted, part) = mixer.finish()?;
-        // finish() waits for ffmpeg to exit, so this is the encoder's wall time.
+        let (emitted, encoder) = mixer.finish()?;
+        let part = encoder.finish_to_part()?;
+        // finish_to_part waits for ffmpeg to exit: the encoder's wall time.
         // Implements: LLR-050, SR-036
         stage_timings.set_ffmpeg_wall(enc_start.elapsed());
 
@@ -443,13 +369,259 @@ impl FrameGenerationPipeline {
             size_bytes,
         }))
     }
+
+    /// Drive every media item of one output through `mixer`: prefetch image
+    /// clips in the background (LLR-060), join each at its own item, skip and
+    /// record failures (SR-014), and capture audio-bearing clips' output start
+    /// frames (LLR-040). Returns `(source frames produced, audio clips)` —
+    /// zero produced means every input was skipped and nothing may finalize.
+    /// Shared verbatim by the streaming and segmented encode paths so the two
+    /// builds emit an identical frame sequence (SR-022 determinism).
+    // Implements: LLR-017, LLR-060, LLR-040, SR-014, SR-032, SR-036
+    fn drive_clips<S: FrameSink>(
+        &self,
+        output_def: &OutputDef,
+        media: &[&MediaFile],
+        mixer: &mut CrossfadeMixer<S>,
+        batch: u32,
+        stage_timings: &Arc<StageTimings>,
+    ) -> Result<(u64, Vec<AudioClip>)> {
+        let (width, height) = output_def.even_dims();
+        let total = media.len();
+        // Source frames contributed across all clips for this output; if zero
+        // (every input skipped/unusable) we must NOT finalize an empty file.
+        // Implements: LLR-017, SR-014
+        let mut produced_total: u64 = 0;
+
+        // Audio-bearing video clips and their output start frames, for the
+        // optional audio passthrough mux after the silent video is built.
+        // Implements: SR-032, LLR-040
+        let mut audio_clips: Vec<AudioClip> = Vec::new();
+
+        // Background prefetch of every image clip, in media order, with the
+        // Ken Burns focus resolved here (main thread, ROI db) so the worker
+        // only decodes+prescales. The loop below joins each result at its item,
+        // timing the blocking wait as the PB-002 boundary stall.
+        // Implements: LLR-060, SR-014, SR-036
+        let jobs: Vec<PrefetchJob> = media
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.file_type == MediaType::Image)
+            .map(|(index, m)| PrefetchJob {
+                index,
+                path: m.path.clone(),
+                focus: self.focus_for(&m.path),
+            })
+            .collect();
+        let mut prefetcher = ClipPrefetcher::spawn(jobs, output_def.clone());
+
+        for (idx, item) in media.iter().enumerate() {
+            let name = item
+                .path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+
+            let mut src: Box<dyn FrameSource> = match item.file_type {
+                MediaType::Image => {
+                    // Join the prefetched load for THIS item: the worker feeds
+                    // results in media order, so the received index always
+                    // matches. Only the blocking wait is boundary dead time
+                    // (PB-002); decode/prescale accrue their raw overlapped
+                    // time below. Implements: LLR-060, LLR-050, SR-036
+                    let wait = Instant::now();
+                    let (job_idx, result) = prefetcher
+                        .next()
+                        .expect("prefetcher yields one result per image item");
+                    stage_timings.add_stall(wait.elapsed());
+                    debug_assert_eq!(job_idx, idx, "prefetch results must arrive in media order");
+                    match result {
+                        Ok(r) => {
+                            let lt = r.load_timings();
+                            stage_timings.add_decode(lt.decode);
+                            stage_timings.add_prescale(lt.prescale);
+                            stage_timings.add_clip();
+                            Box::new(ImageFrameSource::new(r, batch, Arc::clone(stage_timings)))
+                        }
+                        // A failed prefetch surfaces here, at its own item, and
+                        // routes through the same skip path as a serial load
+                        // failure. Implements: LLR-060, LLR-016, LLR-017, SR-014
+                        Err(e) => {
+                            log::warn!("Skipping image {}: {}", item.path.display(), e);
+                            self.record_skip(&item.path, e.to_string());
+                            continue;
+                        }
+                    }
+                }
+                MediaType::Video => {
+                    match VideoFrameReader::open(&item.path, width, height, output_def.fps) {
+                        Ok(rd) => Box::new(VideoFrameSource::new(rd)),
+                        Err(e) => {
+                            log::warn!("Skipping video {}: {}", item.path.display(), e);
+                            self.record_skip(&item.path, e.to_string());
+                            continue;
+                        }
+                    }
+                }
+            };
+
+            // Capture this clip's output start frame BEFORE mixing it in; for an
+            // audio-bearing video that frame is the clip's audio delay (LLR-040).
+            let start_frame = mixer.emitted();
+            let clip_frames = mixer.add_clip(src.as_mut())?;
+            if output_def.enable_audio && item.file_type == MediaType::Video && item.has_audio {
+                audio_clips.push(AudioClip {
+                    source: item.path.clone(),
+                    start_frame,
+                });
+            }
+            produced_total += clip_frames;
+            log::info!(
+                "  [{}/{}] {} {} ({} frames)",
+                idx + 1,
+                total,
+                match item.file_type {
+                    MediaType::Image => "[img]",
+                    MediaType::Video => "[vid]",
+                },
+                name,
+                clip_frames,
+            );
+        }
+
+        Ok((produced_total, audio_clips))
+    }
+
+    /// Build one output as independently-encoded per-clip MPEG-TS segments
+    /// (split at transition midpoints) assembled by stream-copy concat — the
+    /// SR-037 spike path and the Phase-2 foundation. The frame sequence is
+    /// identical to [`Self::execute`]'s streaming build (shared
+    /// [`Self::drive_clips`]); only the encode is segmented. The final
+    /// `<name>.mp4` appears atomically via the shared promote (SR-011).
+    ///
+    /// Not yet wired to the segment cache: every segment is encoded (a "cold"
+    /// segmented build). Audio passthrough is not mapped through the concat
+    /// timeline yet (LLR-057, Round 5b) — audio-bearing clips are logged and
+    /// the output stays silent. Returns `None` when there is no media or every
+    /// input was skipped (same contract as the streaming path, SR-014).
+    // Implements: LLR-056, SR-037, SR-011, SR-013
+    // lib-API: SR-037 segmented path (tests/concat_seam.rs; bin wiring 5b).
+    #[allow(dead_code)]
+    pub fn execute_segmented(
+        &self,
+        output_def: &OutputDef,
+        segment_dir: &Path,
+    ) -> Result<Option<SegmentedBuild>> {
+        ensure_dir_exists(&self.output_dir)?;
+        ensure_dir_exists(segment_dir)?;
+        let media: Vec<_> = self.album.media_files.iter().collect();
+        if media.is_empty() {
+            log::warn!("No media to process for output '{}'", output_def.name);
+            return Ok(None);
+        }
+
+        let (width, height) = output_def.even_dims();
+        let out_path = self.output_dir.join(format!("{}.mp4", output_def.name));
+        // Same encoder resolution as the streaming path (SR-034 fallback).
+        let selection = crate::ffmpeg::probe::selection_for(
+            self.processing.ffmpeg_path.as_deref(),
+            &output_def.encoder,
+        );
+        if let Some(reason) = &selection.fallback_reason {
+            log::warn!("Output '{}': {}", output_def.name, reason);
+        }
+        log::info!(
+            "Encoding '{}' (segmented) -> {} ({}x{} @ {}fps, crf {}, encoder {})",
+            output_def.name,
+            out_path.display(),
+            width,
+            height,
+            output_def.fps,
+            output_def.quality_crf,
+            selection.describe(),
+        );
+
+        let frame_bytes = (width * height * 3) as usize;
+        let batch = (RANGE_MEMORY_BUDGET / frame_bytes.max(1)).max(1) as u32;
+        let stage_timings = Arc::new(StageTimings::new());
+
+        let sink = SegmentedEncoderSink::start(
+            segment_dir,
+            &output_def.name,
+            width,
+            height,
+            output_def.fps,
+            EncoderSettings {
+                choice: selection.encoder,
+                crf: output_def.quality_crf,
+                x264_preset: output_def.x264_preset.clone(),
+            },
+            self.processing.ffmpeg_timeout_secs,
+        )?;
+        let mut mixer = CrossfadeMixer::new(
+            sink,
+            output_def.fade_frames() as usize,
+            Arc::clone(&stage_timings),
+        );
+
+        let (produced_total, audio_clips) =
+            self.drive_clips(output_def, &media, &mut mixer, batch, &stage_timings)?;
+        if produced_total == 0 {
+            log::warn!(
+                "No frames produced for '{}' (every input skipped/unusable); no output written",
+                output_def.name
+            );
+            drop(mixer);
+            return Ok(None);
+        }
+
+        let (emitted, sink) = mixer.finish()?;
+        let (segments, boundaries) = sink.finish_all()?;
+        if output_def.enable_audio && !audio_clips.is_empty() {
+            // LLR-057 (Round 5b) maps audio delays through the concat
+            // timeline; until then the segmented path is video-only.
+            log::warn!(
+                "Output '{}': segmented build does not mux audio yet; output is silent",
+                output_def.name
+            );
+        }
+
+        let part = crate::ffmpeg::concat::concat_segments(
+            &segments,
+            &out_path,
+            self.processing.ffmpeg_timeout_secs,
+        )?;
+        crate::ffmpeg::promote(&part, &out_path)?;
+
+        Ok(Some(SegmentedBuild {
+            output: out_path,
+            segments,
+            boundaries,
+            frames: emitted,
+        }))
+    }
 }
 
-/// Streams clips into the encoder, dissolving the tail of each clip into the
-/// head of the next over `n` frames. The first clip fades in from black and the
-/// last fades out to black.
-struct CrossfadeMixer {
-    encoder: FfmpegEncoder,
+/// What a segmented build produced: the promoted output, the ordered segment
+/// files it was assembled from, the output frame index where each segment
+/// after the first begins (the transition midpoints), and the total frames.
+// Implements: LLR-056, SR-037
+// lib-API: SR-037 segmented path (tests/concat_seam.rs; bin wiring 5b).
+#[allow(dead_code)]
+#[derive(Debug)]
+pub struct SegmentedBuild {
+    pub output: PathBuf,
+    pub segments: Vec<PathBuf>,
+    pub boundaries: Vec<u64>,
+    pub frames: u64,
+}
+
+/// Streams clips into a [`FrameSink`], dissolving the tail of each clip into
+/// the head of the next over `n` frames. The first clip fades in from black
+/// and the last fades out to black. At each transition midpoint the sink's
+/// `roll` is signalled — the plan §4 segment boundary (no-op when streaming).
+struct CrossfadeMixer<S: FrameSink> {
+    sink: S,
     n: usize,
     /// The held tail (last <= n frames) of the previously emitted clip, awaiting
     /// the next clip to dissolve into. Empty before the first clip.
@@ -459,10 +631,10 @@ struct CrossfadeMixer {
     timings: Arc<StageTimings>,
 }
 
-impl CrossfadeMixer {
-    fn new(encoder: FfmpegEncoder, n: usize, timings: Arc<StageTimings>) -> Self {
+impl<S: FrameSink> CrossfadeMixer<S> {
+    fn new(sink: S, n: usize, timings: Arc<StageTimings>) -> Self {
         Self {
-            encoder,
+            sink,
             n,
             prev_tail: Vec::new(),
             emitted: 0,
@@ -523,6 +695,13 @@ impl CrossfadeMixer {
             // are ordinary body, consumed by value with no clone (LLR-062).
             for (k, f) in head.into_iter().enumerate() {
                 if k < m {
+                    // Transition midpoint: the frame at floor(m/2) opens the
+                    // next segment ("second half of the incoming transition"
+                    // belongs to the new clip's segment, plan §4). No-op for
+                    // the streaming sink. Implements: LLR-056, SR-037
+                    if k == m / 2 {
+                        self.sink.roll()?;
+                    }
                     let t = (k + 1) as f32 / (m + 1) as f32;
                     let frame = self.timed_blend(&prev[k], &f, t);
                     self.emit(frame)?;
@@ -556,11 +735,12 @@ impl CrossfadeMixer {
         self.emitted
     }
 
-    /// Fade out the final clip's tail to black, flush the encoder to its
-    /// validated `.part`, and return `(emitted_frames, part_path)`. The pipeline
-    /// finalizes — promoting the silent part directly, or muxing audio first.
+    /// Fade out the final clip's tail to black and hand back
+    /// `(emitted_frames, sink)`. The caller finalizes the sink — flushing the
+    /// streaming encoder to its `.part` (then promoting or muxing audio), or
+    /// closing the last segment and concat-assembling.
     // Implements: LLR-041, SR-011
-    fn finish(mut self) -> Result<(u64, PathBuf)> {
+    fn finish(mut self) -> Result<(u64, S)> {
         let prev = std::mem::take(&mut self.prev_tail);
         let len = prev.len();
         for (k, f) in prev.iter().enumerate() {
@@ -568,16 +748,14 @@ impl CrossfadeMixer {
             let frame = self.timed_scale(f, t);
             self.emit(frame)?;
         }
-        let emitted = self.emitted;
-        let part = self.encoder.finish_to_part()?;
-        Ok((emitted, part))
+        Ok((self.emitted, self.sink))
     }
 
     fn emit(&mut self, frame: Vec<u8>) -> Result<()> {
-        // Time the stdin write: when ffmpeg's input buffer is full this is the
+        // Time the sink write: when ffmpeg's input buffer is full this is the
         // encoder-write stall the pipeline blocks on (LLR-050, SR-036).
         let s = Instant::now();
-        self.encoder.write_frame(&frame)?;
+        self.sink.write(&frame)?;
         self.timings.add_write(s.elapsed());
         self.emitted += 1;
         Ok(())

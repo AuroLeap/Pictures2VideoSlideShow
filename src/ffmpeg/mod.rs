@@ -7,6 +7,7 @@
 //! so a killed run never leaves a complete-looking final file.
 
 pub mod audio;
+pub mod concat;
 pub mod encoder_args;
 pub mod probe;
 pub mod resolve;
@@ -93,6 +94,39 @@ impl FfmpegEncoder {
         enc: &encoder_args::EncoderSettings,
         timeout_secs: u64,
     ) -> Result<Self> {
+        Self::spawn_encoder(output, width, height, fps, enc.args(), timeout_secs)
+    }
+
+    /// Like [`start`], but encodes to an intermediate MPEG-TS **segment**
+    /// (SR-037): same rawvideo stdin, watchdog, `.part` temp, and atomic
+    /// [`finish`] promotion, with the output-side args from
+    /// [`encoder_args::segment_encoder_args`] (self-contained timestamps for
+    /// stream-copy concat; `+faststart` is applied at final assembly by
+    /// [`concat::concat_segments`]).
+    // Implements: LLR-056, SR-037, SR-011, SR-013
+    // lib-API: SR-037 segmented path (tests/concat_seam.rs; bin wiring 5b).
+    #[allow(dead_code)]
+    pub fn start_segment(
+        output: &Path,
+        width: u32,
+        height: u32,
+        fps: u32,
+        enc: &encoder_args::EncoderSettings,
+        timeout_secs: u64,
+    ) -> Result<Self> {
+        Self::spawn_encoder(output, width, height, fps, enc.segment_args(), timeout_secs)
+    }
+
+    /// Shared spawn path for [`start`]/[`start_segment`]: rawvideo-in from
+    /// stdin, `out_args` verbatim as the output-side block, watchdog armed.
+    fn spawn_encoder(
+        output: &Path,
+        width: u32,
+        height: u32,
+        fps: u32,
+        out_args: Vec<String>,
+        timeout_secs: u64,
+    ) -> Result<Self> {
         let final_path = output.to_path_buf();
         let temp_path = part_path(output);
         let output_name = output
@@ -119,9 +153,9 @@ impl FfmpegEncoder {
             .arg("-i")
             .arg("pipe:0")
             // Output encoding: the pure per-encoder arg block (`-an` through
-            // `-f mp4`; the temp `.part` extension can't infer a muxer, so the
-            // container is pinned there). Implements: LLR-045, SR-034, SR-035
-            .args(enc.args())
+            // `-f <container>`; the temp `.part` extension can't infer a muxer,
+            // so the container is pinned there). Implements: LLR-045, SR-034
+            .args(out_args)
             .arg(&temp_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
@@ -175,9 +209,10 @@ impl FfmpegEncoder {
     /// stalled ffmpeg, this returns a timeout error naming the output so the
     /// killed run never reports success.
     // Implements: LLR-015, LLR-008, SR-011, SR-013, SR-015
-    // Direct silent finalize: used by the lib/integration tests; the binary now
-    // finalizes via finish_to_part + promote/mux so audio can be muxed first.
-    #[allow(dead_code)]
+    // Direct silent finalize: used for SR-037 segments (each `.ts` appears
+    // atomically) and by the lib/integration tests; the binary finalizes final
+    // outputs via finish_to_part + promote/mux so audio can be muxed first.
+    #[allow(dead_code)] // lib-API: segment finalize + integration tests
     pub fn finish(self) -> Result<()> {
         let final_path = self.final_path.clone();
         let part = self.finish_to_part()?;
