@@ -15,9 +15,12 @@ AlbumOut*
 __pycache__/
 *.pyc
 
-# Kit-generated composite artifacts (gitignored per ADOPTING.md §1)
+# Kit-generated composite artifacts (gitignored per ADOPTING.md §1).
+# perf-baseline.json is deliberately NOT listed: it is the committed golden
+# (process.md §9 — moving a number means committing the new baseline in the
+# same PR). perf-metrics.json / perf-report.md stay ignored (regenerated
+# composites).
 docs/test/report.html
 docs/test/stub-report.md
 docs/test/perf-report.md
 docs/test/perf-metrics.json
-docs/test/perf-baseline.json

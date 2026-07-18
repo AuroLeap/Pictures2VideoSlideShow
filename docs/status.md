@@ -9,9 +9,9 @@ Back to [docs index](README.md) · [README](../README.md).
 ## Current state
 
 - **Active objective:** **OBJ-PERF — engine performance, phases 0–3 of [planning/RUST_PERFORMANCE_PLAN.md](../planning/RUST_PERFORMANCE_PLAN.md)** (measurement → encoder/CPU quick wins → incremental segment cache → pipeline overlap). Prior scope: ✅ PROJECT COMPLETE, FINAL acceptance APPROVED 2026-06-04; this is post-acceptance maintenance work on branch `Optomizations`.
-- **Round:** OBJ-PERF round 1
+- **Round:** OBJ-PERF round 3 closed / round 4 (Phase 1) next
 - **Mode:** **autonomous** (set by Peter 2026-07-17 for OBJ-PERF: decide-and-record per the process.md §6 dial; gates/harness discipline unchanged; decisions logged below instead of pausing)
-- **Latest measurements (2026-07-01, kit re-sync + `Scripts/run-tests.ps1` + `python Scripts/check.py`):** `cargo fmt --check` clean; `cargo clippy -D warnings` clean; `cargo test --all` 113 tests 0 failed; `cargo llvm-cov` line **82.22%** (≥80%); `Scripts/trace.ps1 -Strict` SR=33 LLR=44 TC=62 **orphans=0**; `python Scripts/check.py` (G2): traceability + doc-navigability + design-flows all PASS.
+- **Latest measurements (2026-07-17, OBJ-PERF round 3 verify, `Scripts/run-tests.ps1` + witnessed `Scripts/bench.ps1`):** `cargo fmt --check` clean; `cargo clippy -D warnings` clean; `cargo test --all` 122 passed 0 failed 1 ignored; `cargo llvm-cov` line **82.25%** (≥80%); `trace.py --strict --no-placeholders` SR=38 LLR=64 TC=90 **orphans=0**; committed perf baseline (RTX 3080/5900X host, libx264): **PB-001 69.4 frames/s**, PB-002 278.0 ms/photo, PB-003 43.1 s/1k, PB-005 410.5 MB; `check_perf --tier release` 0 fail / 2 warn / 1 skip, exit 0.
 - **Active gate:** G2. G3 requires all Verification=Test SRs to be Status=Verified; SR-013, SR-024, SR-027 remain Implemented/Draft because their Tier=Release TCs require Peter's hardware/interactive/network. Pre-existing; see Constraints.
 - **Kit version:** `9670982 2026-07-01` (ai-template branch MultiRepoSupport; stamped in `docs/kit-version`).
 - **Still open for the human:** SR-023 release publish on a `v*` tag; SR-013/SR-024/SR-027 Tier=Release TCs for G3 advancement; real-ENOSPC (SR-015) demonstration.
@@ -1110,3 +1110,27 @@ Findings:
 - [MAJOR] PB baseline → record the golden: run `python Scripts/check_perf.py --update-baseline` against a fresh bench (or copy the table above) and commit `docs/test/perf-baseline.json`... note it is currently gitignored by the kit stanza — un-ignoring the committed golden (process.md §9 baseline-as-golden) is your call to make consistently → @test-engineer
 - [MINOR] PB-002 (242 ms/photo vs provisional 100) and PB-003 (46.5 vs provisional 2) budgets were provisional pending this baseline → true them up (or keep as targets for Phases 1b/SR-038) so warn-noise is deliberate, not ambient → @test-engineer
 - [NOTE] Baseline reading for phase ordering (plan §9): render (42.3%) is the largest measured stage at 1080p software-encode; encode-write stall (16.5%) suggests Phase 1a/3 overlap value; boundary stall 242 ms/photo × N photos is the Phase 1b win; PB-001 already beats the provisional 60 fps budget on this host.
+
+### TEST-ENGINEER — OBJ-PERF — Round 3 (Phase 0 verify) — 2026-07-17
+Verdict: APPROVE
+Independent verification (all output pasted from real runs on this host, Ryzen 9 5900X / RTX 3080 / 64 GB / NVMe, ffmpeg 7.1 gyan):
+- `pwsh Scripts/run-tests.ps1`: fmt clean; clippy clean; `cargo test --all` all suites 0 failed; coverage `TOTAL ... 2614 lines, 464 missed → 82.25%` → `OK: coverage >= 80%`; `Traceability: SR=38 LLR=64 TC=90 orphans=0.` → **HARNESS PASSED**.
+- Targeted tests: `cargo test --test stage_timings` → `verbose_emits_one_line_per_stage_sr036 ... ok`, `nonverbose_output_unchanged_sr036 ... ok` (TC-072); `cargo test --lib util::timing` → `perf_metrics_json_is_pbid_to_number_sr036 ... ok` (+ boundary-stall and peak-WS unit tests) (TC-073); `cargo test --test cli_arms bench_full_writes_pb_metrics_sr036` → ok (bench plumbing smoke; note it lives in `tests/cli_arms.rs`, an integration test, not a bin unit test as the R3 SE verdict phrased it).
+- Witnessed bench (TC-074; `pwsh Scripts/bench.ps1`, run 2026-07-18T05:00Z; corpus TestInput/ 10 files; bench-1920x1080 @30fps crf 28; 2021 frames in 29.1 s):
+```
+PB-001 end-to-end frames/s: 69.4
+PB-002 boundary stall ms/photo: 278.0
+PB-003 scan s per 1k files: 43.091
+PB-005 peak working set MB: 410.5
+PB-004 warm-rebuild ratio: omitted until the segment cache (SR-037) exists
+check_perf: OK - 5 in-tier budget(s): 0 fail, 2 warn, 1 skip(no metric) -> docs\test\perf-report.md   (exit 0)
+```
+Stage share: decode 0.5%, prescale 5.3%, **render 41.5%**, blend 10.5%, encode-write-stall 15.0% — corroborates the SE's Phase-1 ordering NOTE. Run-to-run variance vs the SE's same-day run (PB-001 71.6→69.4, PB-002 242.1→278.0) confirms these are noisy metrics; Gate=warn kept deliberately.
+Actions taken (owned artifacts, this commit):
+- **Golden baseline committed:** witnessed metrics copied to `docs/test/perf-baseline.json` (process.md §9 committed golden). **Deliberate call:** removed the `docs/test/perf-baseline.json` line from the kit `.gitignore` stanza (comment added) — the kit stanza conflicted with process.md §9, which requires the baseline committed and diff-reviewed; `perf-metrics.json`/`perf-report.md` stay ignored as regenerated composites.
+- **Budgets trued (performance-budgets.csv, all Gate=warn kept):** PB-001 stays 60 (baseline 69.4 passes); PB-002 100→**50** = Phase-1b target (baseline 278.0 in Notes); PB-003 stays **2** = SR-038 warm-cache target (cold-probe baseline 43.1 in Notes, corpus-scale-sensitive); PB-004 note reworded (no metric until SR-037); PB-005 stays 2048 (baseline 410.5 in Notes). `provisional` wording removed wherever a real baseline now backs the row. check_perf re-run after truing: 0 fail, 2 warn (PB-002 vs the new 50 target, PB-003 vs the warm target — both deliberate pre-Phase-1b/SR-038), 1 skip, exit 0.
+- **TC flips:** TC-072 → **Verified** (`tests/stage_timings.rs::verbose_emits_one_line_per_stage_sr036`, `nonverbose_output_unchanged_sr036`); TC-073 → **Verified** (`util::timing::tests::perf_metrics_json_is_pbid_to_number_sr036`); TC-074 → **Verified** by the witnessed run above — Attest record (who/when/numbers/exit code) added to its Parameters cell per process.md §4; its procedure wording trued to SR-036's "per **measured** PB row" (the literal "one entry per PB row" was unsatisfiable while PB-004 has no metric — a TC wording defect, not a product defect).
+- Traceability: `python Scripts/trace.py --strict --no-placeholders` → `Traceability: SN=31 SR=38 LLR=64 TC=90 orphans=0 integrity=0 placeholders=0 budgets=5 budget-findings=0.` (exit 0); `pwsh Scripts/trace.ps1 -Strict` → `Traceability: SR=38 LLR=64 TC=90 orphans=0.` (exit 0).
+Findings:
+- [MINOR] Scripts/trace.ps1 and Scripts/trace.py both write docs/test/report.md in different formats — whichever runs last wins (run-tests.ps1 ends on the ps1 format; the committed file is the py format, so every harness run dirties report.md) → point one generator at a distinct path or converge the formats; this commit re-ran trace.py last to keep the committed format → @software-engineer
+- [NOTE] SR-036 status stays Draft for the System Engineer: its direct legs (TC-072/073/074) are Verified, but TC-086/087/088/089 (Phase 1/3 regression rows) also cite SR-036 and are rightly still Draft; whether the direct legs suffice for SR-036 Draft→Verified is the SE's call. → @system-engineer
