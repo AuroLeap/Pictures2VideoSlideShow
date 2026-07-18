@@ -1514,3 +1514,10 @@ Verification: full harness + strict trace below (this entry precedes the run; ev
 ### ATTESTATION — TC-082 — 2026-07-18
 
 Peter Johnson attested TC-082 (real-frame playback of segmented builds): frame-test-software.mp4 and frame-test-nvenc.mp4 (1440x900 segmented-cache builds of TestInput from this session, SR-005 profile ffprobe-verified incl. faststart) played on the physical frame per the TC procedure. Recorded per process.md §4 Attest (trust-based human judgment, named and dated). Registry: TC-082 → Verified (attestation in row), SR-037 → Verified in the same commit. OBJ-PERF SRs now all Verified (SR-034..038). Remaining human items: quiet-host Phase-3 bench re-witness; pre-existing SR-013/023/024/027.
+
+### DRIVER (Test Engineer hat) — OBJ-PERF — quiet-host Phase-3 re-bench — 2026-07-18
+
+Open item closed. Host verified quiet before the run (Defender scan waited out: msmpeng 166→6% of one core, total load 7% at bench start; watcher log in session records). Witnessed three-leg bench:
+- PB-001 **95.1 fps** (baseline 91.2, **+4.3% = the Phase-3 overlap gain on the streaming path**); PB-006 134.6 (unchanged — rotation-off leg is encoder-bound, back-pressure dominates as Round 6 predicted); PB-002 4.1 ms; PB-003 0.240 s/1k; PB-004 7.1% (cold 247.2 s / warm +12 = 17.5 s, ≤10% budget).
+- PB-005 **503.6 MB** vs baseline 444.6: the designed EncoderWriter bounded-channel footprint (depth 10 × ~6.2 MB 1080p frames ≈ 62 MB, LLR-063 doc), far inside the 2048 MB budget — new baseline accepted with this rationale (regression-vs-baseline WARN resolves).
+Baseline updated via `check_perf --update-baseline` from this witnessed run; follow-up `check_perf --tier release`: 0 fail / 0 warn / 0 skip. Phase-3 throughput claim now recorded on quiet-host evidence: +4.3% streaming, 0% rotation-off, stall collapse retained. Remaining human items: pre-existing SR-013/023/024/027 only.
