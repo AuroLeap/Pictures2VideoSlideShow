@@ -1,9 +1,36 @@
-//! Filesystem helpers: directory creation/writability checks and the
-//! disk-full (ENOSPC) detection used to produce plain-language errors.
+//! Filesystem helpers: directory creation/writability checks, the disk-full
+//! (ENOSPC) detection used to produce plain-language errors, and the per-user
+//! application cache root shared by the FFmpeg fetch and the probe cache.
 
 use crate::error::{Result, SlideshowError};
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Per-user application cache root (no admin/elevation needed):
+/// `%LOCALAPPDATA%\make_video_slideshow` on Windows, falling back to
+/// `%APPDATA%` then the OS temp dir. Subdirectories: `ffmpeg` (LLR-031
+/// auto-fetch) and `probe-cache` (LLR-058 scan cache) — never under
+/// `media_root` (SR-010) or beside outputs.
+// Implements: LLR-031, LLR-058, SR-027, SR-038
+pub fn app_cache_root() -> PathBuf {
+    let base = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from))
+        .unwrap_or_else(std::env::temp_dir);
+    base.join("make_video_slideshow")
+}
+
+/// Lowercase hex encoding of `bytes` (shared by the FFmpeg checksum gate and
+/// the probe-cache file naming).
+// Implements: LLR-034, LLR-058
+pub fn hex_lower(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        let _ = write!(s, "{:02x}", b);
+    }
+    s
+}
 
 /// Ensure `path` exists as a directory, creating it if missing.
 ///

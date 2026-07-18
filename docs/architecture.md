@@ -148,7 +148,7 @@ graph LR
 | Module | Responsibility |
 |---|---|
 | `src/config` | Load/validate TOML config (`OutputDef`, Ken Burns + audio params, config location) |
-| `src/media` | Parallel scan, classify, dimensions/duration, audio probe, ignore patterns |
+| `src/media` | Parallel scan, classify, dimensions/duration, audio probe, ignore patterns, SR-038 probe cache |
 | `src/transform` | `ClipPlan`: Ken Burns sub-pixel projection + rotation math (deterministic, optional fixed focus) |
 | `src/image` | `FrameRenderer`: pre-scale once, per-frame single-warp render |
 | `src/roi` | Optional region-of-interest database (per-image focus override) |
@@ -194,6 +194,7 @@ graph LR
     m_main --> m_error
     m_media --> m_config
     m_media --> m_error
+    m_media --> m_util
     m_pipeline --> m_config
     m_pipeline --> m_error
     m_pipeline --> m_ffmpeg
@@ -210,6 +211,7 @@ graph LR
     m_setup --> m_config
     m_setup --> m_error
     m_setup --> m_ffmpeg
+    m_setup --> m_util
     m_transform --> m_config
     m_util --> m_error
     m_video --> m_error
@@ -304,9 +306,21 @@ _Generated 2026-07-18 by `scripts/trace.ps1` from the source tree — do not edi
   - uses: `config`, `error`
   - `pub struct MediaFile`
   - `pub enum MediaType`  <- LLR-039, SR-032
+  - `pub struct ProbeStats`  <- LLR-059, SR-038
   - `pub struct Album`
-  - `pub struct MediaLoader`
-  - `pub fn new(config: InputConfig) -> Self`
+  - `pub struct MediaLoader`  <- SR-038
+  - `pub fn new(config: InputConfig) -> Self`  <- LLR-058, SR-038
+  - `pub fn with_probe_cache_path(mut self, path: PathBuf) -> Self`  <- LLR-058, SR-038
+- **src/media/probe_cache.rs** — _Media-scan probe cache (SR-038): JSON persistence of per-file probe_
+  - uses: `error`, `util`
+  - `pub struct ProbeEntry`  <- LLR-058, SR-038
+  - `pub fn entry_current(entry: &ProbeEntry, size: u64, mtime_ms: u64) -> bool`  <- LLR-059, SR-038
+  - `pub struct ProbeCache`  <- LLR-058, SR-038
+  - `pub fn path_for(media_root: &Path) -> PathBuf`  <- LLR-058, SR-038
+  - `pub fn load(path: &Path) -> Self`  <- LLR-058, SR-038
+  - `pub fn save(&self, path: &Path) -> Result<()>`  <- LLR-058, SR-038
+  - `pub fn lookup(`  <- LLR-059, SR-038
+  - `pub fn insert(&mut self, rel: String, entry: ProbeEntry)`
 - **src/pipeline/mod.rs** — _Pipeline orchestration: wire media → frame generation → FFmpeg encoding,_
   - uses: `config`, `error`, `ffmpeg`, `media`, `roi`, `util`, `video`
   - `pub struct SkippedInput`  <- LLR-017, SR-014
@@ -357,7 +371,7 @@ _Generated 2026-07-18 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn to_toml(config: &Config) -> Result<String>`  <- LLR-030, SR-026, SR-030
   - `pub fn parse_wizard_output(stdout: &str) -> Result<WizardValues>`  <- LLR-030, SR-026
 - **src/setup/ffmpeg_fetch.rs** — _FFmpeg acquisition: integrity-verified download to a per-user directory, with_
-  - uses: `error`, `ffmpeg`
+  - uses: `error`, `ffmpeg`, `util`
   - `pub fn cache_dir() -> PathBuf`  <- LLR-031, SR-027
   - `pub fn verify_checksum(path: &Path, expected_hex: &str) -> Result<()>`  <- LLR-034, SR-029
   - `pub fn fetch_ffmpeg(dest_dir: &Path) -> Result<PathBuf>`  <- LLR-031, LLR-034, SR-027, SR-029
@@ -385,8 +399,10 @@ _Generated 2026-07-18 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn estimate_output_bytes(duration_secs: f64, crf: u32) -> u64`  <- LLR-013, SR-009
   - `pub fn is_oversize(bytes: u64) -> bool`  <- LLR-013, SR-009
   - `pub fn human_bytes(bytes: u64) -> String`  <- LLR-013, SR-009
-- **src/util/file_utils.rs** — _Filesystem helpers: directory creation/writability checks and the_
+- **src/util/file_utils.rs** — _Filesystem helpers: directory creation/writability checks, the disk-full_
   - uses: `error`
+  - `pub fn app_cache_root() -> PathBuf`  <- LLR-031, LLR-058, SR-010, SR-027, SR-038
+  - `pub fn hex_lower(bytes: &[u8]) -> String`  <- LLR-034, LLR-058
   - `pub fn ensure_dir_exists(path: &Path) -> Result<()>`  <- LLR-019, SR-016
   - `pub fn ensure_writable_dir(path: &Path) -> Result<()>`  <- LLR-019, SR-016
   - `pub fn disk_full_error(path: &Path) -> SlideshowError`  <- LLR-018, SR-015

@@ -433,8 +433,8 @@ fn resolve_bench_corpus(explicit: Option<PathBuf>) -> Result<(PathBuf, Option<Be
 /// `bench --full`: a real end-to-end build of the bench corpus that measures
 /// the PB rows and writes `docs/test/perf-metrics.json` (cwd-relative) for
 /// `Scripts/check_perf.py`. Measured: PB-001 end-to-end frames/s, PB-002 mean
-/// clip-boundary stall ms/photo, PB-003 scan s per 1k files (a full re-probe —
-/// no probe cache until SR-038 — so "warm" is filesystem-cache warm only),
+/// clip-boundary stall ms/photo, PB-003 scan s per 1k files (warm scan served
+/// by the SR-038 probe cache, pinned to a fresh temp file per bench run),
 /// PB-005 peak working set MB (omitted where unmeasurable). PB-004 is omitted
 /// until the segment cache (SR-037) exists; check_perf skips absent rows.
 // Implements: LLR-052, LLR-051, SR-036
@@ -453,8 +453,10 @@ async fn run_bench_full(
 
     let (corpus_dir, _synth_guard) = resolve_bench_corpus(corpus)?;
 
-    // Scan twice: cold, then warm. Both fully re-probe today (SR-038 pending),
-    // so the warm number is the honest no-probe-cache value (PB-003).
+    // Scan twice: cold, then warm. The probe cache (SR-038) is pinned to a
+    // fresh temp file so the cold leg is genuinely cold and the warm leg is
+    // the honest cache-served number (PB-003) — and the developer's real
+    // per-user cache is never touched by a bench.
     let input = config::InputConfig {
         media_root: corpus_dir.clone(),
         ignore_patterns: config.input.ignore_patterns.clone(),
@@ -462,13 +464,20 @@ async fn run_bench_full(
         exception_threshold: None,
         roi_db: None,
     };
-    let loader = media::MediaLoader::new(input);
+    let bench_cache = std::env::temp_dir().join(format!(
+        "slideshow_bench_probe_cache_{}.json",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&bench_cache);
+    let loader = media::MediaLoader::new(input).with_probe_cache_path(bench_cache.clone());
     let t = std::time::Instant::now();
     let _cold = loader.scan_and_index().await?;
     let cold_scan = t.elapsed();
     let t = std::time::Instant::now();
     let album = loader.scan_and_index().await?;
     let warm_scan = t.elapsed();
+    let _ = std::fs::remove_file(&bench_cache);
+    let warm_stats = album.probe_stats;
     let files = album.media_files.len();
     if files == 0 {
         return Err(crate::error::SlideshowError::Media(format!(
@@ -514,9 +523,11 @@ async fn run_bench_full(
         ot.frames
     );
     println!(
-        "Scan: cold {:.2}s, warm {:.2}s (full re-probe; no probe cache until SR-038)",
+        "Scan: cold {:.2}s, warm {:.2}s ({} cached / {} probed on warm; SR-038 probe cache)",
         cold_scan.as_secs_f64(),
-        warm_scan.as_secs_f64()
+        warm_scan.as_secs_f64(),
+        warm_stats.cache_hits,
+        warm_stats.probed,
     );
     // Per-stage share of the build wall (plan §2 exit criterion).
     let wall_ms = (build_wall.as_secs_f64() * 1000.0).max(0.001);

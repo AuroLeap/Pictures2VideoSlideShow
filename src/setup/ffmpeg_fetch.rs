@@ -20,14 +20,11 @@ const PINNED_URL: &str =
 const PINNED_SHA256: &str = "fa7d4d7e795db0e2503f49f105f46ed5852386f0cfdd819899be3b65ebde24fc";
 
 /// Per-user cache directory for an auto-fetched FFmpeg (no admin/elevation):
-/// `%LOCALAPPDATA%\make_video_slideshow\ffmpeg` on Windows.
+/// `%LOCALAPPDATA%\make_video_slideshow\ffmpeg` on Windows (the shared
+/// [`crate::util::file_utils::app_cache_root`]).
 // Implements: LLR-031, SR-027
 pub fn cache_dir() -> PathBuf {
-    let base = std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from))
-        .unwrap_or_else(std::env::temp_dir);
-    base.join("make_video_slideshow").join("ffmpeg")
+    crate::util::file_utils::app_cache_root().join("ffmpeg")
 }
 
 /// Verify a file's SHA-256 against `expected_hex` (case-insensitive). Returns an
@@ -53,14 +50,7 @@ pub fn verify_checksum(path: &Path, expected_hex: &str) -> Result<()> {
     }
 }
 
-fn hex_encode(bytes: &[u8]) -> String {
-    use std::fmt::Write;
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        let _ = write!(s, "{:02x}", b);
-    }
-    s
-}
+use crate::util::file_utils::hex_lower as hex_encode;
 
 /// Fetch FFmpeg into `dest_dir`, verifying its integrity before it is usable.
 ///

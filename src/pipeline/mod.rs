@@ -821,6 +821,7 @@ mod tests {
             media_files: Vec::new(),
             total_size: 0,
             created_at: SystemTime::UNIX_EPOCH,
+            probe_stats: Default::default(),
         };
         FrameGenerationPipeline::new(
             album,

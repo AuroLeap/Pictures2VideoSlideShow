@@ -56,6 +56,20 @@ pub fn write_png(path: &Path, w: u32, h: u32, rgb: [u8; 3]) {
     img.save(path).expect("save png");
 }
 
+/// Synthesize a tiny test video at `path` via ffmpeg's `testsrc` (silent).
+/// Returns true on success so callers can give a clear failure message if
+/// ffmpeg genuinely cannot synth (it should — CI invariant).
+pub fn synth_video(path: &Path, seconds: u32, w: u32, h: u32, rate: u32) -> bool {
+    let lavfi = format!("testsrc=duration={seconds}:size={w}x{h}:rate={rate}");
+    let status = std::process::Command::new("ffmpeg")
+        .args(["-y", "-v", "error", "-f", "lavfi", "-i"])
+        .arg(&lavfi)
+        .args(["-pix_fmt", "yuv420p"])
+        .arg(path)
+        .status();
+    matches!(status, Ok(s) if s.success()) && path.exists()
+}
+
 /// Absolute path to the integration-test target binary built by cargo.
 ///
 /// Cargo sets `CARGO_BIN_EXE_<name>` for integration tests; the bin is

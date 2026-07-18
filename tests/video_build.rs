@@ -12,22 +12,9 @@
 
 mod common;
 
-use common::{slideshow_bin, write_config, write_png, TempDir};
+use common::{slideshow_bin, synth_video, write_config, write_png, TempDir};
 use std::path::Path;
 use std::process::{Command, Output};
-
-/// Synthesize a tiny test video at `path`. Returns true on success so the test
-/// can give a clear skip message if ffmpeg genuinely cannot synth (it should).
-fn synth_video(path: &Path, seconds: u32, w: u32, h: u32, rate: u32) -> bool {
-    let lavfi = format!("testsrc=duration={seconds}:size={w}x{h}:rate={rate}");
-    let status = Command::new("ffmpeg")
-        .args(["-y", "-v", "error", "-f", "lavfi", "-i"])
-        .arg(&lavfi)
-        .args(["-pix_fmt", "yuv420p"])
-        .arg(path)
-        .status();
-    matches!(status, Ok(s) if s.success()) && path.exists()
-}
 
 fn run_build(config: &Path) -> Output {
     Command::new(slideshow_bin())

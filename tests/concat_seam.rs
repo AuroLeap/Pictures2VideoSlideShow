@@ -112,6 +112,7 @@ fn build_album(media: &Path) -> Album {
         media_files: files,
         total_size: 0,
         created_at: std::time::SystemTime::now(),
+        probe_stats: Default::default(),
     }
 }
 
