@@ -9,13 +9,13 @@ Back to [docs index](README.md) · [README](../README.md).
 ## Current state
 
 - **Active objective:** **OBJ-PERF — engine performance, phases 0–3 of [planning/RUST_PERFORMANCE_PLAN.md](../planning/RUST_PERFORMANCE_PLAN.md)** (measurement → encoder/CPU quick wins → incremental segment cache → pipeline overlap). Prior scope: ✅ PROJECT COMPLETE, FINAL acceptance APPROVED 2026-06-04; this is post-acceptance maintenance work on branch `Optomizations`.
-- **Round:** OBJ-PERF round 5b **done** (SE 2026-07-18: **SR-037 segment cache COMPLETE and the default `build` path** — warm rebuild re-encodes only new clips + neighbors, **PB-004 first measurement 6.4%** of cold (budget ≤10%; warm 15.7 s vs cold 244 s on the bench album, 15.6x); LLR-053/054/055/057 Implemented; `--no-cache`/`--clear-cache` wired; TC-075..078/081 tests exist and pass, statuses Draft pending @test-engineer verify) / next: TE verify of 5a+5b TCs, then Phase 3 decision (pipeline overlap) on the measured PB rows
+- **Round:** OBJ-PERF **round 5 CLOSED** (TE 2026-07-18 Round 5c: independent verify of 5a+5b green — TC-075..081 + TC-083..085 flipped Verified, Phase-2 perf baseline accepted incl. PB-004 6.43% first measurement and PB-003 41.5→0.26 s/1k lock-in, PB-001/PB-006 retexted to say they measure the STREAMING pipeline) / next: **Round 6 — the Phase 3 gate decision** (pipeline overlap, LLR-060/063 territory) on the measured PB rows, plus @system-engineer SR-037/SR-038 status flips and the PB-001 segmented-cold-leg decision
 - **Mode:** **autonomous** (set by Peter 2026-07-17 for OBJ-PERF: decide-and-record per the process.md §6 dial; gates/harness discipline unchanged; decisions logged below instead of pausing)
-- **Latest measurements (2026-07-18, OBJ-PERF round 5b SE run, `Scripts/run-tests.ps1` + three-leg `Scripts/bench.ps1`):** `cargo fmt --check` clean; `cargo clippy --all-targets -D warnings` clean; `cargo test --all` **201 passed 0 failed 2 ignored** (both deliberate: network fetch + Release-tier hardware profile); `cargo llvm-cov` line **86.99%** (≥80%); trace SR=38 LLR=64 TC=90 **orphans=0**, budgets=6 findings=0; quiet-window bench: PB-001 83.7 fps / PB-002 4.2 ms / PB-003 0.275 s/1k / **PB-004 6.4% warm-rebuild ratio (first measurement, budget ≤10%)** / PB-005 445.3 MB / PB-006 126.2 fps; `check_perf --tier release` **0 fail / 0 warn / 0 skip**, exit 0 (all six PB rows measured). PB-004 baseline acceptance pending @test-engineer (4c golden baseline otherwise unchanged: 87.3 / 4.5 / 41.5 / 446.0 / 134.5).
+- **Latest measurements (2026-07-18, OBJ-PERF round 5c TE independent witness, `Scripts/run-tests.ps1` + `Scripts/check.py` + three-leg `Scripts/bench.ps1` on a quiet host):** `cargo fmt --check` clean; `cargo clippy -D warnings` clean; `cargo test --all` **201 passed 0 failed 2 ignored** (both deliberate: network fetch + Release-tier hardware profile); `cargo llvm-cov` line **86.97%** (≥80%); trace SR=38 LLR=64 TC=90 **orphans=0**, budgets=6 findings=0; check.py RESULT: PASS. Witnessed bench (run of record, **accepted as the Phase-2 golden baseline**): PB-001 91.2 fps / PB-002 4.2 ms / **PB-003 0.26 s/1k (was 41.5 — SR-038 probe cache, ~160x)** / **PB-004 6.43% warm-rebuild ratio (first measurement, budget ≤10%; cold 243.8 s, warm +12 photos 15.7 s, 239 reused / 13 re-encoded)** / PB-005 444.6 MB / PB-006 134.6 fps; `check_perf --tier release` **0 fail / 0 warn / 0 skip**, exit 0, again post-baseline-accept.
 - **Active gate:** G2. G3 requires all Verification=Test SRs to be Status=Verified; SR-013, SR-024, SR-027 remain Implemented/Draft because their Tier=Release TCs require Peter's hardware/interactive/network. Pre-existing; see Constraints.
 - **Kit version:** `9670982 2026-07-01` (ai-template branch MultiRepoSupport; stamped in `docs/kit-version`).
 - **Still open for the human:** SR-023 release publish on a `v*` tag; SR-013/SR-024/SR-027 Tier=Release TCs for G3 advancement; real-ENOSPC (SR-015) demonstration.
-- **Next action:** @test-engineer verify of the Round-5a (TC-079/080/083/084/085) and Round-5b (TC-075/076/077/078/081) test cases + PB-004 baseline acceptance; @system-engineer SR-037/SR-038 status decision once TCs flip. Then the Phase 3 gate (pipeline overlap) on measured PB rows. This clone (`C:\Projects\Pictures2VideoSlideShowOptomizations`, branch `Optomizations`) is the perf worktree; the original repo continues under a parallel session whose review-fix commits (`ad15454`, `dd65a95`) are **deliberately not merged here** — one `git fetch <orig> kit-resync-2026-07` + merge away if Peter wants them.
+- **Next action:** @system-engineer — SR-037/SR-038 status decision (all their automated Test TCs are now Verified; only TC-082, Demonstration/Release, remains Draft on SR-037), the still-open SR-036 status question from Round 3 (TC-089/TC-090 are planned Phase-3 rows), and the PB-001 Phase-3 decision (segmented-cold leg vs streaming-only, see Round-5c ruling). Then the Round 6 / Phase 3 gate (pipeline overlap) on the measured PB rows. This clone (`C:\Projects\Pictures2VideoSlideShowOptomizations`, branch `Optomizations`) is the perf worktree; the original repo continues under a parallel session whose review-fix commits (`ad15454`, `dd65a95`) are **deliberately not merged here** — one `git fetch <orig> kit-resync-2026-07` + merge away if Peter wants them.
 
 ## Constraints
 
@@ -1321,3 +1321,46 @@ Findings:
 - [MINOR] `bench --full` (PB-001) still measures the **streaming** path (`execute()`), which is no longer the default build path — kept deliberately for baseline comparability, and because the segmented cold path adds per-clip encoder spawns (visible on the PB-004 cold leg: short 1 s clips -> ~21 fps wall vs ~84 streaming; amortized on real 6 s-clip albums but not separately measured). Decide whether PB-001 gains a segmented-cold leg or just the note -> @test-engineer / @system-engineer
 - [NOTE] SR-037 acceptance evidence is on file end-to-end (all six scenarios + both flags + equivalence + TC-080 atomicity); the SR status flip after TC verify is yours -> @system-engineer
 - [NOTE] Leftover-artifact sweeps are staleness-gated (24 h) — a deliberate concurrency-safety trade recorded in LLR-054's Detail; fresh orphans are left alone -> no action
+
+### TEST-ENGINEER — OBJ-PERF — Round 5c (Phase 2 verify) — 2026-07-18
+Verdict: APPROVE (Phase 2 independently verified; ten TCs flipped Verified; Phase-2 perf baseline accepted; round 5 closed)
+
+**Independent verification (all run by me on this clone, quiet host — no competing cargo/ffmpeg processes; throughput rows at/above the Phase-1 baseline, so no load skew):**
+```
+HARNESS PASSED  (pwsh Scripts/run-tests.ps1, exit 0)
+  cargo fmt --check clean; cargo clippy (deny warnings) clean
+  cargo test --all: 201 passed, 0 failed, 2 ignored (both deliberate: network fetch + Release-tier hardware profile)
+  cargo llvm-cov: TOTAL lines 86.97% >= 80% (cache/mod 100%, cache/planner 99.67%, cache/store 86.73%, probe_cache 81.05%)
+  Traceability: SR=38 LLR=64 TC=90 orphans=0. Report -> docs/test/report.md
+Check summary (gate G2, tier all): PASS traceability / PASS doc-navigability / PASS design-flows — RESULT: PASS
+Scripts/trace.ps1 -Strict: SR=38 LLR=64 TC=90 orphans=0, exit 0 (post-registry-edit re-run)
+Witnessed bench (pwsh Scripts/bench.ps1, three legs, exit 0 — the Phase-2 run of record):
+  PB-001 91.2 fps (canonical streaming leg)   PB-002 4.2 ms/photo   PB-003 0.257 s/1k (10 cached / 0 probed warm)
+  PB-004 6.43% warm-rebuild ratio: cold 243.8 s (240 photos, fresh temp-pinned cache) -> +12 photos warm 15.7 s,
+     segments 239 reused / 13 re-encoded (12 new + 1 right-neighbor) — matches the SE 5b run (6.4%)
+  PB-005 444.6 MB   PB-006 134.6 fps
+  check_perf --tier release: 0 fail / 0 warn / 0 skip, exit 0 — and again after --update-baseline: 0 fail / 0 warn / 0 skip
+```
+
+**TC flips (each only after confirming its named tests exist and pass in my harness run, and spot-reading the assertions against the row):**
+- **TC-075, TC-076, TC-077, TC-079, TC-083, TC-084, TC-085 → Verified** (rows as written; "planned" dropped from Expected; TC-084 Expected now also names the per-user-location unit leg `path_for_is_per_user_and_keyed_by_root_sr038`).
+- **TC-078 → Verified with row true-up** (SE 5b finding confirmed honest): the round-trip/LRU/corrupt/clear/root legs live as `src/cache/store.rs` unit tests (`store_roundtrips_and_persists_sr037`, `store_prunes_lru_to_cap_sr037`, `corrupt_entry_is_miss_and_deleted_sr037`, `clear_empties_and_root_prefers_temp_dir_sr037`), not under `--test segment_cache` as the row previously said; the flag + store-root legs run through the real binary in `--test segment_cache no_cache_and_clear_cache_flags_sr037`. Expected corrected to name the real homes.
+- **TC-081 → Verified with row true-up** (SE 5b finding confirmed honest): Expected now names both suites and records the `@pairwise` pairing (all six scenarios x `cache-flag=default` in `warm_scenarios_reencode_only_misses_sr037`; `no-cache`/`clear-cache` paired with cold/warm through the real binary in `no_cache_and_clear_cache_flags_sr037`, pairing documented in the suite header). The no-cache leg genuinely asserts "neither reads nor writes" via a byte-level store-tree snapshot.
+- **TC-080 → Verified after an honest re-scope (ruling recorded in the row):** the end-to-end legs (empty list; non-zero concat exit via garbage segment → named error, no final `<name>.mp4`, no leftover `.part`/list) pass in `concat_failure_names_error_and_leaves_no_final_sr037`. The row's previously-named `concat_kill_cleans_part_sr037` does not exist; the timeout/kill/disk-full legs are covered at the decision seam — the concat watch loop arms the same `timed_out` decision the encoder watchdog uses (unit-verified `inactivity_timeout_decision_sr013`), disk-full list writes map through `is_disk_full`/`disk_full_error` (unit-verified `is_disk_full_detects_platform_code_sr015`), and `concat_segments` structurally never creates the final name (promote()-only, TC-018 guard). Forcing a live ffmpeg stall end-to-end needs a stub-exe-on-PATH harness (Windows resolves only `.exe` for `Command::new("ffmpeg")`) — cost out of proportion to the seam already tested; if end-to-end forced-stall coverage is wanted, that is a new TC → @system-engineer.
+- **TC-074 (Verified, stays):** witness record updated to the Phase-2 run; Method/Parameters trued to the three-leg wrapper (PB-004 leg no longer "omitted until SR-037").
+
+**Phase-2 baseline accepted (`check_perf --update-baseline` from my witnessed run; old → new):**
+- PB-001: 87.25 → 91.19 fps (quiet-host streaming leg, slight improvement)
+- PB-002: 4.45 → 4.23 ms/photo
+- PB-003: 41.47 → 0.257 s/1k — the SR-038 probe-cache lock-in (~160x)
+- PB-004: (none) → 6.43 % — first measurement, budget ≤10%
+- PB-005: 446.04 → 444.62 MB
+- PB-006: 134.52 → 134.60 fps
+Follow-up `check_perf --tier release`: **0 fail / 0 warn / 0 skip**, exit 0.
+
+**PB-001 semantics ruling (the SE 5b MINOR):** verified in code — `bench --full` drives `FrameGenerationPipeline::execute()`, the **streaming** pipeline, which since Round 5b is the `--no-cache` path, not the default cached build path (the probe cache is pinned to a fresh temp file per run, so its scan legs are honestly cold/warm). Ruling: PB-001/PB-006 keep measuring the streaming path **and now say so** — Metric renamed to "Streaming-pipeline build throughput…" and the PB-001 Notes state the path, the reason (Phase 0-2 baseline comparability; the default cached path's cold/warm walls are exactly what PB-004's timed legs measure), and the open decision. No re-baseline forced by the ruling since what the leg measures did not change. **@system-engineer:** at the Phase-3 gate, decide whether PB-001 switches to a segmented-cold leg (re-baselined in the same commit — expect a lower number from per-clip encoder spawns, amortization-sensitive to clip length) or the streaming row stays with PB-004's cold leg as the cached-path evidence.
+
+**Findings:**
+- [NOTE] **SR-037**: all seven automated Test TCs (TC-075..081) now Verified; only TC-082 (Demonstration, Tier=Release, real-frame playback) remains Draft — same posture as SR-013/024/027. **SR-038**: all three TCs (TC-083/084/085) Verified. Both SR status flips are yours → @system-engineer
+- [NOTE] SR-036 status question from Round 3 remains open: TC-072/073/074 and 086/087/088 are Verified, but TC-089/TC-090 (planned Phase-3 overlap rows) also cite SR-036 and are Draft — decide whether SR-036 flips now or after Phase 3 → @system-engineer
+- [NOTE] `report.md` dual-writer convention honored: `python Scripts/trace.py` run last before this commit → self, done
