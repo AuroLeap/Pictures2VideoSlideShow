@@ -9,13 +9,13 @@ Back to [docs index](README.md) · [README](../README.md).
 ## Current state
 
 - **Active objective:** **OBJ-PERF — engine performance, phases 0–3 of [planning/RUST_PERFORMANCE_PLAN.md](../planning/RUST_PERFORMANCE_PLAN.md)** (measurement → encoder/CPU quick wins → incremental segment cache → pipeline overlap). Prior scope: ✅ PROJECT COMPLETE, FINAL acceptance APPROVED 2026-06-04; this is post-acceptance maintenance work on branch `Optomizations`.
-- **Round:** OBJ-PERF **round 6 SE leg DONE** (SE 2026-07-18: **Phase 3 pipeline overlap SHIPPED** — `EncoderWriter` thread owns ffmpeg stdin behind a bounded channel on both build paths, LLR-063/064 Implemented, TC-089/TC-090 written red-first and green, harness+check.py PASS; fps before/after **load-skewed** — a game ran on the host, no baseline touched, PB-005 450.7 MB on-baseline) / next: @test-engineer TC-089/090 verify + **quiet-host bench re-witness**, then @system-engineer SR closure round (SR-036/037/038 flips, PB-001 segmented-cold-leg decision)
+- **Round:** OBJ-PERF **round 6 CLOSED pending SR closure** (TE 2026-07-18: TC-089/TC-090 **Verified** — independent harness run 211 passed / 87.41% line coverage / check.py PASS; bench witnessed but **load-confounded** (game on host, CPU mean 49.8% during the window) — **golden Phase-2 baseline untouched**, quiet-host re-bench is an open human/next-session item) / next: @system-engineer SR closure round (SR-034..038 flips per TE Round-6b findings, PB-001 segmented-cold-leg decision)
 - **Mode:** **autonomous** (set by Peter 2026-07-17 for OBJ-PERF: decide-and-record per the process.md §6 dial; gates/harness discipline unchanged; decisions logged below instead of pausing)
-- **Latest measurements (2026-07-18, OBJ-PERF round 5c TE independent witness, `Scripts/run-tests.ps1` + `Scripts/check.py` + three-leg `Scripts/bench.ps1` on a quiet host):** `cargo fmt --check` clean; `cargo clippy -D warnings` clean; `cargo test --all` **201 passed 0 failed 2 ignored** (both deliberate: network fetch + Release-tier hardware profile); `cargo llvm-cov` line **86.97%** (≥80%); trace SR=38 LLR=64 TC=90 **orphans=0**, budgets=6 findings=0; check.py RESULT: PASS. Witnessed bench (run of record, **accepted as the Phase-2 golden baseline**): PB-001 91.2 fps / PB-002 4.2 ms / **PB-003 0.26 s/1k (was 41.5 — SR-038 probe cache, ~160x)** / **PB-004 6.43% warm-rebuild ratio (first measurement, budget ≤10%; cold 243.8 s, warm +12 photos 15.7 s, 239 reused / 13 re-encoded)** / PB-005 444.6 MB / PB-006 134.6 fps; `check_perf --tier release` **0 fail / 0 warn / 0 skip**, exit 0, again post-baseline-accept.
+- **Latest measurements (2026-07-18, OBJ-PERF round 6b TE independent verify, `Scripts/run-tests.ps1` + `Scripts/check.py` + three-leg `Scripts/bench.ps1` on a **loaded** host):** `cargo fmt --check` clean; `cargo clippy -D warnings` clean; `cargo test --all` **211 passed 0 failed 2 ignored** (both deliberate: network fetch + Release-tier hardware profile), incl. `tests/overlap.rs` 6/6 (TC-089/TC-090); `cargo llvm-cov` line **87.41%** (≥80%; `pipeline/overlap.rs` 93.02%); trace SR=38 LLR=64 TC=90 **orphans=0**; check.py RESULT: PASS. Bench for the record only — **LOAD-CONFOUNDED (game on host, CPU 23–99%, mean 49.8% across the window), golden Phase-2 baseline (91.2/4.2/0.257/6.43/444.6/134.6) STANDS untouched:** PB-001 77.2 fps (−15.3% WARN) / PB-002 4.55 ms (+7.7% OK) / PB-003 0.260 s/1k (+1.3% OK) / PB-004 6.49% (+0.9% OK; cold 244.3 s, warm +12 15.9 s, 239 reused / 13 re-encoded) / PB-005 482.2 MB (+8.5%, within 10% tolerance — bounded-channel memory story holds) / PB-006 112.1 fps (−16.7% WARN); `check_perf` **0 fail / 2 warn** (both fps rows, load-sensitive). Quiet-host re-bench remains open before any Phase-3 throughput claim or re-baseline.
 - **Active gate:** G2. G3 requires all Verification=Test SRs to be Status=Verified; SR-013, SR-024, SR-027 remain Implemented/Draft because their Tier=Release TCs require Peter's hardware/interactive/network. Pre-existing; see Constraints.
 - **Kit version:** `9670982 2026-07-01` (ai-template branch MultiRepoSupport; stamped in `docs/kit-version`).
 - **Still open for the human:** SR-023 release publish on a `v*` tag; SR-013/SR-024/SR-027 Tier=Release TCs for G3 advancement; real-ENOSPC (SR-015) demonstration.
-- **Next action:** @test-engineer — verify TC-089/TC-090 (suites green in `tests/overlap.rs`, see SE Round-6 verdict findings incl. the TC-089 depth-cap and TC-090 broken-pipe-leg true-ups and the TC-072 6-vs-8-lines note) and re-witness the three-leg bench on a quiet host (today's fps rows are game-load-skewed; PB-005 acceptable from the run of record). Then @system-engineer — SR closure round: SR-036/SR-037/SR-038 status flips and the PB-001 segmented-cold-leg decision (Round-5c ruling). This clone (`C:\Projects\Pictures2VideoSlideShowOptomizations`, branch `Optomizations`) is the perf worktree; the original repo continues under a parallel session whose review-fix commits (`ad15454`, `dd65a95`) are **deliberately not merged here** — one `git fetch <orig> kit-resync-2026-07` + merge away if Peter wants them.
+- **Next action:** @system-engineer — SR closure round: SR-034..SR-038 status flips per the TE Round-6b findings (all Test-method TCs Verified on all five; TC-069 NVENC demo and TC-082 real-frame demo remain the human Demonstration legs) and the PB-001 segmented-cold-leg decision (Round-5c ruling). For Peter (or a later quiet session): quiet-host three-leg bench re-witness before any Phase-3 throughput claim or re-baseline; TC-069; TC-082. This clone (`C:\Projects\Pictures2VideoSlideShowOptomizations`, branch `Optomizations`) is the perf worktree; the original repo continues under a parallel session whose review-fix commits (`ad15454`, `dd65a95`) are **deliberately not merged here** — one `git fetch <orig> kit-resync-2026-07` + merge away if Peter wants them.
 
 ## Constraints
 
@@ -1401,3 +1401,46 @@ Commits: `657313f` (implementation + registry + architecture + trace report), pl
 - [NOTE] The `--verbose` summary gains one `pipe-write` debug line (8 total; TC-072's six named lines and its tests untouched — same precedent as `prefetch-stall`). TC-072's Parameters text still says "6-stage-lines"; true up or leave, your call → @test-engineer
 - [NOTE] SR-036 status question: with TC-089/TC-090 now implemented (Draft → your verify), the last open citations on SR-036 close after your flip; SR closure round next → @system-engineer
 - [NOTE] PB-001 segmented-cold-leg decision (Round-5c ruling) remains open and is now truly a Phase-3-closed question → @system-engineer
+
+### TEST-ENGINEER — OBJ-PERF — Round 6b (Phase 3 verify) — 2026-07-18
+Verdict: APPROVE (TC-089/TC-090 independently verified and flipped Verified; row true-ups applied; bench witnessed but load-confounded — golden baseline untouched, quiet-host re-bench recorded as the open item)
+
+**Host-load context (checked FIRST, per the SE's Round-6 caveat):** the host was NOT quiet at any point in this session. `DRG Survivor` (game) + EpicGamesLauncher active throughout; spot-check showed the game consuming ~0.5 core; CPU LoadPercentage sampled every 15 s across the full bench window: **min 23 / max 99 / mean 49.8%** (raw series in the run log). Every fps number below is therefore indicative only.
+
+**Independent verify (load-insensitive, all run by me on this clone):**
+```
+pwsh Scripts/run-tests.ps1 -> HARNESS PASSED (exit 0)
+  cargo fmt --check clean; cargo clippy -D warnings clean
+  cargo test --all: 211 passed, 0 failed, 2 ignored (deliberate: network fetch + Release-tier hw profile)
+  cargo llvm-cov: TOTAL lines 87.41% >= 80% (pipeline/overlap.rs 93.02%)
+  Traceability: SR=38 LLR=64 TC=90 orphans=0
+python Scripts/check.py -> PASS traceability / PASS doc-navigability / PASS design-flows — RESULT: PASS
+cargo test --test overlap: 6 passed, 0 failed —
+  overlapped_build_output_equals_serial_sr036, overlapped_binary_paths_agree_sr036 (TC-089)
+  writer_thread_error_propagates_and_cleans_sr013, writer_disk_full_error_reraised_verbatim_sr015,
+  writer_watchdog_kill_reraised_with_cleanup_sr013, writer_drop_mid_stream_unblocks_and_cleans_sr011 (TC-090)
+```
+
+**TC flips + row true-ups (all three SE findings accepted as honest):**
+- **TC-089 Draft → Verified.** True-ups: depth wording corrected to the as-built `writer_channel_depth` (2× fade_frames, floored at 4, byte-capped at 64 MB — depth 10 at bench 1080p); "planned" dropped from Expected and the second named test added; row now also claims the byte-identical decoded-frame comparison the lib leg actually asserts (stronger than the old frame-count/duration text).
+- **TC-090 Draft → Verified.** True-up: the broken-pipe leg is honestly re-worded as realized via the watchdog-kill test (writes to the killed ffmpeg's dead stdin) — a lone mid-stream misaligned packet self-heals in ffmpeg, so garbage-then-EOF is the deterministic non-zero-exit leg (same mechanism as atomic_finalize); disk-full is an injected `FrameSink` raising the LLR-018 mapping (real ENOSPC not provokable in CI — same stance as SR-015's existing suites); drop-mid-stream added as a named leg; all four actual test names cited in Expected.
+- **TC-072 Parameters true-up (row stays Verified, tests untouched):** "6-stage-lines" → "one line per named stage", with a note that additional debug timing lines (prefetch-stall LLR-060, pipe-write LLR-063) are permitted — the tests assert exactly one line per each of the six SR-036 stages, not exactly-six-lines-total, so the old wording overstated what is asserted.
+
+**Bench (Scripts/bench.ps1, three legs, run 18:20–18:36 — FOR THE RECORD ONLY, load-confounded, NO baseline change):**
+| PB | Measured | Golden 5c baseline | Δ | check_perf |
+|---|---|---|---|---|
+| PB-001 | 77.2 fps | 91.2 | −15.3% | WARN |
+| PB-002 | 4.55 ms | 4.2 | +7.7% | OK |
+| PB-003 | 0.260 s/1k | 0.257 | +1.3% | OK |
+| PB-004 | 6.49% (cold 244.3 s / warm 15.9 s, 239 reused / 13 re-enc) | 6.43% | +0.9% | OK |
+| PB-005 | 482.2 MB | 444.6 | +8.5% | OK (within 10% tol) |
+| PB-006 | 112.1 fps | 134.6 | −16.7% | WARN |
+
+`check_perf`: **0 fail / 2 warn** — the two warns are exactly the load-sensitive fps rows. **Baseline decision: NOT accepted, `--update-baseline` NOT run** — the Phase-2 golden baseline stands. The load-insensitive rows corroborate the SE's story (PB-004 cache ratio stable; PB-005 within tolerance — the bounded channel keeps memory flat, though my loaded run read 482 MB vs the SE's 450.7; worth one glance on the quiet re-bench). **Open item for Peter / a quiet session: re-witness the three-leg bench on a quiet host before any Phase-3 throughput claim or re-baseline.**
+
+**Traceability (post-edit, both runners, trace.py last):** `Scripts/trace.ps1 -Strict` → SR=38 LLR=64 TC=90 orphans=0, exit 0; `python Scripts/trace.py --strict` → orphans=0, exit 0.
+
+**Findings (for @system-engineer — final SR closure round):**
+- [MAJOR] **All Test-method TCs are now Verified on all five OBJ-PERF SRs** — SR-034 (TC-063..068), SR-035 (TC-068/070 + TC-071 Inspection Verified), SR-036 (TC-072/073/086/087/088 + TC-074 Release witnessed + TC-089), SR-037 (TC-075..081), SR-038 (TC-083..085). SR-035/SR-036/SR-038 have **no** open TC at all and can flip Verified outright. SR-034 and SR-037 each have one open human Demonstration leg (TC-069 NVENC demo; TC-082 real-frame playback demo, both Tier=Release, Draft) — your call whether they flip Verified-with-demo-pending per the SR-012 precedent or wait for Peter. → @system-engineer
+- [MINOR] TC-089/TC-090 also add Verified regression evidence to already-Verified SR-011/SR-013/SR-015 (serial semantics preserved across the writer thread); no status change needed there. → @system-engineer
+- [NOTE] Remaining human items after SR closure: TC-069, TC-082, quiet-host bench re-witness, plus the pre-existing SR-013/024/027 Release TCs and SR-023 tag publish. → Peter
