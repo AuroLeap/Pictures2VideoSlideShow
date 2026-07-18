@@ -60,6 +60,65 @@ sequenceDiagram
     Main-->>U: per-prereq pass/fail + exit code (SR-002)
 ```
 
+### Warm build with segment cache (SR-037; design-time, OBJ-PERF Phase 2)
+
+Planned flow for the incremental rebuild: the planner partitions the album into
+keyed segments (LLR-053, LLR-055), only misses are rendered, and assembly is a
+stream-copy concat routed through the **existing** watchdog, disk-full mapping,
+and atomic promote (LLR-056 — SR-011, SR-013, SR-015). Audio delays are mapped
+through the concat timeline into the unchanged mux (LLR-057, LLR-040, SR-032).
+
+```mermaid
+sequenceDiagram
+    participant Pipe as FrameGenerationPipeline (SR-037)
+    participant Plan as cache planner (LLR-055)
+    participant Store as SegmentStore (LLR-054)
+    participant Enc as segment render+encode (SR-005)
+    participant Cat as concat_segments (LLR-056)
+    participant Mux as mux_audio (SR-032, LLR-057)
+
+    Pipe->>Plan: plan_segments(album, output_def)
+    Plan->>Store: lookup(segment_key) per segment (LLR-053)
+    Store-->>Plan: hit | miss (corrupt entry = miss, SR-037)
+    loop cache misses only (SR-037)
+        Plan->>Enc: render + encode segment
+        Enc-->>Store: insert(key, segment.ts)
+    end
+    Plan->>Cat: ordered segment list (stream-copy, no re-encode)
+    Note over Cat: watchdog-armed + disk-full mapped (SR-013, SR-015)
+    Cat-->>Pipe: silent .part
+    Pipe->>Mux: audio clips at concat-timeline start frames (LLR-040)
+    Mux-->>Pipe: name.mp4 via atomic promote (SR-011)
+    Note over Store: LRU prune to size cap; --no-cache / --clear-cache (LLR-054)
+```
+
+### Overlapped pipeline (design-time, OBJ-PERF Phases 1b/3)
+
+Planned concurrent per-output flow: a bounded prefetcher (LLR-060) feeds the
+render pool; the mixer's inputs/outputs become bounded channels; an
+encoder-writer thread owns ffmpeg stdin (LLR-063). Bounded channel depths
+replace `RANGE_MEMORY_BUDGET` batching (memory guard via SR-036 metrics), and
+failure semantics are preserved across the thread boundary (LLR-064 — SR-011,
+SR-013, SR-014, SR-015).
+
+```mermaid
+sequenceDiagram
+    participant Pre as ClipPrefetcher (LLR-060)
+    participant Pool as render pool, rayon (LLR-061)
+    participant Mix as CrossfadeMixer (LLR-062)
+    participant Wr as EncoderWriter thread (LLR-063)
+    participant FF as ffmpeg stdin (SR-013)
+
+    Note over Pre,Wr: all channels bounded — peak memory capped (LLR-063, SR-036)
+    Pre->>Pool: decoded+prescaled clip N+1 (lookahead 1-2)
+    Pre-->>Mix: prefetch error, in order -> record_skip (SR-014)
+    Pool->>Mix: ordered rendered frames (bounded channel)
+    Mix->>Wr: blended frames (bounded channel, ~2x fade_frames)
+    Wr->>FF: write_frame — sole watchdog-activity bump (SR-013)
+    FF-->>Wr: disk-full / broken-pipe error (SR-015)
+    Wr-->>Mix: Result re-raised by join; .part cleanup unchanged (SR-011, LLR-064)
+```
+
 ## High-level flow (Rust engine)
 
 ```mermaid
