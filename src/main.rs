@@ -6,6 +6,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
+mod cache;
 mod config;
 mod error;
 mod ffmpeg;
@@ -51,6 +52,17 @@ struct Args {
     /// input. For automation, CI, and scheduled runs. (SR-028)
     #[arg(long)]
     non_interactive: bool,
+
+    /// Bypass the SR-037 segment cache entirely: the build neither reads nor
+    /// writes cached segments (the pre-cache streaming pipeline).
+    // Implements: LLR-054, SR-037
+    #[arg(long)]
+    no_cache: bool,
+
+    /// Empty the segment cache before building.
+    // Implements: LLR-054, SR-037
+    #[arg(long)]
+    clear_cache: bool,
 
     /// Verbose logging
     #[arg(short, long)]
@@ -145,7 +157,7 @@ async fn main() -> Result<()> {
     match args.command {
         None | Some(Commands::Build { .. }) => {
             log::info!("Starting slideshow generation pipeline...");
-            run_build(&config, non_interactive).await?;
+            run_build(&config, non_interactive, args.no_cache, args.clear_cache).await?;
         }
         Some(Commands::Validate) => {
             log::info!("Validating runtime prerequisites...");
@@ -204,7 +216,12 @@ fn print_check_results(results: &[preflight::CheckResult]) {
     }
 }
 
-async fn run_build(config: &Config, non_interactive: bool) -> Result<()> {
+async fn run_build(
+    config: &Config,
+    non_interactive: bool,
+    no_cache: bool,
+    clear_cache: bool,
+) -> Result<()> {
     // Resolve FFmpeg (configured path -> PATH -> per-user cache), with the
     // offline/use-existing fallback and a gated auto-fetch. Fails fast with an
     // actionable message in automation rather than blocking.
@@ -250,7 +267,10 @@ async fn run_build(config: &Config, non_interactive: bool) -> Result<()> {
         None => None,
     };
 
-    // 3. Process all output definitions in one pipeline.
+    // 3. Process all output definitions in one pipeline. The SR-037 segment
+    //    cache is the default path; `--no-cache` neither reads nor writes it
+    //    (the streaming pipeline); `--clear-cache` empties it first.
+    // Implements: SR-037, LLR-054
     let pipeline = pipeline::FrameGenerationPipeline::new(
         album,
         config.outputs.clone(),
@@ -259,7 +279,18 @@ async fn run_build(config: &Config, non_interactive: bool) -> Result<()> {
         config.input.media_root.clone(),
         roi,
     );
-    let summary = pipeline.execute().await?;
+    let cache_root = cache::store::SegmentStore::root_for(config.processing.temp_dir.as_deref());
+    if clear_cache {
+        let mut store = cache::store::SegmentStore::open(&cache_root)?;
+        store.clear();
+        log::info!("Segment cache cleared: {}", cache_root.display());
+    }
+    let summary = if no_cache {
+        pipeline.execute().await?
+    } else {
+        let mut store = cache::store::SegmentStore::open(&cache_root)?;
+        pipeline.execute_cached(&mut store).await?
+    };
 
     print_completion_summary(&summary);
 
@@ -287,7 +318,19 @@ fn print_completion_summary(summary: &pipeline::BuildSummary) {
     } else {
         println!("Outputs written: {}", summary.written.len());
         for o in &summary.written {
-            println!("  {} ({})", o.path.display(), human_bytes(o.size_bytes));
+            // Cache evidence (SR-037): how much of the output was reused vs
+            // re-encoded this build. Absent on the --no-cache path.
+            // Implements: LLR-055, SR-037
+            match o.cache {
+                Some((reused, re_encoded)) => println!(
+                    "  {} ({}) — segments: {} reused, {} re-encoded",
+                    o.path.display(),
+                    human_bytes(o.size_bytes),
+                    reused,
+                    re_encoded
+                ),
+                None => println!("  {} ({})", o.path.display(), human_bytes(o.size_bytes)),
+            }
         }
     }
     println!("Inputs skipped: {}", summary.skipped.len());
@@ -435,8 +478,9 @@ fn resolve_bench_corpus(explicit: Option<PathBuf>) -> Result<(PathBuf, Option<Be
 /// `Scripts/check_perf.py`. Measured: PB-001 end-to-end frames/s, PB-002 mean
 /// clip-boundary stall ms/photo, PB-003 scan s per 1k files (warm scan served
 /// by the SR-038 probe cache, pinned to a fresh temp file per bench run),
-/// PB-005 peak working set MB (omitted where unmeasurable). PB-004 is omitted
-/// until the segment cache (SR-037) exists; check_perf skips absent rows.
+/// PB-005 peak working set MB (omitted where unmeasurable). PB-004 (warm
+/// rebuild, SR-037) is measured by the `Scripts/bench.ps1` wrapper via timed
+/// `build` invocations and merged in there, like PB-006.
 // Implements: LLR-052, LLR-051, SR-036
 async fn run_bench_full(
     config: &Config,
@@ -554,7 +598,9 @@ async fn run_bench_full(
         Some(mb) => println!("PB-005 peak working set MB: {:.1}", mb),
         None => println!("PB-005 peak working set: unmeasured on this platform (omitted)"),
     }
-    println!("PB-004 warm-rebuild ratio: omitted until the segment cache (SR-037) exists");
+    println!(
+        "PB-004 warm-rebuild ratio: measured by Scripts/bench.ps1 (timed build legs), not here"
+    );
 
     let mut pairs: Vec<(&str, f64)> = vec![("PB-001", pb001), ("PB-002", pb002), ("PB-003", pb003)];
     if let Some(mb) = pb005 {

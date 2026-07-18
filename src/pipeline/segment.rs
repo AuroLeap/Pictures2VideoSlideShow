@@ -4,10 +4,6 @@
 //! boundary ("second half of transition in + body + first half of transition
 //! out") that the future warm-build planner (LLR-055) will key segments by.
 
-// lib-API: the SR-037 segmented path, exercised via tests/concat_seam.rs; the
-// binary wires it up with the warm-build planner (LLR-055, Round 5b).
-#![allow(dead_code)]
-
 use super::FrameSink;
 use crate::error::Result;
 use crate::ffmpeg::encoder_args::EncoderSettings;

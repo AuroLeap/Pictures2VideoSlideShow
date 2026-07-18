@@ -104,8 +104,6 @@ impl FfmpegEncoder {
     /// stream-copy concat; `+faststart` is applied at final assembly by
     /// [`concat::concat_segments`]).
     // Implements: LLR-056, SR-037, SR-011, SR-013
-    // lib-API: SR-037 segmented path (tests/concat_seam.rs; bin wiring 5b).
-    #[allow(dead_code)]
     pub fn start_segment(
         output: &Path,
         width: u32,
@@ -210,9 +208,8 @@ impl FfmpegEncoder {
     /// killed run never reports success.
     // Implements: LLR-015, LLR-008, SR-011, SR-013, SR-015
     // Direct silent finalize: used for SR-037 segments (each `.ts` appears
-    // atomically) and by the lib/integration tests; the binary finalizes final
-    // outputs via finish_to_part + promote/mux so audio can be muxed first.
-    #[allow(dead_code)] // lib-API: segment finalize + integration tests
+    // atomically) and by the lib/integration tests; final outputs go through
+    // finish_to_part + promote/mux so audio can be muxed first.
     pub fn finish(self) -> Result<()> {
         let final_path = self.final_path.clone();
         let part = self.finish_to_part()?;

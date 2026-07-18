@@ -180,7 +180,7 @@ _`SN -> SR -> LLR -> TC`; `[Status]` and `[orphan]` flags are inline._
       - TC-058 [Verified] — Build with enable_audio=true over an image-only album; assert a non-empty playable output is still produced and ffprobe reports NO audio stream (the silent promote fallback, not an error). Covers the no-audio-source branch of SR-032.
     - LLR-042 [Implemented] — Per-output audio config fields
       - TC-056 [Verified] — Deserialize an OutputDef TOML that omits the audio bitrate/sample-rate fields and assert they default (192 kbps / 48000 Hz) with enable_audio honored; then set explicit values and assert they round-trip through serialize/deserialize. Config-field portion of SR-032.
-    - LLR-057 [Draft] — Audio-delay bookkeeping across the concat timeline
+    - LLR-057 [Implemented] — Audio-delay bookkeeping across the concat timeline
       - TC-077 [Draft] — For an album mixing images and audio-bearing video, compute each audio clip's output start frame from SegmentPlan frame offsets (cached path) and from the streaming mixer.emitted() capture (LLR-040 path); assert the two agree for every clip so warm and cold builds mux identical adelay values through the unchanged delay_ms (TC-055 math)
 - SN-010
   - SR-020 [Verified] — Single discoverable quick-reference
@@ -379,7 +379,7 @@ _`SN -> SR -> LLR -> TC`; `[Status]` and `[orphan]` flags are inline._
       - TC-058 [Verified] — Build with enable_audio=true over an image-only album; assert a non-empty playable output is still produced and ffprobe reports NO audio stream (the silent promote fallback, not an error). Covers the no-audio-source branch of SR-032.
     - LLR-042 [Implemented] — Per-output audio config fields
       - TC-056 [Verified] — Deserialize an OutputDef TOML that omits the audio bitrate/sample-rate fields and assert they default (192 kbps / 48000 Hz) with enable_audio honored; then set explicit values and assert they round-trip through serialize/deserialize. Config-field portion of SR-032.
-    - LLR-057 [Draft] — Audio-delay bookkeeping across the concat timeline
+    - LLR-057 [Implemented] — Audio-delay bookkeeping across the concat timeline
       - TC-077 [Draft] — For an album mixing images and audio-bearing video, compute each audio clip's output start frame from SegmentPlan frame offsets (cached path) and from the streaming mixer.emitted() capture (LLR-040 path); assert the two agree for every clip so warm and cold builds mux identical adelay values through the unchanged delay_ms (TC-055 math)
 - SN-029
   - SR-033 [Implemented] — Bundled one-click demo (sample media + worked config/focus) produces a slideshow
@@ -448,20 +448,20 @@ _`SN -> SR -> LLR -> TC`; `[Status]` and `[orphan]` flags are inline._
     - LLR-063 [Draft] — Encoder-writer thread + bounded channels replace batch memory budget
       - TC-089 [Draft] — Build the same album through the overlapped stage graph (prefetch -> rayon render pool -> mixer -> EncoderWriter thread over bounded sync_channels) and through the serial reference; assert the outputs match (frame count, duration, SR-005 profile via ffprobe) and that channel depth (~2x fade_frames) bounds memory in place of the deleted RANGE_MEMORY_BUDGET (peak working set is the PB-005 measurement via TC-074). The existing behavioral suites must stay green unchanged — TC-018 (atomic finalize), TC-021 (watchdog), TC-022/TC-023 (skip), TC-057/TC-058/TC-059 (audio) — referenced, not duplicated
   - SR-037 [Draft] — Incremental per-clip segment cache for warm rebuilds
-    - LLR-053 [Draft] — Pure segment cache-key derivation
+    - LLR-053 [Implemented] — Pure segment cache-key derivation
       - TC-075 [Draft] — Call the pure segment_key over a baseline SegmentKeyInput and single-field variations: assert identical input yields an identical key and that changing ANY key-tuple member — source path/size/mtime, each encode-relevant OutputDef field (dims, fps, quality_crf, fade/pic times, ken_burns, zoom, rotation, encoder, preset), left or right neighbor identity (including edge None vs Some), engine version — yields a different key, bounding invalidation to inserted items plus their two neighbors
       - TC-081 [Draft] — Drive build over a temp album through the SR-037 scenario x cache-flag Permutations (@pairwise): cold populates the cache; warm-unchanged re-encodes 0 segments, asserted honestly via the cache hit/miss counts surfaced in the summary/log (only misses re-encoded); added-photos re-encodes only the new clips plus transition neighbors; removed-photo only the neighbors; changed-settings (resolution, quality, encoder, preset) invalidates the affected output's segments — a full/partial miss re-encoded, never a stale segment served; corrupted-cache-entry is re-encoded and the build succeeds; every warm output is equivalent to its cold build (same frame count and duration, SR-005 profile via ffprobe). Atomic-finalize/failure legs are TC-080
-    - LLR-054 [Draft] — Segment store layout + LRU prune + cache flags
+    - LLR-054 [Implemented] — Segment store layout + LRU prune + cache flags
       - TC-078 [Draft] — Drive SegmentStore directly: insert/lookup round-trips a segment; prune_to(size_cap) evicts least-recently-used entries down to the cap; a corrupt/unreadable segment file or index is treated as a miss and deleted without failing the caller; --no-cache neither reads nor writes the store during a build; --clear-cache empties the store then proceeds; the store roots at ProcessingConfig.temp_dir when set else the per-user cache dir
       - TC-081 [Draft] — Drive build over a temp album through the SR-037 scenario x cache-flag Permutations (@pairwise): cold populates the cache; warm-unchanged re-encodes 0 segments, asserted honestly via the cache hit/miss counts surfaced in the summary/log (only misses re-encoded); added-photos re-encodes only the new clips plus transition neighbors; removed-photo only the neighbors; changed-settings (resolution, quality, encoder, preset) invalidates the affected output's segments — a full/partial miss re-encoded, never a stale segment served; corrupted-cache-entry is re-encoded and the build succeeds; every warm output is equivalent to its cold build (same frame count and duration, SR-005 profile via ffprobe). Atomic-finalize/failure legs are TC-080
-    - LLR-055 [Draft] — Warm-build segment planner (hit/miss partition)
+    - LLR-055 [Implemented] — Warm-build segment planner (hit/miss partition)
       - TC-076 [Draft] — Call the pure plan_segments over an ordered album and a store key set per scenario: warm-unchanged partitions all segments as hits (0 misses); added-photos marks only the new clips plus their transition neighbors as misses; removed-photo marks only the removed clip's neighbors; assert each segment descriptor spans second-half-transition-in + body + first-half-transition-out and that per-segment output start frames and frame counts sum to the album total minus transition overlaps
       - TC-081 [Draft] — Drive build over a temp album through the SR-037 scenario x cache-flag Permutations (@pairwise): cold populates the cache; warm-unchanged re-encodes 0 segments, asserted honestly via the cache hit/miss counts surfaced in the summary/log (only misses re-encoded); added-photos re-encodes only the new clips plus transition neighbors; removed-photo only the neighbors; changed-settings (resolution, quality, encoder, preset) invalidates the affected output's segments — a full/partial miss re-encoded, never a stale segment served; corrupted-cache-entry is re-encoded and the build succeeds; every warm output is equivalent to its cold build (same frame count and duration, SR-005 profile via ffprobe). Atomic-finalize/failure legs are TC-080
     - LLR-056 [Implemented] — Segment encode + concat assembly routed through watchdog + disk-full + atomic promote
       - TC-079 [Draft] — Concat-seam spike (plan §4 mandatory early risk burn-down; first Round 3 item): build the same small fixed corpus twice with the software encoder — (a) cold/streaming, (b) segmented + `ffmpeg -f concat -c copy` assembly; ffprobe both outputs and assert identical total frame count, identical duration, and the SR-005 profile on the concat output; decode a window around every segment join and assert no dropped/duplicated frames (frame-count + per-frame hash comparison across each join). CI-runnable with the software encoder; the real-frame visual leg is TC-082
       - TC-080 [Draft] — Force failures in the concat assembly path: a non-zero concat exit surfaces as a named SlideshowError with non-zero exit and no false success; the concat child is armed with the same ffmpeg_timeout_secs watchdog (inactivity aborts, naming the output); a disk-full write maps through is_disk_full/disk_full_error naming the path; killing mid-concat leaves NO final <name>.mp4 — the final name appears only via promote() and the .part is cleaned
       - TC-082 [Draft] — Demonstration on the dev box plus a real target picture frame (plan §4 gate; scheduled BEFORE any cache implementation commit per the R2 MINOR): build the bench corpus segmented+concat with software and h264_nvenc encoders, play both outputs on the physical frame, and visually confirm seam-free playback — no stutter, flash, or timestamp jump at any segment join. Automated=No: target-hardware visual judgment
-    - LLR-057 [Draft] — Audio-delay bookkeeping across the concat timeline
+    - LLR-057 [Implemented] — Audio-delay bookkeeping across the concat timeline
       - TC-077 [Draft] — For an album mixing images and audio-bearing video, compute each audio clip's output start frame from SegmentPlan frame offsets (cached path) and from the streaming mixer.emitted() capture (LLR-040 path); assert the two agree for every clip so warm and cold builds mux identical adelay values through the unchanged delay_ms (TC-055 math)
   - SR-038 [Draft] — Media-scan probe cache keyed by file identity
     - LLR-058 [Implemented] — Probe-cache JSON persistence in per-user cache dir
@@ -1056,10 +1056,6 @@ graph LR
     class SR_036 draft;
     class SR_037 draft;
     class SR_038 draft;
-    class LLR_053 draft;
-    class LLR_054 draft;
-    class LLR_055 draft;
-    class LLR_057 draft;
     class LLR_063 draft;
     class LLR_064 draft;
     class TC_001 draft;

@@ -5,10 +5,6 @@
 //! `src/ffmpeg` to reuse the module-private watchdog decision (`timed_out`,
 //! SR-013) and part-path convention.
 
-// lib-API: the SR-037 segmented path, exercised via tests/concat_seam.rs; the
-// binary wires it up with the warm-build planner (LLR-055, Round 5b).
-#![allow(dead_code)]
-
 use super::{now_ms, part_path, timed_out};
 use crate::error::{Result, SlideshowError};
 use crate::util::{disk_full_error, is_disk_full};

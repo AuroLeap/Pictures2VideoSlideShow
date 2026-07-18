@@ -70,6 +70,20 @@ pub struct ProcessingConfig {
     // Implements: SR-031, LLR-037
     #[serde(default)]
     pub default_focus: Option<[f32; 2]>,
+
+    /// Size cap for the SR-037 segment cache, in GB; least-recently-used
+    /// segments are pruned past it after each build. Must be positive.
+    /// The cache roots at `temp_dir` when set, else the per-user cache dir.
+    // Implements: SR-037, LLR-054
+    #[serde(default = "default_segment_cache_gb")]
+    pub segment_cache_gb: f64,
+}
+
+/// Default segment-cache size cap (SR-037 bounded-cache requirement): 20 GB
+/// holds several full album-outputs' segments at typical slideshow bitrates.
+// Implements: LLR-054, SR-037
+fn default_segment_cache_gb() -> f64 {
+    20.0
 }
 
 /// Default FFmpeg inactivity timeout (SR-013): 120s with no encoder progress.
@@ -225,6 +239,16 @@ impl Config {
             ));
         }
 
+        // Implements: SR-037, LLR-054 — the cache byte cap must be positive
+        // (0 would evict every segment and silently defeat the cache).
+        let cap = self.processing.segment_cache_gb;
+        if !cap.is_finite() || cap <= 0.0 {
+            return Err(SlideshowError::InvalidConfig(format!(
+                "segment_cache_gb must be positive (got {})",
+                self.processing.segment_cache_gb
+            )));
+        }
+
         for output in &self.outputs {
             if output.width == 0 || output.height == 0 {
                 return Err(SlideshowError::InvalidConfig(format!(
@@ -342,6 +366,18 @@ mod tests {
         assert!(!p.dry_run, "documented default: false");
         assert!(!p.verbose, "documented default: false");
         assert_eq!(p.ffmpeg_timeout_secs, 120, "documented default: 120s");
+        // Implements: SR-037, LLR-054 — cache cap default (quick-ref §4).
+        assert_eq!(p.segment_cache_gb, 20.0, "documented default: 20 GB");
+    }
+
+    // Verifies: SR-037, LLR-054 — a non-positive cache cap is rejected with a
+    // plain-language error naming the field.
+    #[test]
+    fn segment_cache_gb_must_be_positive_sr037() {
+        let mut cfg = config_with_outputs(vec![sample_output(320, 240)]);
+        cfg.processing.segment_cache_gb = 0.0;
+        let err = cfg.validate().expect_err("zero cap rejected").to_string();
+        assert!(err.contains("segment_cache_gb"), "names the field: {err}");
     }
 
     // Verifies: SR-032, LLR-042 — audio config fields default when omitted from

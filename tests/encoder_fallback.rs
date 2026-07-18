@@ -76,6 +76,7 @@ ignore_patterns = []
 base_dir = "{base_s}"
 
 [processing]
+temp_dir = "{base_s}/cache"
 ffmpeg_path = "{fake_s}"
 
 [[outputs]]

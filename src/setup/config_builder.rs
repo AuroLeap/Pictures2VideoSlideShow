@@ -80,6 +80,7 @@ pub fn build_config(v: &WizardValues) -> Config {
             ffmpeg_timeout_secs: DEFAULT_FFMPEG_TIMEOUT_SECS,
             ffmpeg_path: None,
             default_focus: None,
+            segment_cache_gb: 20.0,
         },
         outputs,
     }

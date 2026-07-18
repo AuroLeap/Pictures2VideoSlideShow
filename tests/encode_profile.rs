@@ -41,6 +41,7 @@ ignore_patterns = []
 base_dir = "{base_s}"
 
 [processing]
+temp_dir = "{base_s}/cache"
 use_parallelism = true
 dry_run = false
 verbose = false

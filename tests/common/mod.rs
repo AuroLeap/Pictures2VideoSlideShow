@@ -101,6 +101,7 @@ ignore_patterns = []
 base_dir = "{base}"
 
 [processing]
+temp_dir = "{base}/cache"
 use_parallelism = true
 dry_run = false
 verbose = false
@@ -169,6 +170,111 @@ pub fn assert_sr005_profile(mp4: &Path) {
         "faststart: moov ({moov:?}) should precede mdat ({mdat:?}) in {}",
         mp4.display()
     );
+}
+
+/// Deterministic per-pixel noise PNG (xorshift): adjacent output frames of a
+/// Ken Burns pan differ strongly, so a one-frame drop/dup or a stale cached
+/// segment shows up as a large pixel delta instead of hiding in flat color.
+/// Shared by the SR-037 suites (concat seams, cache scenarios).
+pub fn write_noise_png(path: &Path, w: u32, h: u32, seed: u32) {
+    let mut state = seed | 1;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        state
+    };
+    let mut img = image::RgbImage::new(w, h);
+    for p in img.pixels_mut() {
+        let v = next();
+        *p = image::Rgb([
+            (v & 0xFF) as u8,
+            ((v >> 8) & 0xFF) as u8,
+            ((v >> 16) & 0xFF) as u8,
+        ]);
+    }
+    img.save(path).expect("save noise png");
+}
+
+/// A `MediaFile` image entry for an on-disk file, with its real size/mtime
+/// identity (the SR-037 cache key inputs) and header dimensions.
+pub fn image_media_file(path: &Path) -> slideshow_core::media::MediaFile {
+    let meta = fs::metadata(path).expect("image metadata");
+    let mtime_ms = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let dims = image::image_dimensions(path).expect("image dimensions");
+    slideshow_core::media::MediaFile {
+        path: path.to_path_buf(),
+        file_type: slideshow_core::media::MediaType::Image,
+        dimensions: dims,
+        duration_secs: None,
+        size_bytes: meta.len(),
+        mtime_ms,
+        has_audio: false,
+    }
+}
+
+/// Decode every frame of `mp4` to raw rgb24 buffers of `w`x`h` via ffmpeg.
+/// Shared by the SR-037 equivalence suites (TC-079 concat seams, TC-081 cache
+/// scenarios) so the cold-vs-warm comparison lives once.
+// Verifies: SR-037 (equivalence legs)
+pub fn decode_frames(mp4: &Path, w: u32, h: u32) -> Vec<Vec<u8>> {
+    let out = std::process::Command::new("ffmpeg")
+        .args(["-v", "error", "-i"])
+        .arg(mp4)
+        .args(["-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"])
+        .output()
+        .expect("run ffmpeg decode");
+    assert!(
+        out.status.success(),
+        "ffmpeg decode of {} failed: {}",
+        mp4.display(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let frame_bytes = (w * h * 3) as usize;
+    assert_eq!(
+        out.stdout.len() % frame_bytes,
+        0,
+        "decoded byte count of {} is not a whole number of {w}x{h} frames",
+        mp4.display(),
+    );
+    out.stdout.chunks(frame_bytes).map(|c| c.to_vec()).collect()
+}
+
+/// Container duration in seconds via ffprobe (SR-037 equivalence legs).
+pub fn probe_duration(mp4: &Path) -> f64 {
+    let out = std::process::Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+        ])
+        .arg(mp4)
+        .output()
+        .expect("run ffprobe");
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .expect("parse duration")
+}
+
+/// Mean absolute per-byte difference between two rgb24 frames (encode-noise
+/// tolerant frame comparison for the SR-037 equivalence legs).
+pub fn mean_abs_diff(a: &[u8], b: &[u8]) -> f64 {
+    assert_eq!(a.len(), b.len());
+    let sum: u64 = a
+        .iter()
+        .zip(b.iter())
+        .map(|(&x, &y)| (x as i16 - y as i16).unsigned_abs() as u64)
+        .sum();
+    sum as f64 / a.len() as f64
 }
 
 /// Hash-ish fingerprint of a file: (len, mtime-nanos, full byte content hash).

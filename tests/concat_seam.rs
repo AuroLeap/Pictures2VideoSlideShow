@@ -2,23 +2,28 @@
 //! the same small fixed corpus is built (a) cold through today's streaming
 //! single-encoder pipeline and (b) as per-clip segments encoded separately and
 //! assembled with a stream-copy `ffmpeg -f concat`, then the two outputs are
-//! compared frame-for-frame. This is the plan §4 mandatory risk burn-down that
-//! gates the SR-037 segment cache: identical frame count and duration, the
-//! SR-005 profile on the assembled file, and clean seams (no dropped or
-//! duplicated frames) at every segment join.
+//! compared frame-for-frame. This is the plan §4 risk burn-down that gates the
+//! SR-037 segment cache: identical frame count and duration, the SR-005
+//! profile on the assembled file, and clean seams (no dropped or duplicated
+//! frames) at every segment join. The segmented build here runs against a
+//! fresh (empty) SegmentStore, i.e. the all-miss cold path; the warm/cache
+//! scenarios are tests/segment_cache.rs (TC-081).
 //!
 //! Verifies: SR-037, SR-005, LLR-056. (TC-079, TC-080.) FFmpeg/ffprobe must be
 //! on PATH (CI invariant).
 
 mod common;
 
-use common::{assert_sr005_profile, TempDir};
+use common::{
+    assert_sr005_profile, decode_frames, image_media_file, mean_abs_diff, probe_duration,
+    write_noise_png, TempDir,
+};
+use slideshow_core::cache::store::SegmentStore;
 use slideshow_core::config::{OutputDef, ProcessingConfig};
 use slideshow_core::ffmpeg::concat::concat_segments;
-use slideshow_core::media::{Album, MediaFile, MediaType};
+use slideshow_core::media::Album;
 use slideshow_core::pipeline::FrameGenerationPipeline;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// Source image size: larger than the output so the Ken Burns crop resamples
 /// real texture instead of upscaling flat color.
@@ -63,30 +68,8 @@ fn processing() -> ProcessingConfig {
         ffmpeg_timeout_secs: 120,
         ffmpeg_path: None,
         default_focus: None,
+        segment_cache_gb: 20.0,
     }
-}
-
-/// Deterministic per-pixel noise PNG (xorshift), so adjacent output frames of
-/// the Ken Burns pan differ strongly — a one-frame drop/dup at a seam then
-/// shows up as a large pixel delta instead of hiding in flat color.
-fn write_noise_png(path: &Path, seed: u32) {
-    let mut state = seed | 1;
-    let mut next = move || {
-        state ^= state << 13;
-        state ^= state >> 17;
-        state ^= state << 5;
-        state
-    };
-    let mut img = image::RgbImage::new(SRC_W, SRC_H);
-    for p in img.pixels_mut() {
-        let v = next();
-        *p = image::Rgb([
-            (v & 0xFF) as u8,
-            ((v >> 8) & 0xFF) as u8,
-            ((v >> 16) & 0xFF) as u8,
-        ]);
-    }
-    img.save(path).expect("save noise png");
 }
 
 /// A four-image album over `media` dir (writes the corpus on first call).
@@ -98,15 +81,8 @@ fn build_album(media: &Path) -> Album {
         .enumerate()
     {
         let p = media.join(format!("img_{i}.png"));
-        write_noise_png(&p, *seed);
-        files.push(MediaFile {
-            path: p.clone(),
-            file_type: MediaType::Image,
-            dimensions: (SRC_W, SRC_H),
-            duration_secs: None,
-            size_bytes: std::fs::metadata(&p).unwrap().len(),
-            has_audio: false,
-        });
+        write_noise_png(&p, SRC_W, SRC_H, *seed);
+        files.push(image_media_file(&p));
     }
     Album {
         media_files: files,
@@ -114,63 +90,6 @@ fn build_album(media: &Path) -> Album {
         created_at: std::time::SystemTime::now(),
         probe_stats: Default::default(),
     }
-}
-
-/// Decode every frame of `mp4` to raw rgb24 buffers via ffmpeg.
-fn decode_frames(mp4: &Path) -> Vec<Vec<u8>> {
-    let out = Command::new("ffmpeg")
-        .args(["-v", "error", "-i"])
-        .arg(mp4)
-        .args(["-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"])
-        .output()
-        .expect("run ffmpeg decode");
-    assert!(
-        out.status.success(),
-        "ffmpeg decode of {} failed: {}",
-        mp4.display(),
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let frame_bytes = (OUT_W * OUT_H * 3) as usize;
-    assert_eq!(
-        out.stdout.len() % frame_bytes,
-        0,
-        "decoded byte count of {} is not a whole number of {}x{} frames",
-        mp4.display(),
-        OUT_W,
-        OUT_H
-    );
-    out.stdout.chunks(frame_bytes).map(|c| c.to_vec()).collect()
-}
-
-/// Container duration in seconds via ffprobe.
-fn probe_duration(mp4: &Path) -> f64 {
-    let out = Command::new("ffprobe")
-        .args([
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-        ])
-        .arg(mp4)
-        .output()
-        .expect("run ffprobe");
-    String::from_utf8_lossy(&out.stdout)
-        .trim()
-        .parse()
-        .expect("parse duration")
-}
-
-/// Mean absolute per-byte difference between two rgb24 frames.
-fn mean_abs_diff(a: &[u8], b: &[u8]) -> f64 {
-    assert_eq!(a.len(), b.len());
-    let sum: u64 = a
-        .iter()
-        .zip(b.iter())
-        .map(|(&x, &y)| (x as i16 - y as i16).unsigned_abs() as u64)
-        .sum();
-    sum as f64 / a.len() as f64
 }
 
 /// Verifies: SR-037, SR-005, LLR-056 (TC-079) — the segmented+concat build of
@@ -200,10 +119,11 @@ fn segmented_concat_build_equals_cold_build_sr037() {
     assert_eq!(summary.written.len(), 1, "cold build writes one output");
     let cold_mp4 = summary.written[0].path.clone();
 
-    // (b) The same corpus as independently-encoded per-clip segments,
-    // assembled by stream-copy concat.
+    // (b) The same corpus as independently-encoded per-clip segments against
+    // an empty store (all-miss cold cached build), assembled by stream-copy
+    // concat.
     let seg_out_dir = tmp.join("segmented");
-    let seg_dir = tmp.join("segments");
+    let mut store = SegmentStore::open(&tmp.join("store")).expect("open store");
     let seg_pipe = FrameGenerationPipeline::new(
         album,
         vec![def.clone()],
@@ -213,11 +133,13 @@ fn segmented_concat_build_equals_cold_build_sr037() {
         None,
     );
     let build = seg_pipe
-        .execute_segmented(&def, &seg_dir)
+        .execute_segmented(&def, &mut store)
         .expect("segmented build")
         .expect("segmented build produced an output");
 
-    // One segment per clip, one boundary per transition, all promoted files real.
+    // One segment per clip, one boundary per transition, all committed
+    // segments real; a cold (empty-cache) build reuses nothing (SR-037 cold
+    // scenario evidence).
     assert_eq!(build.segments.len(), 4, "one segment per clip");
     assert_eq!(build.boundaries.len(), 3, "one boundary per transition");
     assert!(
@@ -225,6 +147,7 @@ fn segmented_concat_build_equals_cold_build_sr037() {
         "boundaries strictly increasing: {:?}",
         build.boundaries
     );
+    assert_eq!((build.reused, build.re_encoded), (0, 4), "cold = all miss");
     for seg in &build.segments {
         assert!(seg.exists(), "segment file exists: {}", seg.display());
     }
@@ -240,8 +163,8 @@ fn segmented_concat_build_equals_cold_build_sr037() {
         "durations differ: cold {d_cold:.4}s vs assembled {d_asm:.4}s"
     );
 
-    let cold = decode_frames(&cold_mp4);
-    let asm = decode_frames(&build.output);
+    let cold = decode_frames(&cold_mp4, OUT_W, OUT_H);
+    let asm = decode_frames(&build.output, OUT_W, OUT_H);
     assert_eq!(
         cold.len(),
         asm.len(),
@@ -250,7 +173,7 @@ fn segmented_concat_build_equals_cold_build_sr037() {
     assert_eq!(
         asm.len() as u64,
         build.frames,
-        "assembled frame count matches the frames the mixer emitted"
+        "assembled frame count matches the planned emission"
     );
 
     // Seam integrity: around every join, each assembled frame matches the cold

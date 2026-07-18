@@ -1,8 +1,10 @@
 //! Pipeline orchestration: wire media → frame generation → FFmpeg encoding,
 //! with cross-fade (dissolve) transitions between consecutive clips.
 //!
-//! For each output definition we open one FFmpeg encoder and drive every clip
-//! (image or video) through a streaming [`CrossfadeMixer`]. The mixer only ever
+//! Two encode paths share one frame source, the streaming [`CrossfadeMixer`]:
+//! the single-encoder streaming build (`--no-cache`), and the default SR-037
+//! cached build — plan segments against the store, re-encode only miss runs,
+//! assemble by stream-copy concat, then mux/promote. The mixer only ever
 //! holds a rolling window of `fade_frames` at each boundary, so memory stays
 //! bounded regardless of clip length or count — whole videos are never loaded.
 
@@ -10,6 +12,9 @@ mod prefetch;
 mod segment;
 mod source;
 
+use crate::cache::planner::{self, ClipFacts, SegmentPlan};
+use crate::cache::store::SegmentStore;
+use crate::cache::{EncodeParams, SourceIdentity};
 use crate::config::{OutputDef, ProcessingConfig};
 use crate::error::Result;
 use crate::ffmpeg::audio::{AudioClip, AudioParams};
@@ -28,7 +33,7 @@ use segment::SegmentedEncoderSink;
 use source::{FrameSource, ImageFrameSource, VideoFrameSource};
 use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -70,6 +75,10 @@ pub struct SkippedInput {
 pub struct WrittenOutput {
     pub path: PathBuf,
     pub size_bytes: u64,
+    /// Cached-build evidence (SR-037): `(segments reused, segments
+    /// re-encoded)`. `None` on the streaming (`--no-cache`) path.
+    // Implements: LLR-055, SR-037
+    pub cache: Option<(usize, usize)>,
 }
 
 /// Per-output stage totals and frame count, captured for the `--verbose`
@@ -291,8 +300,8 @@ impl FrameGenerationPipeline {
 
         let total = media.len();
         let start = Instant::now();
-        let (produced_total, audio_clips) =
-            self.drive_clips(output_def, media, &mut mixer, batch, &stage_timings)?;
+        let outcome = self.drive_clips(output_def, media, &mut mixer, batch, &stage_timings)?;
+        let (produced_total, audio_clips) = (outcome.produced, outcome.audio);
 
         // All inputs were skipped/unusable for this output: abort without
         // finalizing so no complete-looking (empty) `<name>.mp4` is produced.
@@ -367,16 +376,18 @@ impl FrameGenerationPipeline {
         Ok(Some(WrittenOutput {
             path: out_path,
             size_bytes,
+            cache: None,
         }))
     }
 
     /// Drive every media item of one output through `mixer`: prefetch image
     /// clips in the background (LLR-060), join each at its own item, skip and
     /// record failures (SR-014), and capture audio-bearing clips' output start
-    /// frames (LLR-040). Returns `(source frames produced, audio clips)` —
-    /// zero produced means every input was skipped and nothing may finalize.
-    /// Shared verbatim by the streaming and segmented encode paths so the two
-    /// builds emit an identical frame sequence (SR-022 determinism).
+    /// frames (LLR-040). Zero `produced` means every input was skipped and
+    /// nothing may finalize. Shared verbatim by the streaming and segmented
+    /// encode paths so the two builds emit an identical frame sequence
+    /// (SR-022 determinism); the cached path additionally reads the per-clip
+    /// actual frame counts (LLR-055).
     // Implements: LLR-017, LLR-060, LLR-040, SR-014, SR-032, SR-036
     fn drive_clips<S: FrameSink>(
         &self,
@@ -385,13 +396,18 @@ impl FrameGenerationPipeline {
         mixer: &mut CrossfadeMixer<S>,
         batch: u32,
         stage_timings: &Arc<StageTimings>,
-    ) -> Result<(u64, Vec<AudioClip>)> {
+    ) -> Result<DriveOutcome> {
         let (width, height) = output_def.even_dims();
         let total = media.len();
         // Source frames contributed across all clips for this output; if zero
         // (every input skipped/unusable) we must NOT finalize an empty file.
         // Implements: LLR-017, SR-014
         let mut produced_total: u64 = 0;
+
+        // Per-clip actual source frame counts, aligned with `media`; `None`
+        // marks a skipped clip. The cached path records these as the exact
+        // layout inputs (LLR-055).
+        let mut clip_frames: Vec<Option<u64>> = vec![None; media.len()];
 
         // Audio-bearing video clips and their output start frames, for the
         // optional audio passthrough mux after the silent video is built.
@@ -468,14 +484,15 @@ impl FrameGenerationPipeline {
             // Capture this clip's output start frame BEFORE mixing it in; for an
             // audio-bearing video that frame is the clip's audio delay (LLR-040).
             let start_frame = mixer.emitted();
-            let clip_frames = mixer.add_clip(src.as_mut())?;
+            let produced = mixer.add_clip(src.as_mut())?;
+            clip_frames[idx] = Some(produced);
             if output_def.enable_audio && item.file_type == MediaType::Video && item.has_audio {
                 audio_clips.push(AudioClip {
                     source: item.path.clone(),
                     start_frame,
                 });
             }
-            produced_total += clip_frames;
+            produced_total += produced;
             log::info!(
                 "  [{}/{}] {} {} ({} frames)",
                 idx + 1,
@@ -485,36 +502,113 @@ impl FrameGenerationPipeline {
                     MediaType::Video => "[vid]",
                 },
                 name,
-                clip_frames,
+                produced,
             );
         }
 
-        Ok((produced_total, audio_clips))
+        Ok(DriveOutcome {
+            produced: produced_total,
+            audio: audio_clips,
+            clip_frames,
+        })
     }
 
-    /// Build one output as independently-encoded per-clip MPEG-TS segments
-    /// (split at transition midpoints) assembled by stream-copy concat — the
-    /// SR-037 spike path and the Phase-2 foundation. The frame sequence is
-    /// identical to [`Self::execute`]'s streaming build (shared
-    /// [`Self::drive_clips`]); only the encode is segmented. The final
-    /// `<name>.mp4` appears atomically via the shared promote (SR-011).
-    ///
-    /// Not yet wired to the segment cache: every segment is encoded (a "cold"
-    /// segmented build). Audio passthrough is not mapped through the concat
-    /// timeline yet (LLR-057, Round 5b) — audio-bearing clips are logged and
-    /// the output stays silent. Returns `None` when there is no media or every
-    /// input was skipped (same contract as the streaming path, SR-014).
-    // Implements: LLR-056, SR-037, SR-011, SR-013
-    // lib-API: SR-037 segmented path (tests/concat_seam.rs; bin wiring 5b).
-    #[allow(dead_code)]
+    /// Run every output through the SR-037 cache-aware segmented path against
+    /// one shared `store` (keys embed the output parameters, so outputs
+    /// coexist), then LRU-prune the store to the configured cap and persist
+    /// its index. The default `build` path; `--no-cache` uses
+    /// [`Self::execute`] instead (neither reads nor writes the store).
+    // Implements: LLR-054, LLR-055, SR-037, SR-014
+    pub async fn execute_cached(&self, store: &mut SegmentStore) -> Result<BuildSummary> {
+        ensure_dir_exists(&self.output_dir)?;
+        let mut written = Vec::new();
+        for output_def in &self.outputs {
+            if let Some(build) = self.execute_segmented(output_def, store)? {
+                let size_bytes = std::fs::metadata(&build.output)
+                    .map(|m| m.len())
+                    .unwrap_or(0);
+                written.push(WrittenOutput {
+                    path: build.output,
+                    size_bytes,
+                    cache: Some((build.reused, build.re_encoded)),
+                });
+            }
+        }
+        // Bound the cache (SR-037) and persist the index; a save failure is
+        // logged, never a build failure — the outputs are already promoted.
+        let cap_bytes = (self.processing.segment_cache_gb * 1e9) as u64;
+        store.prune_to(cap_bytes);
+        if let Err(e) = store.save() {
+            log::warn!("Segment cache index not saved (build unaffected): {}", e);
+        }
+        Ok(BuildSummary {
+            written,
+            skipped: self.skipped.borrow().clone(),
+            timings: self.timings.borrow().clone(),
+        })
+    }
+
+    /// The per-clip planner facts for the current effective media list: cache
+    /// identity, applied Ken Burns focus, best-known frame count (exact for
+    /// images and previously-encoded videos; probed-duration estimate
+    /// otherwise), and audio presence.
+    // Implements: LLR-055, SR-037
+    fn clip_facts(
+        &self,
+        output_def: &OutputDef,
+        media: &[&MediaFile],
+        store: &mut SegmentStore,
+    ) -> Vec<ClipFacts> {
+        let image_frames = output_def.total_frames() as u64;
+        media
+            .iter()
+            .map(|m| {
+                let identity = SourceIdentity::of(m);
+                let is_image = m.file_type == MediaType::Image;
+                let (frames, frames_exact) = if is_image {
+                    (image_frames, true)
+                } else {
+                    match store.clip_frames(&identity, output_def.fps) {
+                        Some(f) => (f, true),
+                        None => (
+                            planner::estimate_video_frames(m.duration_secs, output_def.fps),
+                            false,
+                        ),
+                    }
+                };
+                ClipFacts {
+                    focus: if is_image {
+                        self.focus_for(&m.path)
+                    } else {
+                        None
+                    },
+                    identity,
+                    frames,
+                    frames_exact,
+                    has_audio: !is_image && m.has_audio,
+                }
+            })
+            .collect()
+    }
+
+    /// Build one output via the SR-037 segment cache: plan hit/miss against
+    /// `store`, encode only the miss runs (each through the mixer +
+    /// [`SegmentedEncoderSink`], so frames are identical to the streaming
+    /// build — SR-022), assemble hits + fresh segments by stream-copy concat
+    /// (LLR-056), map audio delays through the concat timeline into the
+    /// unchanged mux (LLR-057/LLR-040/LLR-041), and promote atomically
+    /// (SR-011). A clip that fails mid-run is skipped and the album re-planned
+    /// without it (SR-014 — its neighbors' keys change, so exactly the
+    /// affected segments re-encode). Returns `None` when there is no media or
+    /// every input was skipped.
+    // Implements: LLR-053, LLR-054, LLR-055, LLR-056, LLR-057, SR-037, SR-011, SR-013, SR-014, SR-032
     pub fn execute_segmented(
         &self,
         output_def: &OutputDef,
-        segment_dir: &Path,
+        store: &mut SegmentStore,
     ) -> Result<Option<SegmentedBuild>> {
         ensure_dir_exists(&self.output_dir)?;
-        ensure_dir_exists(segment_dir)?;
-        let media: Vec<_> = self.album.media_files.iter().collect();
+        let mut media: Vec<&MediaFile> = self.album.media_files.iter().collect();
         if media.is_empty() {
             log::warn!("No media to process for output '{}'", output_def.name);
             return Ok(None);
@@ -522,7 +616,8 @@ impl FrameGenerationPipeline {
 
         let (width, height) = output_def.even_dims();
         let out_path = self.output_dir.join(format!("{}.mp4", output_def.name));
-        // Same encoder resolution as the streaming path (SR-034 fallback).
+        // Same encoder resolution as the streaming path (SR-034 fallback); the
+        // *resolved* encoder enters every segment key (LLR-053).
         let selection = crate::ffmpeg::probe::selection_for(
             self.processing.ffmpeg_path.as_deref(),
             &output_def.encoder,
@@ -531,7 +626,7 @@ impl FrameGenerationPipeline {
             log::warn!("Output '{}': {}", output_def.name, reason);
         }
         log::info!(
-            "Encoding '{}' (segmented) -> {} ({}x{} @ {}fps, crf {}, encoder {})",
+            "Encoding '{}' (cached segments) -> {} ({}x{} @ {}fps, crf {}, encoder {})",
             output_def.name,
             out_path.display(),
             width,
@@ -540,73 +635,383 @@ impl FrameGenerationPipeline {
             output_def.quality_crf,
             selection.describe(),
         );
+        self.warn_if_estimated_oversize(output_def, &media);
 
+        let params = EncodeParams::of(output_def, selection.encoder.codec_name());
+        let engine = crate::cache::engine_version();
+        let enc = EncoderSettings {
+            choice: selection.encoder,
+            crf: output_def.quality_crf,
+            x264_preset: output_def.x264_preset.clone(),
+        };
+        let fade = output_def.fade_frames() as usize;
         let frame_bytes = (width * height * 3) as usize;
         let batch = (RANGE_MEMORY_BUDGET / frame_bytes.max(1)).max(1) as u32;
         let stage_timings = Arc::new(StageTimings::new());
+        let start = Instant::now();
 
-        let sink = SegmentedEncoderSink::start(
-            segment_dir,
-            &output_def.name,
-            width,
-            height,
-            output_def.fps,
-            EncoderSettings {
-                choice: selection.encoder,
-                crf: output_def.quality_crf,
-                x264_preset: output_def.x264_preset.clone(),
-            },
-            self.processing.ffmpeg_timeout_secs,
-        )?;
-        let mut mixer = CrossfadeMixer::new(
-            sink,
-            output_def.fade_frames() as usize,
-            Arc::clone(&stage_timings),
-        );
+        // Keys committed (re-encoded) during THIS build — the honest
+        // re-encode count for the summary (TC-081 evidence).
+        let mut committed: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-        let (produced_total, audio_clips) =
-            self.drive_clips(output_def, &media, &mut mixer, batch, &stage_timings)?;
-        if produced_total == 0 {
-            log::warn!(
-                "No frames produced for '{}' (every input skipped/unusable); no output written",
-                output_def.name
+        // Plan → encode misses → re-plan until everything is a hit. Each
+        // iteration either commits segments, records exact frame counts, or
+        // removes a skipped clip, so the loop converges; the bound fails
+        // loudly rather than spinning (SR-014 fail-loudly spirit).
+        let mut iterations = 0usize;
+        let (plan, facts) = loop {
+            iterations += 1;
+            if iterations > 2 * self.album.media_files.len() + 4 {
+                return Err(crate::error::SlideshowError::Processing(format!(
+                    "segment planning for '{}' did not converge; re-run with --no-cache",
+                    output_def.name
+                )));
+            }
+            if media.is_empty() {
+                log::warn!(
+                    "No frames produced for '{}' (every input skipped/unusable); no output written",
+                    output_def.name
+                );
+                return Ok(None);
+            }
+            let facts = self.clip_facts(output_def, &media, store);
+            let plan = planner::plan_segments(&facts, fade, &params, &engine, |k| store.lookup(k));
+            log::debug!(
+                "Output '{}': plan {} segments, {} hits, {} misses (SR-037)",
+                output_def.name,
+                plan.segments.len(),
+                plan.hits(),
+                plan.misses(),
             );
-            drop(mixer);
-            return Ok(None);
-        }
+            let miss_runs = miss_runs(&plan);
+            if miss_runs.is_empty() {
+                break (plan, facts);
+            }
+            for run in miss_runs {
+                match self.encode_run(
+                    output_def,
+                    &media,
+                    &facts,
+                    &plan,
+                    run,
+                    store,
+                    &enc,
+                    &params,
+                    &engine,
+                    batch,
+                    &stage_timings,
+                    &mut committed,
+                )? {
+                    RunOutcome::Committed => {}
+                    // Short-circuit the remaining runs — their plan is stale.
+                    RunOutcome::Replan => break,
+                    RunOutcome::Skipped(paths) => {
+                        media.retain(|m| !paths.contains(&m.path));
+                        break;
+                    }
+                }
+            }
+            // Loop again unconditionally: the committed segments (and recorded
+            // actual counts) turn this plan's misses into hits, and the final
+            // all-hit plan is the assembly truth.
+        };
 
-        let (emitted, sink) = mixer.finish()?;
-        let (segments, boundaries) = sink.finish_all()?;
-        if output_def.enable_audio && !audio_clips.is_empty() {
-            // LLR-057 (Round 5b) maps audio delays through the concat
-            // timeline; until then the segmented path is video-only.
-            log::warn!(
-                "Output '{}': segmented build does not mux audio yet; output is silent",
-                output_def.name
-            );
+        // Assemble: every planned segment is now a validated store hit.
+        let mut segments = Vec::with_capacity(plan.segments.len());
+        let mut boundaries = Vec::new();
+        let mut total_frames: u64 = 0;
+        for seg in &plan.segments {
+            let (path, frames) = seg
+                .stored
+                .clone()
+                .expect("all-hit plan: every segment has a stored file");
+            if total_frames > 0 {
+                boundaries.push(total_frames);
+            }
+            total_frames += frames;
+            segments.push(path);
         }
+        let reused = plan
+            .segments
+            .iter()
+            .filter(|s| !committed.contains(&s.key))
+            .count();
+        let re_encoded = plan.segments.len() - reused;
 
         let part = crate::ffmpeg::concat::concat_segments(
             &segments,
             &out_path,
             self.processing.ffmpeg_timeout_secs,
         )?;
-        crate::ffmpeg::promote(&part, &out_path)?;
+
+        // Audio timeline (LLR-057): audio-bearing clips' output start frames
+        // come from the plan's frame offsets — the streaming path's
+        // mixer.emitted() capture (LLR-040) mapped through the concat plan —
+        // and feed the existing delay_ms/mux_audio unchanged (LLR-041), on
+        // the assembled .part before the atomic promote (SR-011).
+        // Implements: LLR-057, SR-032, SR-011
+        let audio_clips = if output_def.enable_audio {
+            if facts.iter().any(|f| f.has_audio && !f.frames_exact) {
+                // Only possible when a clip_frames record was pruned while its
+                // segment survived — starts could drift by ±1 frame until the
+                // next re-encode records them again.
+                log::debug!(
+                    "Output '{}': some audio start frames derive from estimated clip lengths",
+                    output_def.name
+                );
+            }
+            plan.audio_clips(&facts)
+        } else {
+            Vec::new()
+        };
+        if output_def.enable_audio && !audio_clips.is_empty() {
+            let audio_params = AudioParams {
+                bitrate_kbps: output_def.audio_bitrate_kbps,
+                sample_rate: output_def.audio_sample_rate,
+            };
+            log::info!(
+                "Muxing audio from {} video clip(s) into '{}'",
+                audio_clips.len(),
+                output_def.name
+            );
+            crate::ffmpeg::audio::mux_audio(
+                &part,
+                &out_path,
+                &audio_clips,
+                output_def.fps,
+                total_frames,
+                &audio_params,
+            )?;
+        } else {
+            if output_def.enable_audio {
+                log::info!(
+                    "Audio enabled for '{}' but no audio-bearing video clips found; output is silent",
+                    output_def.name
+                );
+            }
+            crate::ffmpeg::promote(&part, &out_path)?;
+        }
+
+        let elapsed = start.elapsed();
+        // Same end-of-output frames/s line as the streaming path (TC-072
+        // contract), plus the SR-037 reuse evidence (TC-081).
+        log::info!(
+            "Finished '{}': {} items, {} frames in {:.1}s ({:.1} frames/s) — segments: {} reused, {} re-encoded (SR-037)",
+            output_def.name,
+            media.len(),
+            total_frames,
+            elapsed.as_secs_f64(),
+            total_frames as f64 / elapsed.as_secs_f64().max(0.001),
+            reused,
+            re_encoded,
+        );
+        stage_timings.log_summary(&output_def.name);
+        self.timings.borrow_mut().push(OutputTimings {
+            name: output_def.name.clone(),
+            frames: total_frames,
+            stages: stage_timings.snapshot(),
+        });
 
         Ok(Some(SegmentedBuild {
             output: out_path,
             segments,
             boundaries,
-            frames: emitted,
+            frames: total_frames,
+            reused,
+            re_encoded,
         }))
     }
+
+    /// Encode one contiguous run of planned miss segments: render the run's
+    /// member clips plus the adjacent context clip on each side (their
+    /// overlapping transition frames are part of the segments), roll at the
+    /// mixer-signalled midpoints, and commit each non-context segment into the
+    /// store under its key. Frame identity with the streaming build follows
+    /// from the shared mixer/renderer and per-path determinism (SR-022).
+    // Implements: LLR-055, LLR-056, SR-037, SR-014, SR-022
+    #[allow(clippy::too_many_arguments)] // internal step fn: the run context is wide by nature
+    fn encode_run(
+        &self,
+        output_def: &OutputDef,
+        media: &[&MediaFile],
+        facts: &[ClipFacts],
+        plan: &SegmentPlan,
+        run: std::ops::Range<usize>,
+        store: &mut SegmentStore,
+        enc: &EncoderSettings,
+        params: &EncodeParams,
+        engine: &str,
+        batch: u32,
+        stage_timings: &Arc<StageTimings>,
+        committed: &mut std::collections::HashSet<String>,
+    ) -> Result<RunOutcome> {
+        let fade = output_def.fade_frames() as usize;
+        let first_clip = plan.segments[run.start].members.start;
+        let last_clip = plan.segments[run.end - 1].members.end;
+        // A non-first segment always opens at a transition midpoint, so the
+        // previous clip's tail frames are inside it — include that clip as
+        // context (and symmetrically on the right). Context partials are
+        // discarded after the run.
+        let ctx_left = first_clip > 0;
+        let ctx_right = last_clip < media.len();
+        let sub_start = first_clip - usize::from(ctx_left);
+        let sub_end = last_clip + usize::from(ctx_right);
+        let sub = &media[sub_start..sub_end];
+
+        let staging = store.staging_dir()?;
+        // Best-effort staging cleanup on every exit path.
+        struct StagingGuard(PathBuf);
+        impl Drop for StagingGuard {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let _guard = StagingGuard(staging.clone());
+
+        let (width, height) = output_def.even_dims();
+        let sink = SegmentedEncoderSink::start(
+            &staging,
+            &output_def.name,
+            width,
+            height,
+            output_def.fps,
+            enc.clone(),
+            self.processing.ffmpeg_timeout_secs,
+        )?;
+        let mut mixer = CrossfadeMixer::new(sink, fade, Arc::clone(stage_timings));
+        let outcome = self.drive_clips(output_def, sub, &mut mixer, batch, stage_timings)?;
+
+        // Record every actual video frame count first — even if we replan,
+        // exact counts make the next plan's layout exact (LLR-055).
+        for (m, cf) in sub.iter().zip(&outcome.clip_frames) {
+            if let (MediaType::Video, Some(f)) = (m.file_type, cf) {
+                store.record_clip_frames(&SourceIdentity::of(m), output_def.fps, *f);
+            }
+        }
+
+        let skipped: Vec<PathBuf> = sub
+            .iter()
+            .zip(&outcome.clip_frames)
+            .filter(|(_, cf)| cf.is_none())
+            .map(|(m, _)| m.path.clone())
+            .collect();
+        if !skipped.is_empty() {
+            // drive_clips already logged + recorded the skips (SR-014); the
+            // caller drops the clips and re-plans — the neighbors' keys change
+            // so exactly the affected segments re-encode.
+            drop(mixer);
+            return Ok(RunOutcome::Skipped(skipped));
+        }
+
+        let (_emitted, sink) = mixer.finish()?;
+        let (seg_paths, _sink_boundaries) = sink.finish_all()?;
+
+        // Ground truth for this run: the layout over the ACTUAL counts. Its
+        // groups must match what the sink produced; each non-context group is
+        // a full-album segment (transition math is local to a clip and its
+        // neighbors, all present here) and is committed under its key.
+        let actual: Vec<u64> = outcome.clip_frames.iter().map(|c| c.unwrap_or(0)).collect();
+        let sub_layout = planner::clip_layout(&actual, fade);
+        let groups = planner::segment_groups(sub.len(), &sub_layout);
+        if groups.len() != seg_paths.len() {
+            log::warn!(
+                "Output '{}': segment run produced {} segments where {} were expected; re-planning",
+                output_def.name,
+                seg_paths.len(),
+                groups.len()
+            );
+            return Ok(RunOutcome::Replan);
+        }
+        let mut seg_starts: Vec<u64> = vec![0];
+        seg_starts.extend(sub_layout.boundaries.iter().map(|&(_, b)| b));
+
+        let mut committed_ranges: Vec<std::ops::Range<usize>> = Vec::new();
+        for (gi, g) in groups.iter().enumerate() {
+            let contains_ctx = (ctx_left && g.start == 0) || (ctx_right && g.end == sub.len());
+            if contains_ctx {
+                continue; // context partial — not a full-album segment
+            }
+            let album_members = (sub_start + g.start)..(sub_start + g.end);
+            let key = planner::group_key(facts, &album_members, params, engine);
+            let end = seg_starts.get(gi + 1).copied().unwrap_or(sub_layout.total);
+            store.commit(&key, &seg_paths[gi], end - seg_starts[gi])?;
+            committed.insert(key);
+            committed_ranges.push(album_members);
+        }
+
+        // If a frame-count estimate was wrong enough to change the grouping
+        // (e.g. a video turned out shorter than the transition), the committed
+        // set differs from the planned one — re-plan with the now-exact
+        // counts; the committed segments are picked up as hits.
+        let planned_ranges: Vec<std::ops::Range<usize>> = run
+            .clone()
+            .map(|si| plan.segments[si].members.clone())
+            .collect();
+        if committed_ranges != planned_ranges {
+            log::info!(
+                "Output '{}': actual clip lengths changed the segment grouping; re-planning",
+                output_def.name
+            );
+            return Ok(RunOutcome::Replan);
+        }
+        Ok(RunOutcome::Committed)
+    }
+}
+
+/// Outcome of driving one media list through the mixer (see
+/// [`FrameGenerationPipeline::drive_clips`]).
+// Implements: LLR-017, LLR-040, LLR-055, SR-014
+struct DriveOutcome {
+    /// Source frames contributed across all clips (0 = everything skipped).
+    produced: u64,
+    /// Audio-bearing clips with their mixer-captured start frames (LLR-040).
+    audio: Vec<AudioClip>,
+    /// Per-clip actual source frame counts (`None` = skipped), aligned with
+    /// the input media slice.
+    clip_frames: Vec<Option<u64>>,
+}
+
+/// How one miss-run encode ended (see
+/// [`FrameGenerationPipeline::encode_run`]).
+enum RunOutcome {
+    /// Every planned segment of the run is committed to the store.
+    Committed,
+    /// Structure diverged from the plan (now-recorded exact counts fix it) —
+    /// plan again.
+    Replan,
+    /// These clips failed to load/decode (SR-014): drop them and plan again.
+    Skipped(Vec<PathBuf>),
+}
+
+/// Contiguous runs of miss segments in `plan`, as segment-index ranges —
+/// adjacent misses share one encode run (and its context clips).
+// Implements: LLR-055, SR-037
+fn miss_runs(plan: &SegmentPlan) -> Vec<std::ops::Range<usize>> {
+    let mut runs = Vec::new();
+    let mut start: Option<usize> = None;
+    for (i, seg) in plan.segments.iter().enumerate() {
+        match (seg.hit, start) {
+            (false, None) => start = Some(i),
+            (true, Some(s)) => {
+                runs.push(s..i);
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(s) = start {
+        runs.push(s..plan.segments.len());
+    }
+    runs
 }
 
 /// What a segmented build produced: the promoted output, the ordered segment
 /// files it was assembled from, the output frame index where each segment
-/// after the first begins (the transition midpoints), and the total frames.
-// Implements: LLR-056, SR-037
-// lib-API: SR-037 segmented path (tests/concat_seam.rs; bin wiring 5b).
+/// after the first begins (the transition midpoints), the total frames, and
+/// the reuse split (SR-037 warm-build evidence).
+// Implements: LLR-055, LLR-056, SR-037
+// lib-API: fields read by tests/concat_seam.rs and tests/segment_cache.rs;
+// the binary consumes only the summary counts via execute_cached.
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct SegmentedBuild {
@@ -614,6 +1019,74 @@ pub struct SegmentedBuild {
     pub segments: Vec<PathBuf>,
     pub boundaries: Vec<u64>,
     pub frames: u64,
+    /// Segments served from the cache this build.
+    pub reused: usize,
+    /// Segments encoded this build.
+    pub re_encoded: usize,
+}
+
+/// Drive the real [`CrossfadeMixer`] over synthetic fixed-length clips and
+/// capture its observable frame arithmetic — the ground truth the pure
+/// `cache::planner::clip_layout` is verified against (TC-076/TC-077), so the
+/// planner and mixer cannot drift apart.
+// Implements: LLR-055, LLR-057, SR-037 (test support)
+#[cfg(test)]
+pub(crate) struct MixerProbe {
+    /// `mixer.emitted()` before each clip — the LLR-040 start frames.
+    pub starts: Vec<u64>,
+    /// Output frame index at each roll (transition midpoint).
+    pub rolls: Vec<u64>,
+    /// Total frames emitted (finish included).
+    pub total: u64,
+}
+
+#[cfg(test)]
+pub(crate) fn mixer_test_probe(counts: &[u64], fade: usize) -> MixerProbe {
+    struct CountSink {
+        written: u64,
+        rolls: Vec<u64>,
+    }
+    impl FrameSink for CountSink {
+        fn write(&mut self, _frame: &[u8]) -> Result<()> {
+            self.written += 1;
+            Ok(())
+        }
+        fn roll(&mut self) -> Result<()> {
+            self.rolls.push(self.written);
+            Ok(())
+        }
+    }
+    struct FixedSource {
+        left: u64,
+    }
+    impl FrameSource for FixedSource {
+        fn next_frame(&mut self) -> Result<Option<Vec<u8>>> {
+            if self.left == 0 {
+                return Ok(None);
+            }
+            self.left -= 1;
+            Ok(Some(vec![0u8; 3]))
+        }
+    }
+
+    let sink = CountSink {
+        written: 0,
+        rolls: Vec::new(),
+    };
+    let mut mixer = CrossfadeMixer::new(sink, fade, Arc::new(StageTimings::new()));
+    let mut starts = Vec::with_capacity(counts.len());
+    for &c in counts {
+        starts.push(mixer.emitted());
+        mixer
+            .add_clip(&mut FixedSource { left: c })
+            .expect("counting sink cannot fail");
+    }
+    let (total, sink) = mixer.finish().expect("counting sink cannot fail");
+    MixerProbe {
+        starts,
+        rolls: sink.rolls,
+        total,
+    }
 }
 
 /// Streams clips into a [`FrameSink`], dissolving the tail of each clip into
@@ -809,6 +1282,7 @@ mod tests {
             ffmpeg_timeout_secs: 0,
             ffmpeg_path: None,
             default_focus,
+            segment_cache_gb: 20.0,
         }
     }
 

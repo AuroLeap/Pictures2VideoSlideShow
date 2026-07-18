@@ -21,6 +21,11 @@ pub struct MediaFile {
     pub dimensions: (u32, u32),
     pub duration_secs: Option<f32>,
     pub size_bytes: u64,
+    /// File modification time (epoch ms) at scan time — with `size_bytes` the
+    /// file's cache identity (SR-037 segment keys, SR-038 probe entries).
+    // Implements: LLR-053, SR-037
+    #[serde(default)]
+    pub mtime_ms: u64,
     /// Whether the file carries a decodable audio stream (always `false` for
     /// images). Drives audio passthrough: only audio-bearing video clips
     /// contribute sound to the slideshow.
@@ -226,6 +231,7 @@ fn process_file(
             dimensions: entry.dims,
             duration_secs: entry.duration_secs,
             size_bytes: size,
+            mtime_ms,
             has_audio: entry.has_audio,
         };
         return Ok(Some((mf, rel.to_string(), entry.clone(), true)));
@@ -254,6 +260,7 @@ fn process_file(
         dimensions,
         duration_secs,
         size_bytes: size,
+        mtime_ms,
         has_audio,
     };
     Ok(Some((mf, rel.to_string(), entry, false)))

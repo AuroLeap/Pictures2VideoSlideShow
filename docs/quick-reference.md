@@ -79,6 +79,8 @@ make_video_slideshow.exe --config your_config.toml build           # produce the
 
 Useful flags: `--input <dir>` and `--output <dir>` override the config paths; `--dry-run` plans without encoding; `--non-interactive` forces the never-block automation path (§1b); `-v`/`--verbose` (or `RUST_LOG=debug`) increases logging. `build` accepts `--output <name>` to build only one output definition.
 
+Rebuilds are **incremental by default** (SR-037): each clip's encoded segment is cached (in a per-user folder, or under `temp_dir` — see §4), so re-building after adding photos re-encodes only the new clips and their transition neighbors — the build summary reports `segments: X reused, Y re-encoded`. `--no-cache` bypasses the cache entirely (neither reads nor writes it); `--clear-cache` empties it before building.
+
 > **Developers running from a source checkout** can use `cargo run --release -- --config your_config.toml <command>` instead of invoking the built `make_video_slideshow.exe` directly — it is the same engine. `--release` is strongly recommended for `build`/`bench` (10-15x faster than debug).
 
 ---
@@ -112,7 +114,8 @@ For a basic end-user run you do **not** edit this file by hand — the first-run
 ### `[processing]`
 | Field | Unit / type | Default | Meaning |
 |---|---|---|---|
-| `temp_dir` | path | *(none)* | Optional scratch dir (e.g. a RAM disk `R:\`); empty/omitted = system temp. |
+| `temp_dir` | path | *(none)* | Optional scratch dir (e.g. a RAM disk `R:\`). When set, the segment cache (SR-037) roots there (in a `segment-cache` subfolder); omitted = the per-user cache folder. |
+| `segment_cache_gb` | GB | `20` | Size cap for the incremental segment cache (SR-037); least-recently-used segments are pruned past it after each build. Must be positive. |
 | `max_workers` | integer (threads) | *(all cores)* | Optional cap on parallel workers; omit to use every CPU core. |
 | `use_parallelism` | bool | `true` | Use the rayon thread pool for frame generation. |
 | `dry_run` | bool | `false` | Plan without encoding. |
