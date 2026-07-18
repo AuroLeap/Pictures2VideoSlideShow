@@ -9,13 +9,13 @@ Back to [docs index](README.md) · [README](../README.md).
 ## Current state
 
 - **Active objective:** **OBJ-PERF — engine performance, phases 0–3 of [planning/RUST_PERFORMANCE_PLAN.md](../planning/RUST_PERFORMANCE_PLAN.md)** (measurement → encoder/CPU quick wins → incremental segment cache → pipeline overlap). Prior scope: ✅ PROJECT COMPLETE, FINAL acceptance APPROVED 2026-06-04; this is post-acceptance maintenance work on branch `Optomizations`.
-- **Round:** OBJ-PERF round 4 **closed** (4c 2026-07-18: Phase 1 independently verified — TC-063..TC-068, TC-070, TC-071, TC-086..TC-088 Verified; new perf baseline accepted incl. new PB-006 rotation-off leg; TC-069 NVENC Demonstration stays Draft for Peter) / round 5 next: Phase 2 (segment cache, SR-037) or SR-038 (probe cache)
+- **Round:** OBJ-PERF round 5a **done** (SE 2026-07-18: **concat-seam spike GREEN** — .ts segments concat clean, Phase 2 unblocked; LLR-056 Implemented. **SR-038 probe cache shipped** — warm scan probes zero unchanged files, PB-003 41.5 → ~0.3 s/1k (budget 2 s); LLR-058/LLR-059 Implemented. TC-079/080/083/084/085 tests exist and pass, statuses Draft pending @test-engineer verify) / round 5b next: segment store + planner + warm build (LLR-053/054/055/057, SR-037)
 - **Mode:** **autonomous** (set by Peter 2026-07-17 for OBJ-PERF: decide-and-record per the process.md §6 dial; gates/harness discipline unchanged; decisions logged below instead of pausing)
 - **Latest measurements (2026-07-18, OBJ-PERF round 4c Test Engineer witness, `Scripts/run-tests.ps1` + two-leg `Scripts/bench.ps1`):** `cargo fmt --check` clean; `cargo clippy -D warnings` clean; `cargo test --all` 153 passed 0 failed 2 ignored (both deliberate: network fetch + Release-tier hardware profile); `cargo llvm-cov` line **84.70%** (≥80%); trace SR=38 LLR=64 TC=90 **orphans=0**, budgets=6 findings=0; witnessed bench (quiet host, repeats 87.5/87.3/87.3 fps): **PB-001 87.3 fps**, **PB-002 4.5 ms/photo** (blocking-wait semantics), PB-003 41.5 s/1k, PB-005 446.0 MB, **PB-006 (new rotation-off leg, LLR-061 fast path) 134.5 fps**; **baseline accepted** 69.4→87.3 / 278.0→4.5 / 43.1→41.5 / 410.5→446.0 / PB-006 new 134.5; `check_perf --tier release` 0 fail / 1 warn (PB-003, pre-existing until SR-038) / 1 skip, exit 0.
 - **Active gate:** G2. G3 requires all Verification=Test SRs to be Status=Verified; SR-013, SR-024, SR-027 remain Implemented/Draft because their Tier=Release TCs require Peter's hardware/interactive/network. Pre-existing; see Constraints.
 - **Kit version:** `9670982 2026-07-01` (ai-template branch MultiRepoSupport; stamped in `docs/kit-version`).
 - **Still open for the human:** SR-023 release publish on a `v*` tag; SR-013/SR-024/SR-027 Tier=Release TCs for G3 advancement; real-ENOSPC (SR-015) demonstration.
-- **Next action:** OBJ-PERF grind in progress (see round log tail). This clone (`C:\Projects\Pictures2VideoSlideShowOptomizations`, branch `Optomizations`) is the perf worktree; the original repo continues under a parallel session whose review-fix commits (`ad15454`, `dd65a95`) are **deliberately not merged here** — one `git fetch <orig> kit-resync-2026-07` + merge away if Peter wants them.
+- **Next action:** Round 5b — segment cache store/planner/warm-build on the now-validated concat foundation; @test-engineer verify of the Round-5a TCs (see round log tail). This clone (`C:\Projects\Pictures2VideoSlideShowOptomizations`, branch `Optomizations`) is the perf worktree; the original repo continues under a parallel session whose review-fix commits (`ad15454`, `dd65a95`) are **deliberately not merged here** — one `git fetch <orig> kit-resync-2026-07` + merge away if Peter wants them.
 
 ## Constraints
 
@@ -1245,3 +1245,41 @@ Findings:
 - [MINOR] PB-002 regression band is now ±0.9 ms (20% of 4.45) on a metric whose same-day spread was 4.0-4.5 — expect occasional WARNs from noise alone; Gate=warn absorbs it, but widen Tolerance or floor it if it nags → @test-engineer (self, watch)
 - [NOTE] Bench doubles wall time (~25 s extra) for the PB-006 leg — accepted trade per the R4b finding (coverage over speed; wrapper is Release-tier only) → no action
 - [NOTE] `report.md` dual-writer: trace.py re-run last before commit per convention → done this round
+
+### SOFTWARE-ENGINEER — OBJ-PERF — Round 5a (concat spike + probe cache) — 2026-07-18
+Verdict: APPROVE (both deliverables green; the Phase-2 gate is passed)
+
+**Deliverable A — concat-seam spike VERDICT: seam-clean YES; container: MPEG-TS (`.ts`).**
+Red-first TC-079 (`tests/concat_seam.rs::segmented_concat_build_equals_cold_build_sr037`): a fixed 4-noise-image corpus built (a) cold through today's streaming pipeline and (b) as per-clip `.ts` segments (split at transition midpoints, each its own libx264 encoder) assembled with `ffmpeg -f concat -safe 0 -c copy -movflags +faststart`. Asserted green on the FIRST attempt — no container fallback needed:
+- identical decoded total frame count (ffmpeg rawvideo decode of both) and container duration within one frame period (ffprobe);
+- SR-005 profile on the assembled file (h264/yuv420p/even dims/24-30 fps/faststart moov<mdat — shared `assert_sr005_profile`);
+- seam integrity at every join: ±3-frame windows match the cold build's same-index frames within encode-noise tolerance (mean |Δ| < 10/byte) AND match them strictly better than either neighboring cold frame — a dropped or duplicated frame at any seam would fail the comparative check.
+h264-in-mpegts → concat → mp4 keeps SR-005 because faststart is a remux flag applied at assembly; LLR-054 Detail records the container as VALIDATED (fMP4 fallback not needed). TC-080 failure legs (`concat_failure_names_error_and_leaves_no_final_sr037`): empty list and garbage segment each surface as a named error, no final `<name>.mp4`, no leftover `.part`/list.
+Surface shipped (production-grade, the Phase-2 foundation): `FrameSink` trait + generic `CrossfadeMixer` (streaming sink byte-identical, roll no-op), `SegmentedEncoderSink` rolling at mixer-signalled transition midpoints, `FfmpegEncoder::start_segment` + `segment_encoder_args` (shared `quality_args` — one quality fact), `concat_segments` (src/ffmpeg/concat.rs) armed with the LLR-008 `timed_out` decision over part-file growth, disk-full mapping (SR-015) and promote-only finalize (SR-011), `FrameGenerationPipeline::execute_segmented` (video-only until LLR-057 in 5b).
+
+**Deliverable B — SR-038 probe cache shipped.**
+Red-first TC-083/084/085 (`src/media/probe_cache.rs` unit tests + `tests/probe_cache.rs`): `ProbeCache` JSON per media_root under the per-user cache dir (sha256-keyed name; never under media_root per SR-010); pure `entry_current(size, mtime)` decision (LLR-059) + kind revalidation on lookup; corrupt/missing cache = cold scan, never an error; atomic tmp+rename save; `MediaLoader` consults before any ffprobe/header decode and refreshes after; `Album.probe_stats` is the evidence surface — the unchanged warm scan asserts **probed=0, cache_hits=all** for image and video kinds. Ignore filtering runs before lookup (SR-018); skip semantics untouched (SR-014; guarded by existing TC-022/023/028 suites, referenced not duplicated). Shared helpers hoisted once: `util::file_utils::app_cache_root`/`hex_lower` (now also LLR-031's ffmpeg dir), `tests/common::synth_video`.
+
+**Evidence (all run by me on this clone; parallel session live on the host — throughput rows jittery, PB-003 unaffected in magnitude):**
+```
+HARNESS PASSED  (pwsh Scripts/run-tests.ps1, exit 0, after each commit)
+  cargo fmt --check clean; cargo clippy -D warnings clean
+  cargo test --all: 169 passed, 0 failed, 2 ignored (both deliberate: network fetch + Release-tier hardware profile)
+  cargo llvm-cov: TOTAL lines 84.90% >= 80% (probe_cache.rs new, segment.rs 98.51%, concat covered via concat_seam)
+  Traceability: SR=38 LLR=64 TC=90 orphans=0. Report -> docs/test/report.md
+Check summary (gate G2, tier all): PASS traceability / PASS doc-navigability / PASS design-flows — RESULT: PASS
+Scripts/trace.py: SN=31 SR=38 LLR=64 TC=90 orphans=0 (run last, report.md dual-writer convention)
+Bench (Scripts/bench.ps1, TestInput/ 10 files, two runs):
+  Scan: cold 0.44-0.55s, warm 0.00-0.01s (10 cached / 0 probed on warm; SR-038 probe cache)
+  PB-003 warm scan s/1k: 41.5 (accepted 4c baseline, full re-probe) -> 0.293 / 1.300  — budget 2 s now met
+  PB-001 80.4/80.4  PB-002 4.2/5.6  PB-005 447.7/450.1  PB-006 118.8/126.1
+  check_perf --tier release: 0 fail / 1 warn / 1 skip, exit 0 both runs (warn = PB-006 run1, PB-002 run2 — ms-scale
+  jitter under parallel-session host load per the round brief; PB-003's 41.5->~0.3 is 2 orders, not jitter)
+```
+Registry: LLR-056 → Implemented (Module/CodeSymbol extended to the spike surface; Detail records the .ts outcome + SR-005 added to SR-Refs); LLR-054 Detail: container validated (row stays Draft for 5b); LLR-058, LLR-059 → Implemented; LLR-051/LLR-052 Detail truth-ups (PB-003 is now the cache-served number; bench pins a fresh temp probe cache so cold is honest and the user cache untouched). LLR-053/055/057 untouched for 5b. TC statuses untouched (test-engineer-owned). architecture.md: Phase-2 flow prose updated to spike-shipped; media module row mentions the probe cache; generated map regenerated by trace.
+Commits: `e602ebf` (A — spike), `8a4c8cf` (B — probe cache), plus this status/report commit.
+Findings:
+- [MAJOR] TC-079/TC-080 (concat legs) and TC-083/TC-084/TC-085 (probe cache): the planned tests exist under the planned names and pass in my runs — verify independently and flip per G3 discipline. TC-080's inactivity-timeout and kill-mid-concat legs are covered at the decision level (`timed_out` reuse, promote-only finalize asserted) but not end-to-end forced — judge whether the row's Draft stands until a forced-stall harness exists (5b brings the bin wiring that makes one practical) → @test-engineer
+- [MINOR] Bench PB-001/PB-002/PB-006 read below the 4c baseline under parallel-session host load (brief warned of this); no baseline change proposed — re-witness on a quiet host if the warns nag → @test-engineer
+- [NOTE] Spike gate is PASSED — Round 5b (store/planner/warm build/audio timeline, LLR-053/054/055/057) can proceed on this design unchanged → @system-engineer
+- [NOTE] `report.md` dual-writer: `python Scripts/trace.py` re-run last before the final commit → @software-engineer (self, done)
