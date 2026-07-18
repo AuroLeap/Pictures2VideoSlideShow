@@ -136,10 +136,12 @@ For a basic end-user run you do **not** edit this file by hand — the first-run
 | `enable_audio` | bool | `false` | Preserve **source-video** audio in this output (images are silent). `true` carries each video clip's audio into the slideshow, in sync (see §7). |
 | `audio_bitrate_kbps` | kbps | `192` | AAC bitrate for the muxed audio track (used when `enable_audio = true`). |
 | `audio_sample_rate` | Hz | `48000` | Audio sample rate for the muxed track (used when `enable_audio = true`). |
+| `encoder` | `software` \| `auto` \| `h264_nvenc` \| `h264_qsv` \| `h264_amf` | `software` | H.264 video encoder (SR-034). `software` = libx264 (the verified default). `auto` probes for a working hardware (GPU) encoder at start and uses the first that passes, else software. An explicit hardware value is probe-checked too; if it can't work, the build **falls back to software with a logged warning — a missing GPU never fails a build**. Hardware encode is typically several times faster at the same visual quality class. |
+| `x264_preset` | libx264 preset (`ultrafast`…`veryslow`) | `medium` | Software-encoder speed/quality trade (SR-035; ignored for hardware encoders). Faster presets (`veryfast`, `faster`) encode up to ~1.5-2x quicker at slightly larger file size / marginally lower quality per bit; slower presets do the reverse. Default `medium` keeps the long-verified behavior. |
 | `zoom_amount` | fraction | `0.12` | Ken Burns zoom (0.12 = up to 12% over the clip). Direction randomized per image. |
 | `ken_burns` | bool | `true` | `false` = static cover-fit (fade only, no pan/zoom). |
 
-> Note: fields marked *(required)* must be present in the TOML even though the recommended values are given in §3. `zoom_amount`/`ken_burns`/`audio_bitrate_kbps`/`audio_sample_rate` have serde defaults and may be omitted.
+> Note: fields marked *(required)* must be present in the TOML even though the recommended values are given in §3. `zoom_amount`/`ken_burns`/`audio_bitrate_kbps`/`audio_sample_rate`/`encoder`/`x264_preset` have serde defaults and may be omitted.
 
 ---
 
@@ -151,7 +153,7 @@ The Rust engine is fast but feature-incomplete. These gaps are stated **here onc
 |---|---|---|
 | **`bulk_video_time_min` splitting** | Rust writes **one continuous MP4 per output**, no matter how long. A long album can cross the **4 GB FAT32 wall**. | Keep the album small, raise `quality_crf` (smaller file), use an **exFAT/NTFS** card, or use the **PowerShell pipeline** (which splits into ~20-min parts). |
 | Shared video-decode across multiple outputs | Each output re-decodes videos (slower with many outputs). | Cosmetic/perf only; no action needed. |
-| GPU acceleration | CPU-only encode. | None; CPU path is already 10-15x faster than PowerShell. |
+| GPU **rendering** | Frame rendering (Ken Burns warp, blends) is CPU-only. | Hardware **encoding** is available today via the `encoder` config field (§4); GPU rendering is a possible future phase. |
 
 When the Rust engine falls short, the **PowerShell pipeline** (feature-complete reference on `main`) is the documented fallback — see the README [Project Status](../README.md#project-status) for which implementation to choose.
 
