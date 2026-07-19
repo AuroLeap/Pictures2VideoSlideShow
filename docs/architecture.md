@@ -292,7 +292,7 @@ graph LR
 ## Module map (generated)
 
 <!-- BEGIN GENERATED MODULE MAP (scripts/trace.ps1) -->
-_Generated 2026-07-18 by `scripts/trace.ps1` from the source tree — do not edit by hand. Each file's summary is its first `//!` line; `<- SR/LLR` are the `Implements:` back-links found at the item; `uses:` lists in-tree modules the file references (`crate::`)._
+_Generated 2026-07-19 by `scripts/trace.ps1` from the source tree — do not edit by hand. Each file's summary is its first `//!` line; `<- SR/LLR` are the `Implements:` back-links found at the item; `uses:` lists in-tree modules the file references (`crate::`)._
 
 - **src/cache/mod.rs** — _Segment cache (SR-037): pure cache-key derivation for per-clip encoded_
   - uses: `config`, `media`, `util`
