@@ -163,6 +163,22 @@ never skipped, never failed (LLR-072). Cross-backend similarity is
 tolerance-checked via `frame_mean_abs_diff` (LLR-073); deps wgpu + bytemuck +
 pollster are justified/costed in LLR-074.
 
+**Phase 4a.5 transport (SR-040, Draft — LLR-075..LLR-082, Round 9b design;
+rgb24 is the shipped behavior until these land):** one `FrameTransport`
+(rgb24 | yuv420p) is picked per output alongside the backend selection and
+never flips mid-run (LLR-075 — the one `frame_bytes`/pixel-format home). In
+yuv mode a second compute pass converts the rendered target to tightly-packed
+planar yuv420p (BT.601 limited range — swscale's default, the historical
+conversion; constants single-homed in LLR-079) before readback (LLR-076); the
+mixer's blend is plane-agnostic and its black-fade scales Y→16, U/V→128
+(LLR-077); videos decode straight to yuv420p (LLR-078); a device-lost degrade
+converts CPU-rendered frames via the shared coefficients so one transport
+reaches the encoder (LLR-079); the encoder's rawvideo input args follow the
+transport while the output profile and audio mux stay untouched (LLR-080);
+the transport enters the segment-cache key with a format-version bump
+(LLR-081); colorimetry is verified in decoded-rgb space through the one diff
+home (LLR-082).
+
 ```mermaid
 sequenceDiagram
     participant Cfg as render_backend config (LLR-067)
@@ -174,6 +190,7 @@ sequenceDiagram
 
     Cfg->>Sel: auto | cpu | gpu (SR-039)
     Note over Sel: probe once per process; adapter absent / probe fail -> CPU + logged reason — never a build failure (SR-039)
+    Note over Sel: FrameTransport picked with the backend and fixed for the run — gpu -> yuv420p, cpu -> rgb24 (SR-040, LLR-075; Draft)
     Sel-->>Src: backend selected; backend-in-use reported at build start (LLR-072)
     Pre->>Gpu: decoded+prescaled LoadedClip (prescale stays CPU, LLR-066)
     Gpu->>Gpu: upload clip texture once — Rgba8, bilinear sampler (LLR-069)
@@ -181,10 +198,12 @@ sequenceDiagram
         Src->>Gpu: render_range(i..j)
         Gpu->>Gpu: CPU computes ClipPlan projection(i) -> FrameUniforms (SR-022, LLR-070)
         Gpu->>Ring: draw textured quad -> copy to staging buffer (LLR-071)
-        Ring-->>Src: rgb24 Vec<u8> — FrameSource contract unchanged (SR-039)
+        Note over Gpu,Ring: yuv mode: + compute pass rgb->yuv420p, BT.601 limited (LLR-076, LLR-079) -> tightly-packed planar staging copy
+        Ring-->>Src: rgb24 Vec<u8> — or planar yuv420p in yuv mode; frame size via the one LLR-075 home (SR-039, SR-040)
     end
-    Note over Src: blend stays CPU in CrossfadeMixer (LLR-062) — render-only Phase-4a scope (LLR-070)
-    Note over Gpu: device lost mid-clip -> retained LoadedClip completes the range on CPU, build degrades to CPU, warning logged (LLR-072, LLR-073)
+    Note over Src: blend stays CPU in CrossfadeMixer (LLR-062) — render-only Phase-4a scope (LLR-070); yuv black-fade scales Y->16, U/V->128 (LLR-077)
+    Note over Gpu: device lost mid-clip -> retained LoadedClip completes the range on CPU, build degrades to CPU, warning logged (LLR-072, LLR-073); yuv runs convert those frames via LLR-079 — transport never flips (SR-040)
+    Note over Src: downstream in yuv mode: rawvideo input args follow the transport (LLR-080); transport enters the segment-cache key + format-version bump (LLR-081); colorimetry checked in decoded-rgb space (LLR-082)
 ```
 
 ## High-level flow (Rust engine)
