@@ -1,12 +1,16 @@
-//! GPU frame renderer (SR-039): process-wide wgpu device/queue, once-per-clip
-//! texture upload, per-frame textured-quad draws through CPU-computed
-//! [`ClipPlan`] uniforms, and a 3-deep async staging-buffer readback ring
-//! emitting `rgb24` frames shape-identical to the CPU path. A device error
-//! mid-build degrades to the CPU renderer from the retained [`LoadedClip`] —
-//! never a skip, never a failed build (LLR-072).
+//! GPU frame renderer (SR-039/SR-040): process-wide wgpu device/queue,
+//! once-per-clip texture upload, per-frame textured-quad draws through
+//! CPU-computed [`ClipPlan`] uniforms, and a 3-deep async staging-buffer
+//! readback ring emitting frames on the run transport — `rgb24`
+//! shape-identical to the CPU path, or planar `yuv420p` via a second compute
+//! pass (`cs_yuv420p`) with tightly-packed buffer-to-buffer readback. A
+//! device error mid-build degrades to the CPU renderer from the retained
+//! [`LoadedClip`] — never a skip, never a failed build (LLR-072); in yuv mode
+//! the degraded frames are converted so one transport per run holds (LLR-079).
 
 use crate::image::{ClipRenderer, FrameRenderer, LoadTimings, LoadedClip};
 use crate::transform::ClipPlan;
+use crate::transport::FrameTransport;
 use bytemuck::{Pod, Zeroable};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, OnceLock};
@@ -30,6 +34,10 @@ pub struct GpuContext {
     queue: wgpu::Queue,
     pipeline: wgpu::RenderPipeline,
     bind_layout: wgpu::BindGroupLayout,
+    /// The yuv420p transport compute pass (LLR-076); created with the render
+    /// pipeline (cheap, once per process), used only in yuv mode.
+    yuv_pipeline: wgpu::ComputePipeline,
+    yuv_bind_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     /// Adapter name for the backend-in-use report (LLR-072).
     pub adapter_name: String,
@@ -178,6 +186,60 @@ fn init_context() -> Result<GpuContext, InitError> {
         multiview_mask: None,
         cache: None,
     });
+    // yuv420p transport pass (LLR-076): reads the rendered target via
+    // textureLoad, receives the BT.601 coefficients as uniforms (LLR-079 —
+    // never compiled-in), writes the tightly-packed planar byte stream.
+    let yuv_bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("yuv compute bind layout"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 3,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 4,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: wgpu::BufferSize::new(
+                        std::mem::size_of::<YuvUniforms>() as u64
+                    ),
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 5,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+        ],
+    });
+    let yuv_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("yuv compute pipeline layout"),
+        bind_group_layouts: &[Some(&yuv_bind_layout)],
+        immediate_size: 0,
+    });
+    let yuv_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("yuv420p transport pass"),
+        layout: Some(&yuv_pipeline_layout),
+        module: &shader,
+        entry_point: Some("cs_yuv420p"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+
     // Bilinear + clamp-to-edge: the hardware analog of the CPU warp's
     // bilinear sampling (LLR-069).
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -195,6 +257,8 @@ fn init_context() -> Result<GpuContext, InitError> {
         queue,
         pipeline,
         bind_layout,
+        yuv_pipeline,
+        yuv_bind_layout,
         sampler,
         adapter_name,
         max_texture_dim,
@@ -333,21 +397,34 @@ struct Slot {
 
 /// 3-deep ring of mappable staging buffers: frame `i`'s copy + async map
 /// overlap frames `i+1`/`i+2`'s draws; depth 3 caps readback staging memory
-/// at `3 * padded_bpr * out_h` bytes (LLR-071).
-// Implements: LLR-071, SR-039
+/// at `3 * bytes_per_slot` (LLR-071). In yuv mode a slot holds the
+/// tightly-packed planar frame (the mapped bytes ARE the frame — wgpu's
+/// COPY_BYTES_PER_ROW_ALIGNMENT binds texture copies only, LLR-076), so
+/// [`strip_readback`] is rgb-mode-only.
+// Implements: LLR-071, LLR-076, SR-039, SR-040
 struct ReadbackRing {
     slots: Vec<Slot>,
     /// Next slot to submit into.
     next: usize,
     /// Submitted-but-not-drained count.
     pending: usize,
+    /// The run transport: picks the drain path (strip vs direct copy).
+    transport: FrameTransport,
+    /// Exact frame byte length from the LLR-075 home (yuv drains slice this
+    /// off the 4-byte-aligned slot).
+    frame_bytes: usize,
 }
 
 /// Readback ring depth (LLR-071).
 const RING_DEPTH: usize = 3;
 
 impl ReadbackRing {
-    fn new(ctx: &GpuContext, bytes_per_slot: u64) -> Self {
+    fn new(
+        ctx: &GpuContext,
+        bytes_per_slot: u64,
+        transport: FrameTransport,
+        frame_bytes: usize,
+    ) -> Self {
         let slots = (0..RING_DEPTH)
             .map(|i| Slot {
                 buffer: ctx.device.create_buffer(&wgpu::BufferDescriptor {
@@ -364,6 +441,8 @@ impl ReadbackRing {
             slots,
             next: 0,
             pending: 0,
+            transport,
+            frame_bytes,
         }
     }
 
@@ -394,9 +473,10 @@ impl ReadbackRing {
         self.pending += 1;
     }
 
-    /// Block on the oldest in-flight readback and return its stripped rgb24
-    /// frame. `Err(reason)` signals a device error — the caller degrades to
-    /// CPU (LLR-072).
+    /// Block on the oldest in-flight readback and return its transport frame:
+    /// rgb mode strips the padded rows; yuv mode copies the tightly-packed
+    /// planar bytes verbatim (LLR-076). `Err(reason)` signals a device error
+    /// — the caller degrades to CPU (LLR-072).
     fn drain_oldest(&mut self, ctx: &GpuContext, w: usize, h: usize) -> Result<Vec<u8>, String> {
         let idx = oldest_slot(self.next, self.pending, RING_DEPTH);
         let slot = &mut self.slots[idx];
@@ -419,7 +499,13 @@ impl ReadbackRing {
                 .slice(..)
                 .get_mapped_range()
                 .map_err(|e| format!("mapped-range read failed: {e}"))?;
-            strip_readback(&view, padded_bytes_per_row(w as u32) as usize, w, h)
+            match self.transport {
+                FrameTransport::Rgb24 => {
+                    strip_readback(&view, padded_bytes_per_row(w as u32) as usize, w, h)
+                }
+                // Tightly packed already — the mapped bytes ARE the frame.
+                FrameTransport::Yuv420p => view[..self.frame_bytes].to_vec(),
+            }
         };
         slot.buffer.unmap();
         self.pending -= 1;
@@ -442,15 +528,34 @@ pub struct GpuRenderer {
     target: wgpu::Texture,
     target_view: wgpu::TextureView,
     ring: ReadbackRing,
-    /// Set on the first device error: all remaining ranges render here.
+    /// The run transport (fixed per run, LLR-075): picks the readback shape
+    /// and whether the yuv compute pass runs.
+    transport: FrameTransport,
+    /// yuv-mode resources; `None` on the rgb transport (bit-for-bit the
+    /// shipped LLR-071 path).
+    yuv: Option<YuvPass>,
+    /// Set on the first device error: all remaining ranges render here (yuv
+    /// mode converts its frames — LLR-079, one transport per run).
     cpu_fallback: Option<FrameRenderer>,
+}
+
+/// Per-clip resources of the yuv420p compute pass (LLR-076).
+struct YuvPass {
+    storage: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    /// 4-byte-aligned bytes copied buffer-to-buffer per frame.
+    copy_bytes: u64,
+    /// `ceil(copy_bytes/4 words / 256)` workgroups per dispatch.
+    groups: u32,
 }
 
 impl GpuRenderer {
     /// Upload `clip`'s prescaled image (rgb→rgba expand) once and prepare the
     /// per-frame plumbing. The ~10–15 MB upload amortizes over the clip's
-    /// frames (LLR-069).
-    pub fn new(ctx: &'static GpuContext, clip: LoadedClip) -> Self {
+    /// frames (LLR-069). `transport` fixes the readback format for the run
+    /// (SR-040): yuv mode adds the compute pass + storage buffer.
+    // Implements: LLR-069, LLR-076, SR-039, SR-040
+    pub fn new(ctx: &'static GpuContext, clip: LoadedClip, transport: FrameTransport) -> Self {
         let (pre_w, pre_h) = (clip.plan.pre_w, clip.plan.pre_h);
         let texture = ctx.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("clip texture"),
@@ -514,6 +619,8 @@ impl GpuRenderer {
 
         // Draw target: the output size directly — the rotation-margin crop is
         // folded into the uniforms, so fewer readback bytes (LLR-070).
+        // TEXTURE_BINDING lets the yuv compute pass textureLoad it (inert for
+        // the rgb path).
         let (out_w, out_h) = (clip.plan.out_w, clip.plan.out_h);
         let target = ctx.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("frame target"),
@@ -526,11 +633,71 @@ impl GpuRenderer {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
         let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
-        let ring = ReadbackRing::new(ctx, padded_bytes_per_row(out_w) as u64 * out_h as u64);
+
+        // Frame/slot sizing through the one LLR-075 home: rgb keeps the
+        // 256-byte-aligned texture-copy rows (stripped on drain); yuv is a
+        // tightly-packed buffer-to-buffer copy, rounded up to the 4-byte
+        // copy/word alignment only.
+        let frame_bytes = transport.frame_bytes(out_w, out_h);
+        let slot_bytes = match transport {
+            FrameTransport::Rgb24 => padded_bytes_per_row(out_w) as u64 * out_h as u64,
+            FrameTransport::Yuv420p => (frame_bytes as u64).div_ceil(4) * 4,
+        };
+        let ring = ReadbackRing::new(ctx, slot_bytes, transport, frame_bytes);
+
+        // yuv mode: the compute pass reading the target and packing the
+        // planar byte stream into a storage buffer (LLR-076), coefficients
+        // uploaded once from the LLR-079 home.
+        let yuv = (transport == FrameTransport::Yuv420p).then(|| {
+            let uniform = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("yuv uniforms"),
+                size: std::mem::size_of::<YuvUniforms>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            ctx.queue.write_buffer(
+                &uniform,
+                0,
+                bytemuck::bytes_of(&YuvUniforms::for_output(out_w, out_h)),
+            );
+            let storage = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("yuv planar frame"),
+                size: slot_bytes,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            });
+            let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("yuv compute bind group"),
+                layout: &ctx.yuv_bind_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(&target_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: uniform.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: storage.as_entire_binding(),
+                    },
+                ],
+            });
+            YuvPass {
+                storage,
+                bind_group,
+                copy_bytes: slot_bytes,
+                groups: u32::try_from((slot_bytes / 4).div_ceil(256))
+                    .expect("dispatch count fits u32 for any real output size"),
+            }
+        });
 
         Self {
             ctx,
@@ -540,6 +707,8 @@ impl GpuRenderer {
             target,
             target_view,
             ring,
+            transport,
+            yuv,
             cpu_fallback: None,
         }
     }
@@ -579,28 +748,44 @@ impl GpuRenderer {
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
-        let (out_w, out_h) = (self.clip.plan.out_w, self.clip.plan.out_h);
-        enc.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.target,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: self.ring.write_slot(),
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(padded_bytes_per_row(out_w)),
-                    rows_per_image: Some(out_h),
+        if let Some(yuv) = &self.yuv {
+            // yuv transport (SR-040): convert on the device, then a tightly
+            // packed buffer-to-buffer copy into the ring slot — half the
+            // readback bytes and no padded rows to strip (LLR-076).
+            {
+                let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("yuv420p transport pass"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.ctx.yuv_pipeline);
+                pass.set_bind_group(0, &yuv.bind_group, &[]);
+                pass.dispatch_workgroups(yuv.groups, 1, 1);
+            }
+            enc.copy_buffer_to_buffer(&yuv.storage, 0, self.ring.write_slot(), 0, yuv.copy_bytes);
+        } else {
+            let (out_w, out_h) = (self.clip.plan.out_w, self.clip.plan.out_h);
+            enc.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.target,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
                 },
-            },
-            wgpu::Extent3d {
-                width: out_w,
-                height: out_h,
-                depth_or_array_layers: 1,
-            },
-        );
+                wgpu::TexelCopyBufferInfo {
+                    buffer: self.ring.write_slot(),
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(padded_bytes_per_row(out_w)),
+                        rows_per_image: Some(out_h),
+                    },
+                },
+                wgpu::Extent3d {
+                    width: out_w,
+                    height: out_h,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
         let submission = self.ctx.queue.submit([enc.finish()]);
         let (tx, rx) = mpsc::channel();
         self.ring
@@ -609,6 +794,23 @@ impl GpuRenderer {
                 let _ = tx.send(r);
             });
         self.ring.submitted(rx, submission);
+    }
+
+    /// CPU-rendered `rgb24` frames brought onto the run transport: converted
+    /// via the LLR-079 one-home converter in yuv mode so a degraded clip
+    /// still delivers exactly one transport format (SR-040).
+    // Implements: LLR-079, LLR-072, SR-040
+    fn cpu_frames_on_transport(&self, frames: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
+        match self.transport {
+            FrameTransport::Rgb24 => frames,
+            FrameTransport::Yuv420p => {
+                let (w, h) = (self.clip.plan.out_w as usize, self.clip.plan.out_h as usize);
+                frames
+                    .iter()
+                    .map(|f| crate::image::yuv::rgb_to_yuv420p(f, w, h))
+                    .collect()
+            }
+        }
     }
 
     /// The GPU render loop for one range; `Err(reason)` = device error, the
@@ -634,20 +836,23 @@ impl ClipRenderer for GpuRenderer {
         self.clip.plan.total_frames
     }
 
-    // Implements: LLR-072, SR-039 — a device error completes the in-flight
-    // range on a CPU FrameRenderer built from the SAME LoadedClip (identical
-    // crop/projection, seam-free within the LLR-073 tolerance) and flags the
-    // process degraded so later clips select CPU without re-probing.
+    // Implements: LLR-072, LLR-079, SR-039, SR-040 — a device error completes
+    // the in-flight range on a CPU FrameRenderer built from the SAME
+    // LoadedClip (identical crop/projection, seam-free within the LLR-073
+    // tolerance) and flags the process degraded so later clips select CPU
+    // without re-probing; in yuv mode the CPU frames are converted so the run
+    // keeps exactly one transport format.
     fn render_range(&mut self, start: u32, end: u32) -> Vec<Vec<u8>> {
         if let Some(cpu) = &self.cpu_fallback {
-            return cpu.render_range(start, end);
+            let frames = cpu.render_range(start, end);
+            return self.cpu_frames_on_transport(frames);
         }
         match self.try_render_range(start, end) {
             Ok(frames) => frames,
             Err(reason) => {
                 set_degraded(&reason);
                 let cpu = FrameRenderer::new(self.clip.clone());
-                let frames = cpu.render_range(start, end);
+                let frames = self.cpu_frames_on_transport(cpu.render_range(start, end));
                 self.cpu_fallback = Some(cpu);
                 frames
             }
@@ -805,7 +1010,7 @@ mod tests {
         let ctx = context().expect("this test requires a wgpu adapter");
 
         let cpu = FrameRenderer::new(clip.clone());
-        let mut gpu = GpuRenderer::new(ctx, clip);
+        let mut gpu = GpuRenderer::new(ctx, clip, FrameTransport::Rgb24);
         let total = cpu.total_frames();
         assert_eq!(ClipRenderer::total_frames(&gpu), total);
 
@@ -831,5 +1036,58 @@ mod tests {
             );
         }
         eprintln!("cpu_vs_gpu_within_tolerance_sr039: worst per-frame mean abs diff = {worst:.4}");
+    }
+
+    // Verifies: SR-040, LLR-076, LLR-079 — the shader-side conversion and the
+    // CPU converter share ONE coefficient home, so converting the GPU rgb
+    // readback with rgb_to_yuv420p equals the yuv-mode readback of the same
+    // frames to within per-byte rounding (float floor(v+0.5) vs 16.16 fixed
+    // point): max per-byte diff <= 1. Renders the identical clip through both
+    // transports on the same device (GPU rasterization is run-to-run
+    // deterministic — TC-102 evidence).
+    #[test]
+    #[ignore = "Release tier (SR-040): needs a GPU adapter"]
+    fn gpu_yuv_readback_matches_cpu_converter_sr040() {
+        let dir = std::env::temp_dir().join("slideshow_test_gpu_yuv");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("grad.png");
+        let img = ::image::RgbImage::from_fn(1600, 1200, |x, y| {
+            ::image::Rgb([
+                (x % 256) as u8,
+                (y % 256) as u8,
+                ((x * 7 + y * 13) % 256) as u8,
+            ])
+        });
+        img.save(&path).unwrap();
+
+        let out = out_def(15.0);
+        let clip = LoadedClip::load(&path, &out, None).unwrap();
+        let ctx = context().expect("this test requires a wgpu adapter");
+        let (w, h) = (clip.plan.out_w as usize, clip.plan.out_h as usize);
+
+        let mut rgb = GpuRenderer::new(ctx, clip.clone(), FrameTransport::Rgb24);
+        let mut yuv = GpuRenderer::new(ctx, clip, FrameTransport::Yuv420p);
+        let total = ClipRenderer::total_frames(&rgb).min(12);
+        let rgb_frames = ClipRenderer::render_range(&mut rgb, 0, total);
+        let yuv_frames = ClipRenderer::render_range(&mut yuv, 0, total);
+        assert!(
+            rgb.cpu_fallback.is_none() && yuv.cpu_fallback.is_none(),
+            "neither path may silently degrade mid-test"
+        );
+
+        let mut worst = 0u8;
+        for (i, (rf, yf)) in rgb_frames.iter().zip(&yuv_frames).enumerate() {
+            let converted = crate::image::yuv::rgb_to_yuv420p(rf, w, h);
+            assert_eq!(converted.len(), yf.len(), "frame {i} planar length");
+            for (a, b) in converted.iter().zip(yf) {
+                let d = a.abs_diff(*b);
+                worst = worst.max(d);
+                assert!(
+                    d <= 1,
+                    "frame {i}: converter vs shader byte diff {d} > 1 (one home => rounding only)"
+                );
+            }
+        }
+        eprintln!("gpu_yuv_readback_matches_cpu_converter_sr040: worst byte diff = {worst}");
     }
 }

@@ -27,7 +27,7 @@ use crate::ffmpeg::audio::{AudioClip, AudioParams};
 use crate::ffmpeg::encoder_args::EncoderSettings;
 use crate::ffmpeg::FfmpegEncoder;
 use crate::image::backend::{self, BackendSelection, RenderBackend};
-use crate::image::{gpu, ClipRenderer, FrameRenderer, LoadedClip};
+use crate::image::{gpu, ClipRenderer, LoadedClip};
 use crate::media::{Album, MediaFile, MediaType};
 use crate::roi::RoiDb;
 use crate::transport::FrameTransport;
@@ -166,9 +166,10 @@ impl FrameGenerationPipeline {
 
     /// The render-backend selection for this build: resolved on first use
     /// (`cpu` never touches wgpu), reported exactly once — the backend-in-use
-    /// line mirroring LLR-048's encoder line — with an explicit-`gpu` degrade
+    /// line mirroring LLR-048's encoder line, which also names the run's
+    /// frame transport (SR-040 reporting) — with an explicit-`gpu` degrade
     /// additionally warned with the probe reason (SR-039 fallback leg).
-    // Implements: LLR-068, LLR-072, SR-039
+    // Implements: LLR-068, LLR-072, LLR-075, SR-039, SR-040
     fn render_selection(&self) -> &BackendSelection {
         self.render.get_or_init(|| {
             let sel = backend::select_for(&self.processing.render_backend);
@@ -178,21 +179,35 @@ impl FrameGenerationPipeline {
             ) {
                 log::warn!("{reason}");
             }
-            log::info!("Rendering with {}", sel.describe());
+            log::info!(
+                "Rendering with {} ({} transport)",
+                sel.describe(),
+                transport_for(&sel).pixel_format()
+            );
             sel
         })
+    }
+
+    /// The run's frame transport: derived once from the cached backend
+    /// selection (the only input — a mid-build device-lost degrade cannot
+    /// flip it; degraded frames convert instead, LLR-079).
+    // Implements: LLR-075, SR-040
+    fn transport(&self) -> FrameTransport {
+        transport_for(self.render_selection())
     }
 
     /// Wrap a prefetched clip in the selected backend's renderer (LLR-066):
     /// GPU when selected, the process is not degraded (LLR-072), and the
     /// clip's prescale fits the device texture limit; otherwise the CPU
-    /// reference renderer.
-    // Implements: LLR-066, LLR-072, SR-039
+    /// reference renderer — converted onto the run transport in yuv mode
+    /// (LLR-079, one transport per run).
+    // Implements: LLR-066, LLR-072, LLR-079, SR-039, SR-040
     fn clip_renderer(&self, clip: LoadedClip) -> Box<dyn ClipRenderer> {
+        let transport = self.transport();
         if self.render_selection().backend == RenderBackend::Gpu && !gpu::degraded() {
             match gpu::context() {
                 Ok(ctx) if ctx.fits_texture(&clip.plan) => {
-                    return Box::new(gpu::GpuRenderer::new(ctx, clip));
+                    return Box::new(gpu::GpuRenderer::new(ctx, clip, transport));
                 }
                 Ok(_) => log::debug!(
                     "clip prescale exceeds the GPU texture limit; rendering this clip on cpu"
@@ -201,7 +216,7 @@ impl FrameGenerationPipeline {
                 Err(e) => log::debug!("GPU context unavailable ({}); rendering on cpu", e.reason),
             }
         }
-        Box::new(FrameRenderer::new(clip))
+        crate::image::yuv::cpu_clip_renderer(clip, transport)
     }
 
     /// Resolve the Ken Burns focus for an image: its ROI-database entry (keyed
@@ -323,8 +338,10 @@ impl FrameGenerationPipeline {
 
         // One bounded depth sizes both the render batches and the
         // mixer->writer channel; it replaces the deleted RANGE_MEMORY_BUDGET
-        // as the in-flight-frame memory cap (PB-005). Implements: LLR-063
-        let frame_bytes = (width * height * 3) as usize;
+        // as the in-flight-frame memory cap (PB-005). Frame size comes from
+        // the run transport's one home. Implements: LLR-063, LLR-075, SR-040
+        let transport = self.transport();
+        let frame_bytes = transport.frame_bytes(width, height);
         let depth = writer_channel_depth(output_def.fade_frames() as usize, frame_bytes);
         let batch = depth as u32;
 
@@ -340,12 +357,12 @@ impl FrameGenerationPipeline {
             width,
             height,
             output_def.fps,
-            // Implements: SR-034, SR-035, LLR-045, LLR-049
+            // Implements: SR-034, SR-035, LLR-045, LLR-049, LLR-080
             &EncoderSettings {
                 choice: selection.encoder,
                 crf: output_def.quality_crf,
                 x264_preset: output_def.x264_preset.clone(),
-                transport: FrameTransport::Rgb24,
+                transport,
             },
             // Inactivity watchdog: abort a wedged ffmpeg after this many seconds
             // of no frame writes (0 disables). SR-013 / LLR-008.
@@ -360,7 +377,7 @@ impl FrameGenerationPipeline {
             writer,
             output_def.fade_frames() as usize,
             Arc::clone(&stage_timings),
-            FrameTransport::Rgb24,
+            transport,
             (width * height) as usize,
         );
 
@@ -547,12 +564,15 @@ impl FrameGenerationPipeline {
                     }
                 }
                 MediaType::Video => {
+                    // The run transport reaches the decoder too: yuv mode
+                    // decodes directly to yuv420p, no rgb round-trip
+                    // (LLR-078, SR-040 mixed-media leg).
                     match VideoFrameReader::open(
                         &item.path,
                         width,
                         height,
                         output_def.fps,
-                        FrameTransport::Rgb24,
+                        self.transport(),
                     ) {
                         Ok(rd) => Box::new(VideoFrameSource::new(rd)),
                         Err(e) => {
@@ -722,22 +742,22 @@ impl FrameGenerationPipeline {
         );
         self.warn_if_estimated_oversize(output_def, &media);
 
-        let params = EncodeParams::of(
-            output_def,
-            selection.encoder.codec_name(),
-            FrameTransport::Rgb24,
-        );
+        // The run transport enters the cache identity (LLR-081, SR-040) and
+        // the per-segment encoders (LLR-080).
+        let transport = self.transport();
+        let params = EncodeParams::of(output_def, selection.encoder.codec_name(), transport);
         let engine = crate::cache::engine_version();
         let enc = EncoderSettings {
             choice: selection.encoder,
             crf: output_def.quality_crf,
             x264_preset: output_def.x264_preset.clone(),
-            transport: FrameTransport::Rgb24,
+            transport,
         };
         // Same bounded depth as the streaming path (LLR-063): sizes render
-        // batches and each run's mixer->writer channel.
+        // batches and each run's mixer->writer channel; frame size from the
+        // one home (LLR-075).
         let fade = output_def.fade_frames() as usize;
-        let frame_bytes = (width * height * 3) as usize;
+        let frame_bytes = transport.frame_bytes(width, height);
         let batch = writer_channel_depth(fade, frame_bytes) as u32;
         let stage_timings = Arc::new(StageTimings::new());
         let start = Instant::now();
@@ -978,7 +998,7 @@ impl FrameGenerationPipeline {
             writer,
             fade,
             Arc::clone(stage_timings),
-            FrameTransport::Rgb24,
+            self.transport(),
             (width * height) as usize,
         );
         let outcome = self.drive_clips(output_def, sub, &mut mixer, batch, stage_timings)?;
@@ -1086,6 +1106,16 @@ enum RunOutcome {
     Replan,
     /// These clips failed to load/decode (SR-014): drop them and plan again.
     Skipped(Vec<PathBuf>),
+}
+
+/// The ONE production mapping from the LLR-068 backend selection to the run
+/// transport: Gpu -> yuv420p, Cpu (selected or full-run fallback) -> rgb24,
+/// through the pure [`FrameTransport::for_backend`] home. Free fn so the
+/// once-per-build report line and [`FrameGenerationPipeline::transport`]
+/// share it.
+// Implements: LLR-075, SR-040
+fn transport_for(sel: &BackendSelection) -> FrameTransport {
+    FrameTransport::for_backend(sel.backend == RenderBackend::Gpu)
 }
 
 /// Contiguous runs of miss segments in `plan`, as segment-index ranges —
