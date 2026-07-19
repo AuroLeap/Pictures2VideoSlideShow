@@ -1855,3 +1855,24 @@ Findings:
 - [MINOR] SR-040 AC colorimetry leg says "stays within the SR-039/TC-103 epsilon" — now imprecise: the mechanism is TC-103's, the number is TC-116's decoded-space calibration. True the wording to cite "the SR-039/TC-103 tolerance mechanism at the TC-116 decoded-space epsilon" (or equivalent) in your next registry touch; LLR-082's Detail ("under the TC-103 epsilon") needs the same one-word touch. No behavior change either way. → @system-engineer @software-engineer
 - [NOTE] SR-040 flip decision after Part 2: with TC-107..TC-117 Verified the only open legs are TC-118 (bench, Part 2) and the TC-117 device-lost extension of the TC-104 manual procedure (same standing formality as TC-104 itself — SR-039 precedent: Implemented demo-pending). → @system-engineer
 - [NOTE] Part 2 (witnessed bench, PB-007 re-baseline) follows in a separate commit per the sequencing directive — verification work committed first so a session interruption during the gated bench cannot lose it. → all
+
+**Part 2 (witnessed bench + PB-007 re-baseline) — same round, separate commit per the sequencing directive.**
+
+**Witnessed bench (real output, `pwsh Scripts/bench.ps1`, RTX 3080 / Ryzen 9 5900X):** quiet-host gate passed legitimately — samples 48% (waiting) then 17% / 19% quiet 2/2, no timeout override. GPU leg verified in-log: `Rendering with gpu (NVIDIA GeForce RTX 3080) (yuv420p transport)` — the 4a.5 transport, not a fallback. All four legs completed; `check_perf --tier release`: **0 fail / 0 warn / 0 skip** both before and after the baseline move.
+
+**PB table old -> new (`check_perf --update-baseline`, 7 changes, committed golden in this commit):**
+```
+PB-001  95.69 -> 91.22 frames/s   (-4.7%, inside 10% tol; back at the Phase-2 91.2 level)
+PB-002   4.13 ->  4.35 ms/photo   (inside 20% tol)
+PB-003  0.245 -> 0.254 s/1k       (inside 20% tol)
+PB-004   6.5  ->  6.45 %          (flat)
+PB-005  457.6 -> 471.5 MB         (+3.0%, inside 10% tol)
+PB-006  134.5 -> 134.5 frames/s   (flat — SIMD fast path unaffected, as designed)
+PB-007  131.4 -> 176.5 frames/s   (+34.3% — the Phase-4a.5 payoff; 1.94x the same-run cpu canonical leg 91.2)
+```
+
+**TC-118 -> Verified** (witness record in the row: gate samples, in-log transport line, 131.4->176.5, check_perf 0 fail). Trace after flip: `SN=31 SR=40 LLR=82 TC=118 orphans=0 integrity=0 placeholders=0 budgets=7 budget-findings=0` (exit 0).
+
+Findings (Part 2):
+- [NOTE] **SR-040 flip decision:** all 12 SR-040 TCs (TC-107..TC-118) are now Verified; the ONLY open leg anywhere in scope is the TC-117 device-lost extension of the TC-104 manual procedure (the same standing formality TC-104 itself carries for SR-039). Recommendation: SR-040 Draft -> **Implemented** (demo-pending the TC-104/TC-117 manual device-lost procedure — the SR-039/SR-034 precedent), plus the Part-1 MINOR wording touch (SR-040 AC / LLR-082 "TC-103 epsilon" -> "TC-103 mechanism at the TC-116 decoded-space epsilon"). → @system-engineer
+- [MINOR] PB-007 Notes prose still reads "Baseline 131.4 ... EXPECTED TO MOVE UP" — satisfied by this commit's golden (176.5); true the Notes sentence in the next budgets-registry touch (Integration-owned row, not edited by this hat). → @system-engineer
