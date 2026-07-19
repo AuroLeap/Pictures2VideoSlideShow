@@ -1,9 +1,10 @@
 <#
 .SYNOPSIS
-  Canonical performance-bench runner (SR-036, LLR-052; TC-074): builds the
-  release binary, runs `bench --full` over the fixed corpus twice — a
-  rotation-off leg (PB-006, the LLR-061 SIMD fast path) then the canonical
-  rotation-15 1920x1080 leg (PB-001/002/003/005) — plus a third timed-build
+  Canonical performance-bench runner (SR-036, LLR-052; TC-074/TC-105): builds
+  the release binary, runs `bench --full` over the fixed corpus three times —
+  a rotation-off leg (PB-006, the LLR-061 SIMD fast path), a render_backend=gpu
+  rotation-15 leg (PB-007, the SR-039 GPU renderer), then the canonical
+  rotation-15 1920x1080 leg (PB-001/002/003/005) — plus a fourth timed-build
   leg measuring the SR-037 warm-rebuild ratio (PB-004), and compares the
   merged docs/test/perf-metrics.json against performance-budgets.csv and the
   committed baseline via Scripts/check_perf.py.
@@ -14,11 +15,14 @@
   (resolution/fps/crf/fade) so runs differ only by code and hardware. Record
   the resulting numbers plus the host hardware in docs/status.md per plan §2.
 
-  Two legs, one variable: the legs differ ONLY in `max_rotation_degrees`
-  (0.0 vs the canonical 15.0). The canonical leg keeps PB-001 comparable with
-  every prior baseline; the rotation-off leg exists because rotation 15 never
-  exercises the LLR-061 axis-aligned SIMD resize path, so PB-006 is that
-  path's regression guard (Round-4b MINOR finding).
+  One variable per leg pair: the rotation-off leg differs from the canonical
+  leg ONLY in `max_rotation_degrees` (0.0 vs the canonical 15.0) — it exists
+  because rotation 15 never exercises the LLR-061 axis-aligned SIMD resize
+  path, so PB-006 is that path's regression guard (Round-4b MINOR finding).
+  The gpu leg differs from the canonical leg ONLY in `render_backend`
+  ("gpu" vs the pinned "cpu"), so PB-007 vs PB-001 isolates exactly the
+  SR-039 render-backend change. The canonical leg keeps PB-001 comparable
+  with every prior baseline.
 
   Corpus: -Corpus DIR when given, else the binary's default (TestInput/ if
   present in the repo root, else synthesized PNGs — plumbing-valid only).
@@ -58,10 +62,16 @@ if (-not $SkipBuild) {
 }
 
 # Pinned bench config: fixed 1920x1080 output so PB numbers are comparable
-# across runs; only the Ken Burns rotation differs between the two legs.
-# media_root is a placeholder — bench --full resolves the corpus itself
-# (explicit --corpus, else TestInput/, else synthesized).
-function New-BenchConfig([string]$Name, [double]$RotationDegrees) {
+# across runs; only the Ken Burns rotation and the render backend differ
+# between legs. media_root is a placeholder — bench --full resolves the
+# corpus itself (explicit --corpus, else TestInput/, else synthesized).
+# render_backend defaults to "cpu" HERE (not the config-file default "auto"):
+# since Round 8 `auto` silently selects the GPU renderer on a GPU host, which
+# would poison PB-001/002/005/006 comparability with every pre-GPU baseline —
+# the gpu leg (PB-007) is the one deliberate exception. The encoder is left at
+# its config default ("software", libx264) on every leg, so the gpu leg stays
+# single-variable vs the canonical leg.
+function New-BenchConfig([string]$Name, [double]$RotationDegrees, [string]$RenderBackend = 'cpu') {
     $path = Join-Path ([IO.Path]::GetTempPath()) "slideshow_bench_config_$Name.toml"
     @"
 [input]
@@ -72,6 +82,7 @@ ignore_patterns = ["DNP"]
 base_dir = "TestOut/BenchOut"
 
 [processing]
+render_backend = "$RenderBackend"
 
 [[outputs]]
 name = "$Name"
@@ -135,12 +146,22 @@ function Wait-QuietHost {
 }
 Wait-QuietHost
 
-function Invoke-BenchLeg([string]$ConfigPath, [string]$Label) {
+function Invoke-BenchLeg([string]$ConfigPath, [string]$Label, [string]$ExpectPattern) {
     Write-Host "==> bench --full ($Label)" -ForegroundColor Cyan
     $benchArgs = @('--config', $ConfigPath, '--non-interactive', 'bench', '--full')
     if ($Corpus) { $benchArgs += @('--corpus', $Corpus) }
-    & $exe @benchArgs
-    if ($LASTEXITCODE) { throw "bench --full ($Label) failed (exit $LASTEXITCODE)" }
+    if ($ExpectPattern) {
+        # Capture (while still displaying) so the leg can verify the backend
+        # actually in use — a silent fallback would mislabel the PB row.
+        & $exe @benchArgs 2>&1 | Tee-Object -Variable legOut | Out-Host
+        if ($LASTEXITCODE) { throw "bench --full ($Label) failed (exit $LASTEXITCODE)" }
+        if (-not ($legOut -match $ExpectPattern)) {
+            Write-Host "    WARNING: '$Label' never logged '$ExpectPattern' - its PB row measured the fallback path; do not accept it as a baseline" -ForegroundColor Yellow
+        }
+    } else {
+        & $exe @benchArgs
+        if ($LASTEXITCODE) { throw "bench --full ($Label) failed (exit $LASTEXITCODE)" }
+    }
 }
 
 $metricsPath = Join-Path $repo 'docs\test\perf-metrics.json'
@@ -152,17 +173,31 @@ $metricsPath = Join-Path $repo 'docs\test\perf-metrics.json'
 Invoke-BenchLeg (New-BenchConfig 'bench-1920x1080-rot0' 0.0) 'rotation-off leg, PB-006'
 $pb006 = (Get-Content $metricsPath -Raw | ConvertFrom-Json).'PB-001'
 
-# Leg 2 — canonical rotation-15 leg: the PB-001/002/003/005 producer,
-# comparable with every prior baseline.
+# Leg 2 — gpu rotation-15 leg (PB-007, SR-039/TC-105): identical to the
+# canonical leg except render_backend="gpu" — the encoder stays the config
+# default (software libx264), so PB-007 vs PB-001 isolates exactly the render
+# change. Its end-to-end fps is captured as PB-007 before the canonical leg
+# overwrites perf-metrics.json (wrapper-owned key, like PB-006). On an
+# adapter-less host the build falls back to CPU (SR-039 never-fail clause);
+# the ExpectPattern check warns loudly so a fallback run is never mistaken
+# for a GPU measurement.
+Invoke-BenchLeg (New-BenchConfig 'bench-1920x1080-gpu' 15.0 'gpu') 'gpu rotation-15 leg, PB-007' 'rendering with gpu'
+$pb007 = (Get-Content $metricsPath -Raw | ConvertFrom-Json).'PB-001'
+
+# Leg 3 — canonical rotation-15 leg: the PB-001/002/003/005 producer,
+# comparable with every prior baseline. Runs last of the fps legs so its
+# numbers are the ones left authoritative in perf-metrics.json.
 Invoke-BenchLeg (New-BenchConfig 'bench-1920x1080' 15.0) 'canonical leg'
 
-# Fold the rotation-off throughput back in as PB-006.
+# Fold the rotation-off and gpu throughputs back in as PB-006/PB-007.
 $metrics = Get-Content $metricsPath -Raw | ConvertFrom-Json
 $metrics | Add-Member -NotePropertyName 'PB-006' -NotePropertyValue $pb006 -Force
+$metrics | Add-Member -NotePropertyName 'PB-007' -NotePropertyValue $pb007 -Force
 $metrics | ConvertTo-Json | Set-Content -Encoding UTF8 $metricsPath
 Write-Host ("PB-006 rotation-off end-to-end frames/s: {0:N1}" -f $pb006)
+Write-Host ("PB-007 gpu-render end-to-end frames/s: {0:N1}" -f $pb007)
 
-# Leg 3 — PB-004 warm-rebuild ratio (SR-037 segment cache): a synthetic
+# Leg 4 — PB-004 warm-rebuild ratio (SR-037 segment cache): a synthetic
 # 240-photo album is cold-built with a fresh segment cache, 12 photos (5% —
 # the PB-004 row's "+100 per ~2000-photo library" scaled to bench size) are
 # added, and the timed warm rebuild re-encodes only the new clips + neighbor.
@@ -200,6 +235,8 @@ base_dir = "$($pb004Out -replace '\\','/')"
 
 [processing]
 temp_dir = "$($pb004Cache -replace '\\','/')"
+# Pinned cpu for baseline comparability (see New-BenchConfig note).
+render_backend = "cpu"
 
 [[outputs]]
 name = "pb004"

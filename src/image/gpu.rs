@@ -785,15 +785,18 @@ mod tests {
             "GPU path must not have silently degraded to CPU mid-test"
         );
         assert_eq!(gpu_frames.len(), cpu_frames.len());
-        // TC-103 epsilon: mean absolute per-channel difference <= 2.0 of 255
-        // per frame (the epsilon lives in the TC row; asserted here).
+        // TC-103 epsilon: mean absolute per-channel difference <= 1.0 of 255
+        // per frame (the epsilon lives in the TC row; asserted here). Trued
+        // down from the provisional 2.0 per the TC-103 row: first witnessed
+        // worst-case 0.6378 (RTX 3080, 2026-07-18), so 1.0 keeps ~1.57x
+        // headroom while staying under 0.4% of full scale.
         let mut worst = 0.0f64;
         for (i, (c, g)) in cpu_frames.iter().zip(&gpu_frames).enumerate() {
             let d = crate::image::frame_mean_abs_diff(c, g);
             worst = worst.max(d);
             assert!(
-                d <= 2.0,
-                "frame {i}: mean abs diff {d} > TC-103 epsilon 2.0"
+                d <= 1.0,
+                "frame {i}: mean abs diff {d} > TC-103 epsilon 1.0"
             );
         }
         eprintln!("cpu_vs_gpu_within_tolerance_sr039: worst per-frame mean abs diff = {worst:.4}");

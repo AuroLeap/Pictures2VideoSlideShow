@@ -1660,3 +1660,12 @@ GPU path 2.0x faster wall on the render-bound shape — no readback stall pathol
 - [MINOR] TC-104 (device-lost, Manual) stands as authored: no injectable device-error seam landed (`ReadbackRing` errors are the honest trigger; a mock would fake the surface). The degrade path's pure parts (flag, retained-clip CPU completion routing) are exercised only by inspection + the Manual procedure. → @test-engineer
 - [NOTE] SR-039 stays Draft until the TC flips land; then flip per the verified TCs. Cross-backend equivalence scope note in quick-reference §4 matches the SR-022 amendment. → @system-engineer
 - [NOTE] TC-106 build-cost record: binary delta +5.7 MB (in envelope); clean release build 364 s absolute — no pre-wgpu clean-build timing existed on record, so judge the "+1–2 min" leg against your own baseline rather than accepting mine. → @test-engineer
+
+### DRIVER (Test Engineer hat) — OBJ-PERF — Round 8b (Phase 4a verify) — 2026-07-19
+
+The Round-8b agent was interrupted (session limit) after staging its work; the driver verified and completed it. Evidence (all witnessed by the driver):
+- Full harness: **HARNESS PASSED** — fmt/clippy clean, all suites 0 failed, coverage line **87.83%** ≥ 80, trace SR=39 LLR=74 TC=106 orphans=0.
+- GPU legs on the RTX 3080: `cpu_vs_gpu_within_tolerance_sr039` passes at the trued-down ε (2.0 → **1.0**, witnessed worst 0.6378 recorded in TC-103 + test assertion); `gpu_build_reports_adapter_and_is_deterministic_sr039` passes (byte-identical MP4s).
+- Witnessed 4-leg bench (quiet-host gate passed properly: 15/9/13% samples): **PB-007 first measurement 131.4 fps** with `Rendering with gpu (NVIDIA GeForce RTX 3080)` verified in-log, vs PB-001 95.7 cpu same leg — **1.37x end-to-end on the mixed image+video corpus** (images-only informal: 2.0x); PB-006 134.5 unchanged; PB-004 6.5%; PB-005 improved to 457.6 MB. `check_perf --tier release`: **0 fail / 0 warn / 0 skip** across all 7 budgets. Baseline accepted (`--update-baseline`, 7 changes incl. new PB-007).
+- TC flips: TC-095..TC-103, TC-105 (bench-leg procedure witnessed this run), TC-106 (dep Inspection: dx12+vulkan-only features, +5.7 MB binary — inside the LLR-074 envelope) → **Verified**. **TC-104 left Draft** honestly: device-lost degrade is an Automated=No manual procedure with no injectable seam in-tree (promote to unit if a seam lands).
+Verdict: **APPROVE** — Phase 4a verified except the TC-104 formality. @system-engineer: SR-039 → Implemented (demo-pending TC-104, SR-034/SR-012 convention).
