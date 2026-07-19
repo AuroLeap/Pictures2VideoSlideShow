@@ -1817,3 +1817,41 @@ Findings:
 - [MAJOR] TC-107..TC-115 + TC-117: named tests exist and pass (TC-115/117 on the RTX 3080, output above) — verify and flip per the TC-flip discipline; TC-116 blocks on finding 1; TC-118 witnessed bench + `check_perf --update-baseline` PB-007 move in the same commit (expected UP from 131.4, no number pre-stated; at-or-below = finding to me). → @test-engineer
 - [NOTE] LLR-075 `for_backend` signature deviation (bool selection-outcome, not the enum) recorded above and in the code doc — keeps the approved leaf property; LLR row text already matches ("for_backend (pure) picks it ONCE per output"). Raise if you want the LLR Detail's touch-point list amended to name `pipeline::transport_for` explicitly (it already names pipeline/mod.rs as co-home). → @system-engineer
 - [NOTE] TC-116's reference album in the test is deliberately smooth/muted content (ramp PNGs + muted `gradients` lavfi video): saturated-sawtooth content measures the known subsample-filter divergence (~1.1 raw, no encode) rather than the matrix, while matrix errors shift smooth content just as hard (6.38 probe). Recorded in the test comments. → @test-engineer
+
+### TEST-ENGINEER — OBJ-PERF — Round 10b (Phase 4a.5 verify) — 2026-07-19
+**Part 1 (verification + TC-116 ruling; witnessed bench is Part 2, separate commit).**
+Verdict: APPROVE (Phase 4a.5 verified except the TC-118 bench formality; TC-116 epsilon ruled and re-witnessed green)
+
+**Harness (real output, this host, RTX 3080):**
+```
+pwsh Scripts/run-tests.ps1
+  TOTAL 10168/88.38% fn-region ... 87.51% line   OK: coverage >= 80%
+  Traceability: SR=40 LLR=82 TC=118 orphans=0. Report -> docs/test/report.md
+  HARNESS PASSED
+python Scripts/check.py -> RESULT: PASS (traceability / doc-navigability / design-flows)
+python Scripts/trace.py --strict --no-placeholders
+  -> SN=31 SR=40 LLR=82 TC=118 orphans=0 integrity=0 placeholders=0 budgets=7 budget-findings=0 (exit 0)
+pwsh Scripts/trace.ps1 -Strict -> SR=40 LLR=82 TC=118 orphans=0 (exit 0)
+```
+
+**Ignored GPU legs, witnessed by this hat on the RTX 3080 (real output):**
+```
+cargo test --lib -- --ignored --nocapture
+  gpu_yuv_readback_matches_cpu_converter_sr040: worst byte diff = 1 ... ok
+  cpu_vs_gpu_within_tolerance_sr039: worst per-frame mean abs diff = 0.6378 ... ok   (TC-103 guard unchanged)
+cargo test --test render_backend -- --ignored --nocapture
+  gpu_yuv_build_passes_profile_sr040 ... ok                       (TC-115)
+  gpu_yuv_mixed_blackfade_chroma_neutral_sr040 ... ok             (TC-117: fade-in Y 37.9->125.6, fade-out Y 108.0->34.0, U=V=128±1)
+  gpu_build_reports_adapter_and_is_deterministic_sr039 ... ok     (TC-102 guard)
+  gpu_yuv_vs_cpu_colorimetry_sr040 ... FAILED at eps=1.0          (frame 21 diff 1.0412; worst 1.271 — SE finding CONFIRMED)
+  [after ruling] gpu_yuv_vs_cpu_colorimetry_sr040 ... ok          (eps=2.0; worst 1.3677; run-to-run floor 1.27–1.37)
+```
+
+**TC-116 epsilon RULING (this hat owns the row):** decoded-MP4 comparison space KEPT — the LLR-082 design call stands (ffmpeg's historical swscale as independent referee is the leg's purpose; a raw-frame respec would put our own coefficients back in the loop and cost an LLR-082 respec for no gain). TC-116 gets its OWN calibrated epsilon **2.0 of 255 in decoded space** — NOT a loosening of TC-103 (raw-frame space, stays 1.0): different comparison space, different number, same one-home `frame_mean_abs_diff` mechanism. Calibration recorded in the row: measured correct-implementation floor worst 1.27 (TE witness) / 1.49 (SE Round-10) from three recorded tolerance-based factors × two lossy encodes, vs wrong-matrix signal 6.38 (BT.709 probe) / ~18 (full-vs-limited) — ≥1.34x headroom over the floor, ≥3.19x separation below the defect class the leg exists to catch. Test assertion (tests/render_backend.rs 1.0→2.0 + comment) aligned by this hat in the same commit as the row edit — the ruling's mechanical consequence, per the SE's Round-10 offer.
+
+**TC flips:** TC-107..TC-114 (CI-safe, named tests green in the full harness) + TC-115, TC-117 (witnessed above) + TC-116 (green post-ruling, witnessed) → **Verified**. **TC-118 stays Draft** until the Part-2 witnessed bench (baseline move in the same commit as the measurement, per its row).
+
+Findings:
+- [MINOR] SR-040 AC colorimetry leg says "stays within the SR-039/TC-103 epsilon" — now imprecise: the mechanism is TC-103's, the number is TC-116's decoded-space calibration. True the wording to cite "the SR-039/TC-103 tolerance mechanism at the TC-116 decoded-space epsilon" (or equivalent) in your next registry touch; LLR-082's Detail ("under the TC-103 epsilon") needs the same one-word touch. No behavior change either way. → @system-engineer @software-engineer
+- [NOTE] SR-040 flip decision after Part 2: with TC-107..TC-117 Verified the only open legs are TC-118 (bench, Part 2) and the TC-117 device-lost extension of the TC-104 manual procedure (same standing formality as TC-104 itself — SR-039 precedent: Implemented demo-pending). → @system-engineer
+- [NOTE] Part 2 (witnessed bench, PB-007 re-baseline) follows in a separate commit per the sequencing directive — verification work committed first so a session interruption during the gated bench cannot lose it. → all

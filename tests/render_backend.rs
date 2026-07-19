@@ -362,10 +362,14 @@ enable_audio = false
 // render_backend=gpu (yuv420p transport), decode BOTH finished MP4s back to
 // rgb24 with the SAME ffmpeg invocation (common::decode_frames — ffmpeg's
 // historical swscale conversion is the independent referee), and compare
-// per-frame via the one diff home under the TC-103 epsilon (1.0 of 255). A
-// shader matrix/range diverging from the historical rgb24->FFmpeg conversion
-// (full-vs-limited would shift ~18/255, 601-vs-709 several units on
-// saturated content) shifts the decoded frames and trips this.
+// per-frame via the one diff home under the TC-116 decoded-space epsilon
+// (2.0 of 255 — Round-10b calibration ruling: TC-103's 1.0 is calibrated for
+// RAW renderer frames; this leg's correct-implementation floor across two
+// lossy encodes measures worst 1.27-1.49, the recorded tolerance-based
+// factors amplified by the double encode). A shader matrix/range diverging
+// from the historical rgb24->FFmpeg conversion (full-vs-limited would shift
+// ~18/255, 601-vs-709 measures 6.38 on this very content) shifts the
+// decoded frames and trips this — >=3.19x separation above the epsilon.
 #[test]
 #[ignore = "Release tier (TC-116): needs a GPU adapter"]
 fn gpu_yuv_vs_cpu_colorimetry_sr040() {
@@ -433,9 +437,10 @@ fn gpu_yuv_vs_cpu_colorimetry_sr040() {
     for (i, d) in diffs.iter().enumerate() {
         worst = worst.max(*d);
         assert!(
-            *d <= 1.0,
-            "frame {i}: decoded mean abs diff {d:.4} > TC-103 epsilon 1.0 — \
-             yuv matrix/range does not match the historical conversion"
+            *d <= 2.0,
+            "frame {i}: decoded mean abs diff {d:.4} > TC-116 decoded-space \
+             epsilon 2.0 — yuv matrix/range does not match the historical \
+             conversion"
         );
     }
     eprintln!("gpu_yuv_vs_cpu_colorimetry_sr040: worst per-frame mean abs diff = {worst:.4}");
