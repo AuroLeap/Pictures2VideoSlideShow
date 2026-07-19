@@ -265,6 +265,37 @@ piece removes**, using the shipped Phase-0–3 numbers (1440×900–1080p class)
   also abandons wgpu portability for vendor interop (CUDA) or bleeding-edge
   Vulkan video, so it must earn its keep on a PB row, same as everything else.
 
+**Gate measurement (2026-07-19, quiet host, RTX 3080, gpu render + h264_nvenc,
+canonical corpus): Phase 4b NOT justified at current targets.** Stage shares:
+
+| Leg | end-to-end fps | render (incl. readback) | pipe-write | blend |
+|---|---|---|---|---|
+| 1080p rot-15 | 173.2 | 34.5% | 34.1% | 3.5% |
+| 1080p rot-0 | 171.7 | 34.7% | 34.4% | 3.5% |
+| 2160p rot-15 | 44.2 | 45.0% | 33.8% | 3.4% |
+
+Reading: on the GPU path the "render" stage is almost entirely readback wait
+(the draw itself is µs), so readback+pipe are each ~34% of 1080p wall — but they
+run on different threads (mixer vs EncoderWriter), so the shares overlap and
+the true 4b-recoverable wall fraction is well under their 68% sum (mixer-side
+encode-write-stall is only 0.7%, i.e. the pipeline is not back-pressured;
+un-instrumented video-clip decode fills much of the wall). Realistic 4b gain at
+1080p-class output: ~1.5–2× for weeks of vendor-interop work. At 2160p the
+eliminable share grows and wall is 4×, confirming the "4b pays at ~4K" claim —
+but the product targets 1440×900-class frames, where the current stack already
+delivers ~170–180 fps end-to-end (a 5,000-photo cold build ≈ tens of minutes;
+warm rebuilds are minutes). **Verdict: parked. Re-open trigger:** 4K-class
+output becomes a real target, or cold-build time at real library scale is
+still felt after `render_backend=auto` + `encoder=h264_nvenc` adoption.
+
+**Cheaper intermediate if more 1080p speed is ever wanted (Phase 4a.5, days
+not weeks):** convert rgb→yuv in the wgpu shader and pipe `yuv420p` rawvideo
+to ffmpeg instead of rgb24 — 1.5 vs 3 bytes/px halves BOTH readback and
+pipe-write and drops ffmpeg's own colorspace conversion, without touching the
+process architecture. Estimated 1.2–1.4× on the measured shares; requires the
+blend/fade stages to move into the shader or operate on yuv (the SR-022
+per-backend determinism scope already accommodates it).
+
 ---
 
 ## 7. Explicitly rejected / deferred
