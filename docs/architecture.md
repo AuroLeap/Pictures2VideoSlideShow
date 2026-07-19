@@ -263,6 +263,7 @@ graph LR
     m_roi["roi — Optional region-of-interest (ROI) database."]
     m_setup["setup — First-run setup building blocks: the FFmpeg dep…"]
     m_transform["transform — Transform calculations for the Ken Burns (pan +…"]
+    m_transport["transport — Per-run frame transport (SR-040): the single ho…"]
     m_util["util — Small shared utilities: filesystem helpers, out…"]
     m_video["video — Video passthrough: decode an input video to raw…"]
     m_cache --> m_config
@@ -270,16 +271,19 @@ graph LR
     m_cache --> m_ffmpeg
     m_cache --> m_media
     m_cache --> m_pipeline
+    m_cache --> m_transport
     m_cache --> m_util
     m_config --> m_error
     m_config --> m_roi
     m_ffmpeg --> m_error
     m_ffmpeg --> m_setup
+    m_ffmpeg --> m_transport
     m_ffmpeg --> m_util
     m_image --> m_config
     m_image --> m_error
     m_image --> m_pipeline
     m_image --> m_transform
+    m_image --> m_transport
     m_main --> m_error
     m_media --> m_config
     m_media --> m_error
@@ -291,6 +295,7 @@ graph LR
     m_pipeline --> m_image
     m_pipeline --> m_media
     m_pipeline --> m_roi
+    m_pipeline --> m_transport
     m_pipeline --> m_util
     m_pipeline --> m_video
     m_preflight --> m_config
@@ -305,6 +310,7 @@ graph LR
     m_transform --> m_config
     m_util --> m_error
     m_video --> m_error
+    m_video --> m_transport
 ```
 <!-- END GENERATED DEPENDENCY DIAGRAM -->
 
@@ -314,18 +320,18 @@ graph LR
 _Generated 2026-07-19 by `scripts/trace.ps1` from the source tree — do not edit by hand. Each file's summary is its first `//!` line; `<- SR/LLR` are the `Implements:` back-links found at the item; `uses:` lists in-tree modules the file references (`crate::`)._
 
 - **src/cache/mod.rs** — _Segment cache (SR-037): pure cache-key derivation for per-clip encoded_
-  - uses: `config`, `media`, `util`
-  - `pub fn engine_version() -> String`  <- LLR-053, SR-037
+  - uses: `config`, `media`, `transport`, `util`
+  - `pub fn engine_version() -> String`  <- LLR-053, LLR-081, SR-037, SR-040
   - `pub struct SourceIdentity`  <- LLR-053, SR-022, SR-037
   - `pub fn of(file: &MediaFile) -> Self`
   - `pub struct EncodeParams`  <- LLR-047, LLR-053, SR-037
-  - `pub fn of(def: &OutputDef, resolved_encoder: &str) -> Self`  <- SR-006
+  - `pub fn of(def: &OutputDef, resolved_encoder: &str, transport: FrameTransport) -> Self`  <- SR-006
   - `pub struct SegmentKeyInput<'a>`  <- LLR-053, SR-037
   - `pub fn segment_key(input: &SegmentKeyInput) -> String`  <- LLR-053, SR-037
   - `pub fn combine_keys(member_keys: &[String]) -> String`  <- LLR-053, LLR-055, SR-037
   - `pub fn clip_frames_key(id: &SourceIdentity, fps: u32) -> String`  <- LLR-055, SR-037
 - **src/cache/planner.rs** — _Warm-build segment planner (SR-037): pure frame-layout arithmetic mirroring_
-  - uses: `config`, `ffmpeg`, `pipeline`
+  - uses: `config`, `ffmpeg`, `pipeline`, `transport`
   - `pub struct ClipFacts`  <- LLR-055, LLR-057, SR-037
   - `pub struct ClipLayout`  <- LLR-055, LLR-057, SR-037
   - `pub fn clip_layout(counts: &[u64], fade: usize) -> ClipLayout`  <- LLR-055, LLR-057, SR-037
@@ -379,7 +385,9 @@ _Generated 2026-07-19 by `scripts/trace.ps1` from the source tree — do not edi
   - uses: `error`, `util`
   - `pub fn concat_segments(`  <- LLR-056, SR-005, SR-011, SR-013, SR-015, SR-037
 - **src/ffmpeg/encoder_args.rs** — _Pure mapping from an encoder choice to the FFmpeg output-side argument_
-  - `pub enum EncoderChoice`  <- LLR-045, LLR-049, SR-034, SR-035
+  - uses: `transport`
+  - `pub fn rawvideo_input_args(`  <- LLR-080, SR-040
+  - `pub enum EncoderChoice`  <- LLR-045, SR-034
   - `pub fn codec_name(self) -> &'static str`
   - `pub enum EncoderRequest`  <- LLR-047, SR-034
   - `pub fn parse(s: &str) -> Self`  <- LLR-047, SR-034
@@ -389,17 +397,17 @@ _Generated 2026-07-19 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn software(crf: u32) -> Self`  <- SR-034
   - `pub fn args(&self) -> Vec<String>`
   - `pub fn segment_args(&self) -> Vec<String>`  <- SR-037
-- **src/ffmpeg/mod.rs** — _FFmpeg coordination: spawn an encoder process and stream raw `rgb24` frames_
-  - uses: `error`, `util`
+- **src/ffmpeg/mod.rs** — _FFmpeg coordination: spawn an encoder process and stream raw frames (on the_
+  - uses: `error`, `transport`, `util`
   - `pub struct FfmpegEncoder`
-  - `pub fn start(`  <- LLR-008, LLR-015, LLR-045, SR-005, SR-011, SR-013, SR-034, SR-035
-  - `pub fn start_segment(`  <- LLR-056, SR-011, SR-013, SR-037
+  - `pub fn start(`  <- LLR-008, LLR-015, LLR-045, LLR-080, SR-005, SR-011, SR-013, SR-034, SR-035, SR-040
+  - `pub fn start_segment(`  <- LLR-056, LLR-080, SR-011, SR-013, SR-037, SR-040
   - `pub fn write_frame(&mut self, data: &[u8]) -> Result<()>`  <- LLR-008, SR-013
   - `pub fn finish(self) -> Result<()>`  <- LLR-008, LLR-015, SR-011, SR-013, SR-015, SR-037
   - `pub fn finish_to_part(mut self) -> Result<PathBuf>`  <- LLR-008, LLR-015, LLR-041, SR-011, SR-013
   - `pub fn promote(src: &Path, final_path: &Path) -> Result<()>`  <- LLR-015, LLR-041, SR-011, SR-015
 - **src/ffmpeg/probe.rs** — _Preflight hardware-encoder probe and fallback selection (SR-034): list the_
-  - uses: `setup`
+  - uses: `setup`, `transport`
   - `pub enum ProbeOutcome`  <- LLR-046, SR-034
   - `pub fn parse_encoders(listing: &str) -> HashSet<String>`  <- LLR-046, SR-034
   - `pub fn classify_trial(success: bool, stderr: &str) -> ProbeOutcome`  <- LLR-046, SR-034
@@ -426,8 +434,8 @@ _Generated 2026-07-19 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn select_backend<F: FnOnce() -> AdapterProbe>(`  <- LLR-068, SR-039
   - `pub fn probe_adapter() -> &'static AdapterProbe`  <- LLR-068, SR-039
   - `pub fn select_for(render_backend: &str) -> BackendSelection`  <- LLR-068, SR-039
-- **src/image/gpu.rs** — _GPU frame renderer (SR-039): process-wide wgpu device/queue, once-per-clip_
-  - uses: `config`, `transform`
+- **src/image/gpu.rs** — _GPU frame renderer (SR-039/SR-040): process-wide wgpu device/queue,_
+  - uses: `config`, `transform`, `transport`
   - `pub struct InitError`  <- LLR-068, SR-039
   - `pub struct GpuContext`  <- LLR-069, SR-039
   - `pub fn fits_texture(&self, plan: &ClipPlan) -> bool`
@@ -435,11 +443,11 @@ _Generated 2026-07-19 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn degraded() -> bool`  <- LLR-072, SR-039
   - `pub struct FrameUniforms`  <- LLR-070, SR-022, SR-039
   - `pub fn frame_uniforms(plan: &ClipPlan, i: u32) -> FrameUniforms`  <- LLR-070, SR-022, SR-039
+  - `pub struct YuvUniforms`  <- LLR-076, LLR-079, SR-040
+  - `pub fn for_output(width: u32, height: u32) -> Self`  <- LLR-076, LLR-079, SR-040
   - `pub fn rgb_to_rgba(rgb: &[u8]) -> Vec<u8>`  <- LLR-069, SR-039
   - `pub fn strip_readback(padded: &[u8], padded_bpr: usize, w: usize, h: usize) -> Vec<u8>`  <- LLR-071, SR-039
   - `pub fn padded_bytes_per_row(width: u32) -> u32`  <- LLR-071, SR-039
-  - `pub fn oldest_slot(next: usize, pending: usize, depth: usize) -> usize`  <- LLR-071, SR-039
-  - `pub struct GpuRenderer`  <- LLR-069, LLR-070, LLR-071, LLR-072, SR-039
 - **src/image/mod.rs** — _Frame generation: turn one source image into a sequence of RGB frames_
   - uses: `config`, `error`, `pipeline`, `transform`
   - `pub struct LoadTimings`  <- LLR-050, LLR-060, SR-036
@@ -454,6 +462,11 @@ _Generated 2026-07-19 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn load_timings(&self) -> LoadTimings`  <- LLR-050, SR-036
   - `pub fn total_frames(&self) -> u32`  <- LLR-050, SR-036
   - `pub fn uses_fast_path(&self) -> bool`  <- LLR-061, SR-036
+- **src/image/yuv.rs** — _Single home for rgb-to-yuv colorimetry (SR-040): the BT.601 limited-range_
+  - uses: `transport`
+  - `pub struct YuvMatrix`  <- LLR-079, SR-040
+  - `pub fn rgb_to_yuv420p(rgb: &[u8], w: usize, h: usize) -> Vec<u8>`  <- LLR-010, LLR-076, LLR-079, SR-040
+  - `pub fn cpu_clip_renderer(clip: LoadedClip, transport: FrameTransport) -> Box<dyn ClipRenderer>`  <- LLR-079, SR-040
 - **src/lib.rs** — _Library crate root: re-exports the engine's modules so integration tests_
 - **src/logging.rs** — _Logging setup: env_logger with millisecond timestamps; `--verbose`_
   - `pub fn init_logging(verbose: bool) -> std::io::Result<()>`
@@ -480,7 +493,7 @@ _Generated 2026-07-19 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn lookup(`  <- LLR-059, SR-038
   - `pub fn insert(&mut self, rel: String, entry: ProbeEntry)`
 - **src/pipeline/mod.rs** — _Pipeline orchestration: wire media → frame generation → FFmpeg encoding,_
-  - uses: `cache`, `config`, `error`, `ffmpeg`, `image`, `media`, `roi`, `util`, `video`
+  - uses: `cache`, `config`, `error`, `ffmpeg`, `image`, `media`, `roi`, `transport`, `util`, `video`
   - `pub trait FrameSink`  <- LLR-056, LLR-063, SR-037
   - `pub struct SkippedInput`  <- LLR-017, SR-014
   - `pub struct WrittenOutput`  <- LLR-023, LLR-024, SR-004
@@ -562,6 +575,11 @@ _Generated 2026-07-19 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn is_axis_aligned(&self) -> bool`  <- LLR-061, SR-036
   - `pub fn crop_window(&self, i: u32) -> (f32, f32, f32, f32)`  <- LLR-036, LLR-061, SR-031
   - `pub fn projection(&self, i: u32) -> Projection`  <- LLR-036, SR-031
+- **src/transport.rs** — _Per-run frame transport (SR-040): the single home for how raw frames travel_
+  - `pub enum FrameTransport`  <- LLR-075, LLR-079, SR-040
+  - `pub fn for_backend(gpu_backend: bool) -> Self`  <- LLR-075, SR-040
+  - `pub fn frame_bytes(self, width: u32, height: u32) -> usize`  <- LLR-010, LLR-075, SR-040
+  - `pub fn pixel_format(self) -> &'static str`  <- LLR-075, LLR-078, LLR-080, SR-040
 - **src/util/estimate.rs** — _Pre-run output size estimation and the FAT32 oversize threshold._
   - `pub fn estimate_output_bytes(duration_secs: f64, crf: u32) -> u64`  <- LLR-013, SR-009
   - `pub fn is_oversize(bytes: u64) -> bool`  <- LLR-013, SR-009
@@ -589,9 +607,9 @@ _Generated 2026-07-19 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn add_clip(&self)`  <- LLR-063
   - `pub fn set_ffmpeg_wall(&self, d: Duration)`
   - `pub fn snapshot(&self) -> StageSnapshot`
-- **src/video/mod.rs** — _Video passthrough: decode an input video to raw `rgb24` frames at the target_
-  - uses: `error`
+- **src/video/mod.rs** — _Video passthrough: decode an input video to raw frames on the run's_
+  - uses: `error`, `transport`
   - `pub struct VideoFrameReader`
-  - `pub fn open(path: &Path, width: u32, height: u32, fps: u32) -> Result<Self>`
+  - `pub fn open(`  <- LLR-075, LLR-078, SR-040
   - `pub fn read_frame(&mut self) -> Result<Option<Vec<u8>>>`
 <!-- END GENERATED MODULE MAP -->
