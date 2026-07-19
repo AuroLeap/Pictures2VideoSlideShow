@@ -21,6 +21,16 @@ env_logger = "0.11"
 clap = { version = "4.4", features = ["derive"] }
 walkdir = "2.4"
 sha2 = "0.10"
+# GPU render backend (SR-039, LLR-074): safe Rust over DX12/Vulkan — the
+# per-machine adapter pick needs no SDK/toolchain on end-user machines.
+# Heaviest dep in the tree (naga shader compiler included) — accepted against
+# removing the 57.3% rot-15 render share; features trimmed to dx12+vulkan+wgsl
+# (no GLES/Metal/WebGPU) to cap compile time and binary size.
+wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "dx12", "vulkan", "wgsl"] }
+# Pod casts for the GPU FrameUniforms and staging-buffer readback (LLR-074).
+bytemuck = { version = "1", features = ["derive"] }
+# Minimal block_on for wgpu's async adapter/device/map calls — no tokio (LLR-074).
+pollster = "1"
 
 [[bin]]
 name = "make_video_slideshow"

@@ -77,6 +77,25 @@ pub struct ProcessingConfig {
     // Implements: SR-037, LLR-054
     #[serde(default = "default_segment_cache_gb")]
     pub segment_cache_gb: f64,
+
+    /// Frame-render backend (SR-039 set): `auto` (the default: GPU when a
+    /// usable adapter exists, else CPU with a logged reason), `cpu` (the
+    /// reference renderer), or `gpu` (wgpu; probe failure falls back to CPU
+    /// with a warning — never a build failure). Process-wide, not per-output:
+    /// the wgpu adapter/device is one per process (LLR-067 recorded call).
+    // Implements: SR-039, LLR-067
+    #[serde(default = "default_render_backend")]
+    pub render_backend: String,
+}
+
+/// The `render_backend` values Config::validate accepts (SR-039).
+// Implements: SR-039, LLR-067
+pub const ALLOWED_RENDER_BACKENDS: [&str; 3] = ["auto", "cpu", "gpu"];
+
+/// Default render backend (SR-039): `auto` — GPU when available, else CPU.
+// Implements: SR-039, LLR-067
+fn default_render_backend() -> String {
+    "auto".into()
 }
 
 /// Default segment-cache size cap (SR-037 bounded-cache requirement): 20 GB
@@ -249,6 +268,16 @@ impl Config {
             )));
         }
 
+        // Implements: SR-039, LLR-067 — render_backend restricted to the
+        // SR-039 set; process-wide (one wgpu device per process).
+        if !ALLOWED_RENDER_BACKENDS.contains(&self.processing.render_backend.as_str()) {
+            return Err(SlideshowError::InvalidConfig(format!(
+                "Invalid render_backend: '{}' (allowed values: {})",
+                self.processing.render_backend,
+                ALLOWED_RENDER_BACKENDS.join(", ")
+            )));
+        }
+
         // Duplicate names would make two definitions write the same
         // `<name>.mp4`, silently discarding one encode (SR-017: N distinct MP4s).
         // Implements: SR-017, LLR-003
@@ -394,6 +423,7 @@ mod tests {
                 ffmpeg_path: None,
                 default_focus: None,
                 segment_cache_gb: default_segment_cache_gb(),
+                render_backend: default_render_backend(),
             },
             outputs: vec![sample_output(640, 480), sample_output(1280, 720)],
         };
@@ -423,6 +453,45 @@ mod tests {
         cfg.processing.segment_cache_gb = 0.0;
         let err = cfg.validate().expect_err("zero cap rejected").to_string();
         assert!(err.contains("segment_cache_gb"), "names the field: {err}");
+    }
+
+    // Verifies: SR-039, LLR-067 (TC-096) — `render_backend` defaults to auto
+    // when omitted, every SR-039 value validates, an invalid value is rejected
+    // with a plain-language error naming the field and the allowed set
+    // (LLR-047 pattern), and the field is process-wide on ProcessingConfig
+    // (deserialized from [processing], not per-output — LLR-067 recorded call).
+    #[test]
+    fn render_backend_defaults_validates_and_rejects_sr039() {
+        // Omitted -> auto (SR-039 default), so existing configs parse unchanged.
+        let p: ProcessingConfig = toml::from_str("").expect("empty [processing] should parse");
+        assert_eq!(p.render_backend, "auto", "documented default: auto");
+
+        // Every allowed value deserializes from [processing] and validates.
+        for value in ALLOWED_RENDER_BACKENDS {
+            let p: ProcessingConfig = toml::from_str(&format!("render_backend = \"{value}\""))
+                .unwrap_or_else(|e| panic!("'{value}' must parse: {e}"));
+            assert_eq!(p.render_backend, value);
+            let mut cfg = config_with_outputs(vec![sample_output(320, 240)]);
+            cfg.processing.render_backend = value.into();
+            cfg.validate()
+                .unwrap_or_else(|e| panic!("'{value}' must validate: {e}"));
+        }
+
+        // An invalid value is rejected, naming the field and the allowed set.
+        let mut cfg = config_with_outputs(vec![sample_output(320, 240)]);
+        cfg.processing.render_backend = "cuda".into();
+        let err = cfg
+            .validate()
+            .expect_err("invalid render_backend must be rejected")
+            .to_string();
+        assert!(err.contains("render_backend"), "names the field: {err}");
+        assert!(err.contains("cuda"), "names the bad value: {err}");
+        for allowed in ALLOWED_RENDER_BACKENDS {
+            assert!(
+                err.contains(allowed),
+                "lists allowed value {allowed}: {err}"
+            );
+        }
     }
 
     // Verifies: SR-032, LLR-042 — audio config fields default when omitted from

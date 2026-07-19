@@ -69,6 +69,7 @@ fn processing() -> ProcessingConfig {
         ffmpeg_path: None,
         default_focus: None,
         segment_cache_gb: 20.0,
+        render_backend: "cpu".into(),
     }
 }
 

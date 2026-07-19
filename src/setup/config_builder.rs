@@ -81,6 +81,8 @@ pub fn build_config(v: &WizardValues) -> Config {
             ffmpeg_path: None,
             default_focus: None,
             segment_cache_gb: 20.0,
+            // SR-039 default: GPU when a usable adapter exists, else CPU.
+            render_backend: "auto".into(),
         },
         outputs,
     }

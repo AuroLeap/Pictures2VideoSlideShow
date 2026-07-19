@@ -2,7 +2,7 @@
 //! the same streaming cross-fade mixer.
 
 use crate::error::Result;
-use crate::image::FrameRenderer;
+use crate::image::ClipRenderer;
 use crate::util::timing::StageTimings;
 use crate::video::VideoFrameReader;
 use std::collections::VecDeque;
@@ -15,10 +15,13 @@ pub trait FrameSource {
     fn next_frame(&mut self) -> Result<Option<Vec<u8>>>;
 }
 
-/// Image clip: renders frames in parallel batches and serves them one at a time,
-/// preserving rayon throughput while exposing a pull interface.
+/// Image clip: renders frames in batches and serves them one at a time,
+/// preserving renderer throughput while exposing a pull interface. Holds the
+/// backend-blind [`ClipRenderer`] (LLR-066): CPU or GPU, the frame shape and
+/// everything downstream are identical.
+// Implements: LLR-066, SR-039
 pub struct ImageFrameSource {
-    renderer: FrameRenderer,
+    renderer: Box<dyn ClipRenderer>,
     total: u32,
     next: u32,
     batch: u32,
@@ -28,7 +31,7 @@ pub struct ImageFrameSource {
 }
 
 impl ImageFrameSource {
-    pub fn new(renderer: FrameRenderer, batch: u32, timings: Arc<StageTimings>) -> Self {
+    pub fn new(renderer: Box<dyn ClipRenderer>, batch: u32, timings: Arc<StageTimings>) -> Self {
         let total = renderer.total_frames();
         Self {
             renderer,

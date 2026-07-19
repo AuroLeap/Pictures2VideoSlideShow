@@ -139,9 +139,9 @@ sequenceDiagram
     Wr-->>Mix: Result re-raised by join; .part cleanup unchanged (SR-011, LLR-064)
 ```
 
-### GPU render path (SR-039; OBJ-PERF Phase 4a — designed Round 7b, implementation lands Round 7d)
+### GPU render path (SR-039; OBJ-PERF Phase 4a — shipped Round 8)
 
-**Designed (LLR-066..LLR-074, Draft):** the frame renderer goes behind a
+**Implemented (LLR-066..LLR-074; TC-095..TC-101 + `--ignored` GPU legs):** the frame renderer sits behind a
 `ClipRenderer` trait — today's `FrameRenderer` is the CPU impl and correctness
 reference — while decode+prescale stay shared and CPU-side as a backend-blind
 `LoadedClip` from the unchanged `ClipPrefetcher` (LLR-066: prescale is 1.5% of
@@ -212,7 +212,7 @@ graph LR
 | `src/config` | Load/validate TOML config (`OutputDef`, Ken Burns + audio params, config location) |
 | `src/media` | Parallel scan, classify, dimensions/duration, audio probe, ignore patterns, SR-038 probe cache |
 | `src/transform` | `ClipPlan`: Ken Burns sub-pixel projection + rotation math (deterministic, optional fixed focus) |
-| `src/image` | `FrameRenderer`: pre-scale once, per-frame single-warp render |
+| `src/image` | `ClipRenderer` backends over a shared `LoadedClip` (SR-039): CPU `FrameRenderer` (pre-scale once, per-frame single-warp render), wgpu `GpuRenderer` (`gpu.rs` + `render.wgsl`: textured-quad draw, 3-deep readback ring), and the `backend.rs` probe/selection table |
 | `src/roi` | Optional region-of-interest database (per-image focus override) |
 | `src/video` | `VideoFrameReader`: stream decoded frames from ffmpeg |
 | `src/ffmpeg` | `FfmpegEncoder` (raw rgb24 → H.264 MP4), FFmpeg resolution order, audio mux |
@@ -259,6 +259,7 @@ graph LR
     m_ffmpeg --> m_util
     m_image --> m_config
     m_image --> m_error
+    m_image --> m_pipeline
     m_image --> m_transform
     m_main --> m_error
     m_media --> m_config
@@ -396,16 +397,44 @@ _Generated 2026-07-18 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub enum Source`
   - `pub fn pick(configured_ok: bool, on_path: bool, cached_ok: bool) -> Option<Source>`  <- LLR-032, SR-027
   - `pub fn resolve(configured: Option<&Path>, cache_dir: &Path) -> Option<PathBuf>`  <- LLR-032, SR-027
+- **src/image/backend.rs** — _Render-backend selection (SR-039): a pure decision table over the config_
+  - `pub enum BackendRequest`  <- LLR-068, SR-039
+  - `pub fn parse(s: &str) -> Self`
+  - `pub enum AdapterProbe`  <- LLR-068, SR-039
+  - `pub enum RenderBackend`  <- LLR-068, SR-039
+  - `pub struct BackendSelection`  <- LLR-068, LLR-072, SR-039
+  - `pub fn describe(&self) -> String`  <- LLR-072
+  - `pub fn select_backend<F: FnOnce() -> AdapterProbe>(`  <- LLR-068, SR-039
+  - `pub fn probe_adapter() -> &'static AdapterProbe`  <- LLR-068, SR-039
+  - `pub fn select_for(render_backend: &str) -> BackendSelection`  <- LLR-068, SR-039
+- **src/image/gpu.rs** — _GPU frame renderer (SR-039): process-wide wgpu device/queue, once-per-clip_
+  - uses: `config`, `transform`
+  - `pub struct InitError`  <- LLR-068, SR-039
+  - `pub struct GpuContext`  <- LLR-069, SR-039
+  - `pub fn fits_texture(&self, plan: &ClipPlan) -> bool`
+  - `pub fn context() -> Result<&'static GpuContext, &'static InitError>`  <- LLR-068, LLR-069, SR-039
+  - `pub fn degraded() -> bool`  <- LLR-072, SR-039
+  - `pub struct FrameUniforms`  <- LLR-070, SR-022, SR-039
+  - `pub fn frame_uniforms(plan: &ClipPlan, i: u32) -> FrameUniforms`  <- LLR-070, SR-022, SR-039
+  - `pub fn rgb_to_rgba(rgb: &[u8]) -> Vec<u8>`  <- LLR-069, SR-039
+  - `pub fn strip_readback(padded: &[u8], padded_bpr: usize, w: usize, h: usize) -> Vec<u8>`  <- LLR-071, SR-039
+  - `pub fn padded_bytes_per_row(width: u32) -> u32`  <- LLR-071, SR-039
+  - `pub fn oldest_slot(next: usize, pending: usize, depth: usize) -> usize`  <- LLR-071, SR-039
+  - `pub struct GpuRenderer`  <- LLR-069, LLR-070, LLR-071, LLR-072, SR-039
 - **src/image/mod.rs** — _Frame generation: turn one source image into a sequence of RGB frames_
-  - uses: `config`, `error`, `transform`
+  - uses: `config`, `error`, `pipeline`, `transform`
   - `pub struct LoadTimings`  <- LLR-050, LLR-060, SR-036
-  - `pub struct FrameRenderer`
-  - `pub fn load(path: &Path, out: &OutputDef) -> Result<Self>`
+  - `pub struct LoadedClip`  <- LLR-066, SR-039
+  - `pub fn load(path: &Path, out: &OutputDef, focus: Option<(f32, f32)>) -> Result<Self>`  <- LLR-037, LLR-066, SR-031, SR-039
+  - `pub trait ClipRenderer: Send`  <- LLR-066, SR-039
+  - `pub fn frame_mean_abs_diff(a: &[u8], b: &[u8]) -> f64`  <- LLR-073, SR-039
+  - `pub struct FrameRenderer`  <- SR-039
+  - `pub fn new(clip: LoadedClip) -> Self`  <- LLR-066, SR-039
+  - `pub fn load(path: &Path, out: &OutputDef) -> Result<Self>`  <- LLR-066, SR-039
   - `pub fn load_with_focus(`  <- LLR-037, SR-031
   - `pub fn load_timings(&self) -> LoadTimings`  <- LLR-050, SR-036
   - `pub fn total_frames(&self) -> u32`  <- LLR-050, SR-036
   - `pub fn uses_fast_path(&self) -> bool`  <- LLR-061, SR-036
-  - `pub fn render_range(&self, start: u32, end: u32) -> Vec<Vec<u8>>`
 - **src/lib.rs** — _Library crate root: re-exports the engine's modules so integration tests_
 - **src/logging.rs** — _Logging setup: env_logger with millisecond timestamps; `--verbose`_
   - `pub fn init_logging(verbose: bool) -> std::io::Result<()>`
@@ -432,7 +461,7 @@ _Generated 2026-07-18 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub fn lookup(`  <- LLR-059, SR-038
   - `pub fn insert(&mut self, rel: String, entry: ProbeEntry)`
 - **src/pipeline/mod.rs** — _Pipeline orchestration: wire media → frame generation → FFmpeg encoding,_
-  - uses: `cache`, `config`, `error`, `ffmpeg`, `media`, `roi`, `util`, `video`
+  - uses: `cache`, `config`, `error`, `ffmpeg`, `image`, `media`, `roi`, `util`, `video`
   - `pub trait FrameSink`  <- LLR-056, LLR-063, SR-037
   - `pub struct SkippedInput`  <- LLR-017, SR-014
   - `pub struct WrittenOutput`  <- LLR-023, LLR-024, SR-004
@@ -440,7 +469,7 @@ _Generated 2026-07-18 by `scripts/trace.ps1` from the source tree — do not edi
   - `pub struct BuildSummary`  <- LLR-017, LLR-023, LLR-024, SR-004, SR-014
   - `pub fn oversize_outputs(&self) -> Vec<&WrittenOutput>`  <- LLR-013, SR-009
   - `pub struct FrameGenerationPipeline`
-  - `pub fn new(`  <- SR-036
+  - `pub fn new(`  <- LLR-068, LLR-072, SR-039
   - `pub fn execute(&self) -> Result<BuildSummary>`  <- LLR-017, LLR-019, LLR-023, LLR-024, SR-004, SR-014
   - `pub fn execute_cached(&self, store: &mut SegmentStore) -> Result<BuildSummary>`  <- LLR-054, LLR-055, SR-014, SR-037
   - `pub fn execute_segmented(`  <- LLR-040, LLR-041, LLR-053, LLR-054, LLR-055, LLR-056, LLR-057, SR-011, SR-013, SR-014, SR-032, SR-037
@@ -454,9 +483,9 @@ _Generated 2026-07-18 by `scripts/trace.ps1` from the source tree — do not edi
 - **src/pipeline/prefetch.rs** — _Background clip prefetch (plan §3 1b): decode+prescale the *next* image_
   - uses: `config`, `error`, `image`
   - `pub struct PrefetchJob`  <- LLR-060, SR-031, SR-036
-  - `pub struct ClipPrefetcher`  <- LLR-060, SR-014, SR-036
+  - `pub struct ClipPrefetcher`  <- LLR-060, LLR-066, SR-014, SR-036, SR-039
   - `pub fn spawn(jobs: Vec<PrefetchJob>, out: OutputDef) -> Self`
-  - `pub fn next(&mut self) -> Option<(usize, Result<FrameRenderer>)>`
+  - `pub fn next(&mut self) -> Option<(usize, Result<LoadedClip>)>`
 - **src/pipeline/segment.rs** — _Segment-rolling frame sink (SR-037 spike foundation): encodes the mixer's_
   - uses: `error`, `ffmpeg`
   - `pub struct SegmentedEncoderSink`  <- LLR-056, SR-011, SR-013, SR-037
@@ -465,8 +494,8 @@ _Generated 2026-07-18 by `scripts/trace.ps1` from the source tree — do not edi
 - **src/pipeline/source.rs** — _A uniform pull-based frame source so images and videos can be driven through_
   - uses: `error`, `image`, `util`, `video`
   - `pub trait FrameSource`
-  - `pub struct ImageFrameSource`
-  - `pub fn new(renderer: FrameRenderer, batch: u32, timings: Arc<StageTimings>) -> Self`
+  - `pub struct ImageFrameSource`  <- LLR-066, SR-039
+  - `pub fn new(renderer: Box<dyn ClipRenderer>, batch: u32, timings: Arc<StageTimings>) -> Self`
   - `pub struct VideoFrameSource`
   - `pub fn new(reader: VideoFrameReader) -> Self`
 - **src/preflight.rs** — _Runtime-prerequisite checks shared by the `validate` command and `build`._

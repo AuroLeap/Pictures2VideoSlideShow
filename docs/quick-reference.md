@@ -123,6 +123,7 @@ For a basic end-user run you do **not** edit this file by hand — the first-run
 | `ffmpeg_timeout_secs` | seconds | `120` | Abort a stalled FFmpeg after this many seconds with no encoder progress; `0` disables. |
 | `ffmpeg_path` | path | *(none)* | Explicit FFmpeg executable; takes priority over PATH / the per-user cache (offline / use-existing fallback). |
 | `default_focus` | `[x, y]` (normalized 0-1) | *(none)* | Default Ken Burns focus for images with **no** `roi_db` entry. Omit to keep the default two-point pan; ROI entries override it. See §6. |
+| `render_backend` | `auto` \| `cpu` \| `gpu` | `auto` | Frame-**render** backend (SR-039; distinct from the per-output `encoder` field). `auto` uses the GPU (wgpu, DX12/Vulkan) when a usable adapter exists, else the CPU renderer with a logged reason. `cpu` is the long-verified reference renderer. An explicit `gpu` whose adapter probe fails **falls back to cpu with a logged warning — a missing GPU never fails a build**. Output is equivalent, not bit-identical, across backends (per-backend determinism, SR-022). |
 
 ### `[[outputs]]` (one block per frame/target; repeat for multiple frames — UN-007)
 | Field | Unit / type | Default | Meaning |
@@ -157,7 +158,7 @@ The Rust engine is fast but feature-incomplete. These gaps are stated **here onc
 | **`bulk_video_time_min` splitting** | Rust writes **one continuous MP4 per output**, no matter how long. A long album can cross the **4 GB FAT32 wall**. | Keep the album small, raise `quality_crf` (smaller file), use an **exFAT/NTFS** card, or use the **PowerShell pipeline** (which splits into ~20-min parts). |
 | Shared video-decode across multiple outputs | Each output re-decodes videos (slower with many outputs). | Cosmetic/perf only; no action needed. |
 | **`exception_pattern` / `exception_threshold`** | Parsed but **inert** in the Rust engine — setting them re-includes nothing. | Curate with `ignore_patterns` only, or use the PowerShell pipeline if you rely on the exception mechanism. |
-| GPU **rendering** | Frame rendering (Ken Burns warp, blends) is CPU-only. | Hardware **encoding** is available today via the `encoder` config field (§4); GPU rendering is a possible future phase. |
+| GPU **blending/piping** | The Ken Burns **render** runs on the GPU when available (`render_backend`, §4 — SR-039); cross-fade blending and the encoder pipe remain CPU-side. | Nothing needed — `render_backend = "auto"` (the default) uses the GPU when present; hardware **encoding** is separate via the `encoder` field (§4). |
 
 When the Rust engine falls short, the **PowerShell pipeline** (feature-complete reference on `main`) is the documented fallback — see the README [Project Status](../README.md#project-status) for which implementation to choose.
 

@@ -266,15 +266,11 @@ pub fn probe_duration(mp4: &Path) -> f64 {
 }
 
 /// Mean absolute per-byte difference between two rgb24 frames (encode-noise
-/// tolerant frame comparison for the SR-037 equivalence legs).
+/// tolerant frame comparison for the SR-037 equivalence legs). Thin alias of
+/// the crate's single comparison hook (LLR-073) — one implementation, not
+/// three ad-hoc diffs.
 pub fn mean_abs_diff(a: &[u8], b: &[u8]) -> f64 {
-    assert_eq!(a.len(), b.len());
-    let sum: u64 = a
-        .iter()
-        .zip(b.iter())
-        .map(|(&x, &y)| (x as i16 - y as i16).unsigned_abs() as u64)
-        .sum();
-    sum as f64 / a.len() as f64
+    slideshow_core::image::frame_mean_abs_diff(a, b)
 }
 
 /// Hash-ish fingerprint of a file: (len, mtime-nanos, full byte content hash).

@@ -26,6 +26,8 @@ use crate::error::Result;
 use crate::ffmpeg::audio::{AudioClip, AudioParams};
 use crate::ffmpeg::encoder_args::EncoderSettings;
 use crate::ffmpeg::FfmpegEncoder;
+use crate::image::backend::{self, BackendSelection, RenderBackend};
+use crate::image::{gpu, ClipRenderer, FrameRenderer, LoadedClip};
 use crate::media::{Album, MediaFile, MediaType};
 use crate::roi::RoiDb;
 use crate::util::ensure_dir_exists;
@@ -133,6 +135,10 @@ pub struct FrameGenerationPipeline {
     skipped: RefCell<Vec<SkippedInput>>,
     /// Per-output stage timings collected during encode (SR-036).
     timings: RefCell<Vec<OutputTimings>>,
+    /// Render-backend selection, resolved and reported once per build
+    /// (LLR-072; the adapter probe itself is cached process-wide, LLR-068).
+    // Implements: LLR-072, SR-039
+    render: std::cell::OnceCell<BackendSelection>,
 }
 
 impl FrameGenerationPipeline {
@@ -153,7 +159,48 @@ impl FrameGenerationPipeline {
             roi,
             skipped: RefCell::new(Vec::new()),
             timings: RefCell::new(Vec::new()),
+            render: std::cell::OnceCell::new(),
         }
+    }
+
+    /// The render-backend selection for this build: resolved on first use
+    /// (`cpu` never touches wgpu), reported exactly once — the backend-in-use
+    /// line mirroring LLR-048's encoder line — with an explicit-`gpu` degrade
+    /// additionally warned with the probe reason (SR-039 fallback leg).
+    // Implements: LLR-068, LLR-072, SR-039
+    fn render_selection(&self) -> &BackendSelection {
+        self.render.get_or_init(|| {
+            let sel = backend::select_for(&self.processing.render_backend);
+            if let (Some(reason), "gpu") = (
+                sel.fallback_reason.as_deref(),
+                self.processing.render_backend.as_str(),
+            ) {
+                log::warn!("{reason}");
+            }
+            log::info!("Rendering with {}", sel.describe());
+            sel
+        })
+    }
+
+    /// Wrap a prefetched clip in the selected backend's renderer (LLR-066):
+    /// GPU when selected, the process is not degraded (LLR-072), and the
+    /// clip's prescale fits the device texture limit; otherwise the CPU
+    /// reference renderer.
+    // Implements: LLR-066, LLR-072, SR-039
+    fn clip_renderer(&self, clip: LoadedClip) -> Box<dyn ClipRenderer> {
+        if self.render_selection().backend == RenderBackend::Gpu && !gpu::degraded() {
+            match gpu::context() {
+                Ok(ctx) if ctx.fits_texture(&clip.plan) => {
+                    return Box::new(gpu::GpuRenderer::new(ctx, clip));
+                }
+                Ok(_) => log::debug!(
+                    "clip prescale exceeds the GPU texture limit; rendering this clip on cpu"
+                ),
+                // Unreachable when selection said Gpu; defensive.
+                Err(e) => log::debug!("GPU context unavailable ({}); rendering on cpu", e.reason),
+            }
+        }
+        Box::new(FrameRenderer::new(clip))
     }
 
     /// Resolve the Ken Burns focus for an image: its ROI-database entry (keyed
@@ -251,6 +298,8 @@ impl FrameGenerationPipeline {
         if let Some(reason) = &selection.fallback_reason {
             log::warn!("Output '{}': {}", output_def.name, reason);
         }
+        // Backend-in-use line, once per build (LLR-072, SR-039 reporting).
+        self.render_selection();
         log::info!(
             "Encoding '{}' -> {} ({}x{} @ {}fps, crf {}, {}-frame crossfade, encoder {})",
             output_def.name,
@@ -469,12 +518,19 @@ impl FrameGenerationPipeline {
                     stage_timings.add_stall(wait.elapsed());
                     debug_assert_eq!(job_idx, idx, "prefetch results must arrive in media order");
                     match result {
-                        Ok(r) => {
-                            let lt = r.load_timings();
+                        Ok(clip) => {
+                            let lt = clip.timings;
                             stage_timings.add_decode(lt.decode);
                             stage_timings.add_prescale(lt.prescale);
                             stage_timings.add_clip();
-                            Box::new(ImageFrameSource::new(r, batch, Arc::clone(stage_timings)))
+                            // Wrap the backend-blind clip in the selected
+                            // backend's renderer here — never on the prefetch
+                            // worker. Implements: LLR-066, SR-039
+                            Box::new(ImageFrameSource::new(
+                                self.clip_renderer(clip),
+                                batch,
+                                Arc::clone(stage_timings),
+                            ))
                         }
                         // A failed prefetch surfaces here, at its own item, and
                         // routes through the same skip path as a serial load
@@ -642,6 +698,8 @@ impl FrameGenerationPipeline {
         if let Some(reason) = &selection.fallback_reason {
             log::warn!("Output '{}': {}", output_def.name, reason);
         }
+        // Backend-in-use line, once per build (LLR-072, SR-039 reporting).
+        self.render_selection();
         log::info!(
             "Encoding '{}' (cached segments) -> {} ({}x{} @ {}fps, crf {}, encoder {})",
             output_def.name,
@@ -1313,6 +1371,7 @@ mod tests {
             ffmpeg_path: None,
             default_focus,
             segment_cache_gb: 20.0,
+            render_backend: "cpu".into(),
         }
     }
 

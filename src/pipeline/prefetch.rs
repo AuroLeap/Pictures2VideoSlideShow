@@ -5,7 +5,7 @@
 
 use crate::config::OutputDef;
 use crate::error::Result;
-use crate::image::FrameRenderer;
+use crate::image::LoadedClip;
 use std::path::PathBuf;
 use std::sync::mpsc::{sync_channel, Receiver};
 use std::thread::JoinHandle;
@@ -19,7 +19,7 @@ const LOOKAHEAD: usize = 1;
 
 /// One image clip to load ahead of time: its position in the media list (for
 /// the in-order join with the clip loop) and the inputs
-/// [`FrameRenderer::load_with_focus`] needs. The Ken Burns focus is resolved
+/// [`LoadedClip::load`] needs. The Ken Burns focus is resolved
 /// *before* spawning — on the main thread, against the ROI database — so
 /// focus resolution stays deterministic and single-homed (SR-031).
 // Implements: LLR-060, SR-036
@@ -35,9 +35,12 @@ pub struct PrefetchJob {
 /// worker feeding a FIFO channel), so a failed load surfaces at exactly the
 /// media item where the serial code would have failed and routes through the
 /// same `record_skip` — SR-014 skip semantics are identical to the serial path.
-// Implements: LLR-060, SR-014, SR-036
+/// Carries backend-blind [`LoadedClip`]s (LLR-066): the consuming clip loop
+/// wraps each in the selected backend's renderer, so GPU objects never live
+/// on this worker thread.
+// Implements: LLR-060, LLR-066, SR-014, SR-036, SR-039
 pub struct ClipPrefetcher {
-    rx: Option<Receiver<(usize, Result<FrameRenderer>)>>,
+    rx: Option<Receiver<(usize, Result<LoadedClip>)>>,
     worker: Option<JoinHandle<()>>,
 }
 
@@ -48,7 +51,7 @@ impl ClipPrefetcher {
         let (tx, rx) = sync_channel(LOOKAHEAD);
         let worker = std::thread::spawn(move || {
             for job in jobs {
-                let result = FrameRenderer::load_with_focus(&job.path, &out, job.focus);
+                let result = LoadedClip::load(&job.path, &out, job.focus);
                 // Send blocks while the channel is full — that block IS the
                 // lookahead bound. An Err means the consumer is gone (build
                 // aborted/failed): stop loading, nothing to deliver to.
@@ -66,7 +69,7 @@ impl ClipPrefetcher {
     /// Blocking-receive the next prefetched clip, in job order. `None` once
     /// every job has been delivered. The caller times this wait as the
     /// boundary stall (`StageTimings::add_stall`).
-    pub fn next(&mut self) -> Option<(usize, Result<FrameRenderer>)> {
+    pub fn next(&mut self) -> Option<(usize, Result<LoadedClip>)> {
         self.rx.as_ref().and_then(|rx| rx.recv().ok())
     }
 }
