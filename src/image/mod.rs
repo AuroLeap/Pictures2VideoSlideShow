@@ -7,6 +7,7 @@
 
 pub mod backend;
 pub mod gpu;
+pub mod yuv;
 
 use crate::config::OutputDef;
 use crate::error::{Result, SlideshowError};

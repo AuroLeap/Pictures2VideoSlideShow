@@ -1,5 +1,6 @@
-//! FFmpeg coordination: spawn an encoder process and stream raw `rgb24` frames
-//! to it over stdin, producing an H.264 MP4.
+//! FFmpeg coordination: spawn an encoder process and stream raw frames (on the
+//! run's transport — `rgb24` or `yuv420p`, SR-040) to it over stdin, producing
+//! an H.264 MP4.
 //!
 //! Each output is encoded to a distinguishable `<name>.mp4.part` temp file and
 //! atomically renamed to the final `<name>.mp4` only after ffmpeg exits
@@ -77,15 +78,17 @@ struct Watchdog {
 }
 
 impl FfmpegEncoder {
-    /// Spawn FFmpeg to read `width`x`height` `rgb24` frames at `fps` from stdin
-    /// and encode them to a temp file alongside `output`. Call [`finish`] to
-    /// atomically promote it to `output`.
+    /// Spawn FFmpeg to read `width`x`height` raw frames at `fps` from stdin
+    /// (pixel format per `enc.transport`, LLR-080) and encode them to a temp
+    /// file alongside `output`. Call [`finish`] to atomically promote it to
+    /// `output`.
     ///
-    /// `enc` selects the video encoder and quality (SR-034/SR-035); the
-    /// output-side arg block comes verbatim from [`encoder_args::encoder_args`]
-    /// so the SR-005 profile holds for every choice.
+    /// `enc` selects the video encoder and quality (SR-034/SR-035) plus the
+    /// run transport; the output-side arg block comes verbatim from
+    /// [`encoder_args::encoder_args`] so the SR-005 profile holds for every
+    /// choice and transport.
     /// `timeout_secs` arms the inactivity watchdog (SR-013); `0` disables it.
-    // Implements: LLR-015, LLR-008, LLR-045, SR-011, SR-013, SR-034
+    // Implements: LLR-015, LLR-008, LLR-045, LLR-080, SR-011, SR-013, SR-034, SR-040
     pub fn start(
         output: &Path,
         width: u32,
@@ -94,7 +97,15 @@ impl FfmpegEncoder {
         enc: &encoder_args::EncoderSettings,
         timeout_secs: u64,
     ) -> Result<Self> {
-        Self::spawn_encoder(output, width, height, fps, enc.args(), timeout_secs)
+        Self::spawn_encoder(
+            output,
+            width,
+            height,
+            fps,
+            enc.transport,
+            enc.args(),
+            timeout_secs,
+        )
     }
 
     /// Like [`start`], but encodes to an intermediate MPEG-TS **segment**
@@ -103,7 +114,7 @@ impl FfmpegEncoder {
     /// [`encoder_args::segment_encoder_args`] (self-contained timestamps for
     /// stream-copy concat; `+faststart` is applied at final assembly by
     /// [`concat::concat_segments`]).
-    // Implements: LLR-056, SR-037, SR-011, SR-013
+    // Implements: LLR-056, LLR-080, SR-037, SR-011, SR-013, SR-040
     pub fn start_segment(
         output: &Path,
         width: u32,
@@ -112,16 +123,26 @@ impl FfmpegEncoder {
         enc: &encoder_args::EncoderSettings,
         timeout_secs: u64,
     ) -> Result<Self> {
-        Self::spawn_encoder(output, width, height, fps, enc.segment_args(), timeout_secs)
+        Self::spawn_encoder(
+            output,
+            width,
+            height,
+            fps,
+            enc.transport,
+            enc.segment_args(),
+            timeout_secs,
+        )
     }
 
     /// Shared spawn path for [`start`]/[`start_segment`]: rawvideo-in from
-    /// stdin, `out_args` verbatim as the output-side block, watchdog armed.
+    /// stdin on `transport`'s pixel format (LLR-080), `out_args` verbatim as
+    /// the output-side block, watchdog armed.
     fn spawn_encoder(
         output: &Path,
         width: u32,
         height: u32,
         fps: u32,
+        transport: crate::transport::FrameTransport,
         out_args: Vec<String>,
         timeout_secs: u64,
     ) -> Result<Self> {
@@ -139,15 +160,12 @@ impl FfmpegEncoder {
             .arg("-y")
             .arg("-loglevel")
             .arg("error")
-            // Raw input description.
-            .arg("-f")
-            .arg("rawvideo")
-            .arg("-pixel_format")
-            .arg("rgb24")
-            .arg("-video_size")
-            .arg(format!("{}x{}", width, height))
-            .arg("-framerate")
-            .arg(fps.to_string())
+            // Raw input description: the transport-driven block (LLR-080) —
+            // byte-identical to the historical rgb24 argv on the CPU path.
+            // Implements: LLR-080, SR-040
+            .args(encoder_args::rawvideo_input_args(
+                transport, width, height, fps,
+            ))
             .arg("-i")
             .arg("pipe:0")
             // Output encoding: the pure per-encoder arg block (`-an` through
@@ -178,8 +196,9 @@ impl FfmpegEncoder {
         })
     }
 
-    /// Write one raw `rgb24` frame to the encoder. Each successful write records
-    /// activity so the inactivity watchdog does not fire on a healthy run.
+    /// Write one raw frame (transport-sized) to the encoder. Each successful
+    /// write records activity so the inactivity watchdog does not fire on a
+    /// healthy run.
     // Implements: LLR-008, SR-013
     pub fn write_frame(&mut self, data: &[u8]) -> Result<()> {
         let temp_path = self.temp_path.clone();

@@ -1,13 +1,17 @@
-//! Video passthrough: decode an input video to raw `rgb24` frames at the target
-//! resolution/fps (cover-fit, like images), one frame at a time, so it can feed
-//! the same streaming pipeline (and cross-fade mixer) as image clips.
+//! Video passthrough: decode an input video to raw frames on the run's
+//! transport (SR-040) — `rgb24` on the CPU path (byte-identical to the
+//! historical reader) or planar `yuv420p` on the GPU path, native for most
+//! sources so no rgb round-trip — at the target resolution/fps (cover-fit,
+//! like images), one frame at a time, so it can feed the same streaming
+//! pipeline (and cross-fade mixer) as image clips.
 
 use crate::error::{Result, SlideshowError};
+use crate::transport::FrameTransport;
 use std::io::Read;
 use std::path::Path;
 use std::process::{Child, ChildStdout, Command, Stdio};
 
-/// Streams decoded `rgb24` frames from a video via an ffmpeg child process.
+/// Streams decoded raw frames from a video via an ffmpeg child process.
 pub struct VideoFrameReader {
     child: Child,
     stdout: ChildStdout,
@@ -17,15 +21,35 @@ pub struct VideoFrameReader {
 
 impl VideoFrameReader {
     /// Spawn ffmpeg to decode `path`, scaling/cropping to `width`x`height`
-    /// (cover-fit) and resampling to `fps`. Audio is dropped.
-    pub fn open(path: &Path, width: u32, height: u32, fps: u32) -> Result<Self> {
+    /// (cover-fit) and resampling to `fps`. Audio is dropped. `transport`
+    /// picks the decode pixel format: yuv mode asks ffmpeg for `yuv420p`
+    /// directly — deleting both the decode-side yuv->rgb conversion and the
+    /// encode-side rgb->yuv reconversion (SR-040 no-rgb-round-trip leg) —
+    /// while rgb mode keeps the historical `rgb24` request byte-identically.
+    /// Frame size comes from the LLR-075 home; the cover-fit/fps filter chain
+    /// and EOF/kill semantics are transport-independent.
+    // Implements: LLR-078, SR-040
+    pub fn open(
+        path: &Path,
+        width: u32,
+        height: u32,
+        fps: u32,
+        transport: FrameTransport,
+    ) -> Result<Self> {
         // Cover-fit (fill then crop) to match the image Ken Burns framing, then
-        // resample to the target frame rate and emit raw rgb24.
+        // resample to the target frame rate and emit rawvideo on the transport.
         let vf = format!(
             "scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},fps={fps}",
             w = width,
             h = height,
             fps = fps
+        );
+        // Named in the log so a yuv-mode run's direct decode is observable
+        // (TC-117 decode-args evidence).
+        log::debug!(
+            "decoding {} as {} rawvideo",
+            path.display(),
+            transport.pixel_format()
         );
 
         let mut child = Command::new("ffmpeg")
@@ -37,7 +61,7 @@ impl VideoFrameReader {
             .arg("-vf")
             .arg(&vf)
             .arg("-pix_fmt")
-            .arg("rgb24")
+            .arg(transport.pixel_format())
             .arg("-f")
             .arg("rawvideo")
             .arg("pipe:1")
@@ -56,7 +80,8 @@ impl VideoFrameReader {
         Ok(Self {
             child,
             stdout,
-            frame_bytes: (width * height * 3) as usize,
+            // Implements: LLR-075, SR-040 — the one frame-size home.
+            frame_bytes: transport.frame_bytes(width, height),
             finished: false,
         })
     }

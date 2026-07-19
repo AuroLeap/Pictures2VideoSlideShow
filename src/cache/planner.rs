@@ -274,6 +274,7 @@ mod tests {
             ken_burns: true,
             encoder: "libx264".into(),
             x264_preset: "veryfast".into(),
+            transport: crate::transport::FrameTransport::Rgb24,
         }
     }
 
@@ -504,7 +505,7 @@ mod tests {
             zoom_amount: 0.12,
             ken_burns: true,
         };
-        let p = EncodeParams::of(&def, "libx264");
+        let p = EncodeParams::of(&def, "libx264", crate::transport::FrameTransport::Rgb24);
         assert_eq!((p.width, p.height), (1440, 900));
         assert_eq!(p.encoder, "libx264");
     }

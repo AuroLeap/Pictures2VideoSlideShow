@@ -8,6 +8,7 @@ pub mod store;
 
 use crate::config::OutputDef;
 use crate::media::MediaFile;
+use crate::transport::FrameTransport;
 use crate::util::file_utils::hex_lower;
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
@@ -15,8 +16,11 @@ use std::fmt::Write as _;
 /// Bump to invalidate every cached segment when the segment format or the
 /// frame-generation semantics change without a crate-version bump (SR-037
 /// engine-version key part; the crate version is folded in alongside).
-// Implements: LLR-053, SR-037
-pub const CACHE_FORMAT_VERSION: u32 = 1;
+/// 1 -> 2 (SR-040): the key schema gained the transport tag, and pre-change
+/// GPU-rendered segments carry swscale colorimetry the new schema cannot
+/// distinguish from shader-converted ones (LLR-081 recorded rationale).
+// Implements: LLR-053, LLR-081, SR-037, SR-040
+pub const CACHE_FORMAT_VERSION: u32 = 2;
 
 /// The engine identity folded into every segment key: crate version plus the
 /// bumpable cache-format constant.
@@ -75,13 +79,19 @@ pub struct EncodeParams {
     /// libx264 preset (SR-035); software path only but always keyed for
     /// simplicity — a preset change on a hardware output re-keys harmlessly.
     pub x264_preset: String,
+    /// The run's frame transport (SR-040): follows the render-backend
+    /// selection, which the pre-4a.5 key never recorded — keying it makes
+    /// segments cached under one transport misses under the other, so no
+    /// assembled output mixes transports (SR-040 cache-identity leg).
+    // Implements: LLR-081, SR-040, SR-037
+    pub transport: FrameTransport,
 }
 
 impl EncodeParams {
-    /// Extract the key-relevant facts from an output definition and the
-    /// resolved encoder choice. Uses [`OutputDef::even_dims`] — the dims that
-    /// actually reach ffmpeg (SR-006).
-    pub fn of(def: &OutputDef, resolved_encoder: &str) -> Self {
+    /// Extract the key-relevant facts from an output definition, the
+    /// resolved encoder choice, and the run transport. Uses
+    /// [`OutputDef::even_dims`] — the dims that actually reach ffmpeg (SR-006).
+    pub fn of(def: &OutputDef, resolved_encoder: &str, transport: FrameTransport) -> Self {
         let (width, height) = def.even_dims();
         Self {
             width,
@@ -95,6 +105,7 @@ impl EncodeParams {
             ken_burns: def.ken_burns,
             encoder: resolved_encoder.to_string(),
             x264_preset: def.x264_preset.clone(),
+            transport,
         }
     }
 }
@@ -144,7 +155,7 @@ pub fn segment_key(input: &SegmentKeyInput) -> String {
     let p = input.params;
     let _ = write!(
         s,
-        "|dim={}x{}|fps={}|crf={}|pic={}|fade={}|rot={}|zoom={}|kb={}|enc={}|preset={}",
+        "|dim={}x{}|fps={}|crf={}|pic={}|fade={}|rot={}|zoom={}|kb={}|enc={}|preset={}|tf={}",
         p.width,
         p.height,
         p.fps,
@@ -156,6 +167,7 @@ pub fn segment_key(input: &SegmentKeyInput) -> String {
         p.ken_burns,
         p.encoder,
         p.x264_preset,
+        p.transport.pixel_format(),
     );
     hash_hex(s.as_bytes())
 }
@@ -216,6 +228,7 @@ mod tests {
             ken_burns: true,
             encoder: "libx264".into(),
             x264_preset: "medium".into(),
+            transport: FrameTransport::Rgb24,
         }
     }
 
@@ -312,6 +325,7 @@ mod tests {
             Box::new(|p| p.ken_burns = false),
             Box::new(|p| p.encoder = "h264_nvenc".into()),
             Box::new(|p| p.x264_preset = "veryfast".into()),
+            Box::new(|p| p.transport = FrameTransport::Yuv420p),
         ];
         for (i, vary) in variations.iter().enumerate() {
             let mut varied = params();
@@ -349,6 +363,70 @@ mod tests {
         let v = engine_version();
         assert!(v.contains(env!("CARGO_PKG_VERSION")));
         assert!(v.ends_with(&format!("+f{CACHE_FORMAT_VERSION}")));
+    }
+
+    // Verifies: SR-040, SR-037, LLR-081 (TC-112) — EncodeParams differing
+    // ONLY in transport yield different segment keys (segments cached under
+    // one transport are misses under the other, so no assembled output mixes
+    // transports); identical input including transport yields identical keys
+    // (extends the TC-075 stability contract by reference).
+    #[test]
+    fn segment_key_varies_on_transport_sr040() {
+        let src = identity("C:/lib/a.jpg", 1000, 111);
+        let p_rgb = params(); // transport: Rgb24
+        let mut p_yuv = params();
+        p_yuv.transport = FrameTransport::Yuv420p;
+
+        let k_rgb = key_of(&src, None, None, None, &p_rgb, "0.1.0+f2");
+        let k_yuv = key_of(&src, None, None, None, &p_yuv, "0.1.0+f2");
+        assert_ne!(k_rgb, k_yuv, "transport-only change must re-key");
+
+        // Identical input incl. transport -> identical key (stability).
+        assert_eq!(k_yuv, key_of(&src, None, None, None, &p_yuv, "0.1.0+f2"));
+    }
+
+    // Verifies: SR-040, SR-037, LLR-081 (TC-112) — CACHE_FORMAT_VERSION is 2
+    // (key-schema change + pre-change GPU segments carry swscale colorimetry
+    // the new schema cannot distinguish, LLR-081 recorded rationale), and a
+    // store entry written under a version-1 engine key is a miss under the
+    // version-2 key. Store layout/prune/corrupt-as-miss semantics are
+    // unchanged — guarded by TC-078, referenced not duplicated.
+    #[test]
+    fn cache_format_version_bump_invalidates_v1_sr040() {
+        assert_eq!(CACHE_FORMAT_VERSION, 2, "LLR-081 bump");
+        assert!(
+            engine_version().ends_with("+f2"),
+            "engine identity carries the bumped format: {}",
+            engine_version()
+        );
+
+        // The bump re-keys (pure): the same tuple under v1 vs v2 engines.
+        let src = identity("C:/lib/a.jpg", 1000, 111);
+        let p = params();
+        let v1 = key_of(&src, None, None, None, &p, "0.1.0+f1");
+        let v2 = key_of(&src, None, None, None, &p, "0.1.0+f2");
+        assert_ne!(v1, v2);
+
+        // And through the store: an entry committed under the v1 key is never
+        // found by a v2 lookup — a miss, exactly like any unknown key.
+        let root = std::env::temp_dir().join(format!(
+            "slideshow_cachever_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let mut store = store::SegmentStore::open(&root).unwrap();
+        let staging = store.staging_dir().unwrap().join("v1.ts");
+        std::fs::write(&staging, b"v1-era segment bytes").unwrap();
+        store.commit(&v1, &staging, 7).unwrap();
+        assert!(store.lookup(&v1).is_some(), "the v1 entry itself exists");
+        assert!(
+            store.lookup(&v2).is_none(),
+            "a v1-era entry must be a miss under the v2 key"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     // Verifies: SR-037, LLR-055 — clip frame counts are keyed by content

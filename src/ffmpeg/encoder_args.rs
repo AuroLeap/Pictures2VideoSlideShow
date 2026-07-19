@@ -5,6 +5,34 @@
 //! byte when the preset is the default `medium`.
 // Implements: LLR-045, LLR-049, SR-034, SR-035
 
+use crate::transport::FrameTransport;
+
+/// FFmpeg rawvideo **input**-side argument block for one run transport
+/// (LLR-080): `-f rawvideo -pixel_format <rgb24|yuv420p> -video_size WxH
+/// -framerate F`, consumed by `FfmpegEncoder`'s spawn between the global
+/// flags and `-i pipe:0`. The rawvideo demuxer derives frame size from
+/// pixel_format+video_size, so this block is the entire input-side change;
+/// `Rgb24` reproduces the pre-SR-040 hard-coded argv byte for byte (SR-040
+/// transport-selection leg). Pure.
+// Implements: LLR-080, SR-040
+pub fn rawvideo_input_args(
+    transport: FrameTransport,
+    width: u32,
+    height: u32,
+    fps: u32,
+) -> Vec<String> {
+    vec![
+        "-f".into(),
+        "rawvideo".into(),
+        "-pixel_format".into(),
+        transport.pixel_format().into(),
+        "-video_size".into(),
+        format!("{width}x{height}"),
+        "-framerate".into(),
+        fps.to_string(),
+    ]
+}
+
 /// A concrete H.264 encoder to drive. An `auto` request is resolved to one of
 /// these by [`crate::ffmpeg::probe::select_encoder`] before args are built.
 // Implements: LLR-045, SR-034
@@ -143,16 +171,23 @@ pub struct EncoderSettings {
     pub crf: u32,
     /// Config `x264_preset` (SR-035); applied on the software path only.
     pub x264_preset: String,
+    /// The run's frame transport (SR-040): drives the **input**-side
+    /// [`rawvideo_input_args`] only — the output-side blocks above are
+    /// byte-invariant across transports (LLR-080).
+    // Implements: LLR-080, SR-040
+    pub transport: FrameTransport,
 }
 
 impl EncoderSettings {
-    /// The pre-SR-034 default: libx264 at `crf` with the `medium` preset.
+    /// The pre-SR-034 default: libx264 at `crf` with the `medium` preset —
+    /// on the historical `rgb24` transport (the lib/integration-test entry).
     #[allow(dead_code)] // lib-API convenience; used by the integration tests
     pub fn software(crf: u32) -> Self {
         Self {
             choice: EncoderChoice::Software,
             crf,
             x264_preset: "medium".into(),
+            transport: FrameTransport::Rgb24,
         }
     }
 
@@ -267,6 +302,79 @@ mod tests {
                 !seg.contains(&"-movflags".to_string()),
                 "faststart is applied at concat assembly, not per segment: {seg:?}"
             );
+        }
+    }
+
+    // Verifies: SR-040, LLR-080 (TC-108) — the pure input-side block per
+    // transport: Rgb24 yields the pre-change hard-coded rgb24 argv byte for
+    // byte (SR-040 transport-selection leg, argv half); Yuv420p swaps in
+    // `-pixel_format yuv420p` only. The pixel-format strings come from the
+    // LLR-075 home — the same home ffmpeg/probe.rs's 1-frame trial pins to
+    // Rgb24 (the encoder probe is transport-independent).
+    #[test]
+    fn rawvideo_input_args_per_transport_sr040() {
+        let expect_rgb: Vec<String> = [
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            "rgb24",
+            "-video_size",
+            "1440x900",
+            "-framerate",
+            "30",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        assert_eq!(
+            rawvideo_input_args(FrameTransport::Rgb24, 1440, 900, 30),
+            expect_rgb,
+            "rgb24 input args must be byte-identical to the pre-SR-040 block"
+        );
+
+        let yuv = rawvideo_input_args(FrameTransport::Yuv420p, 1440, 900, 30);
+        let expect_yuv: Vec<String> = [
+            "-f",
+            "rawvideo",
+            "-pixel_format",
+            "yuv420p",
+            "-video_size",
+            "1440x900",
+            "-framerate",
+            "30",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        assert_eq!(yuv, expect_yuv);
+    }
+
+    // Verifies: SR-040, SR-005, LLR-080 (TC-108) — the output-side arg blocks
+    // (encoder_args/segment_encoder_args, the SR-005 profile incl. the output
+    // `-pix_fmt yuv420p`) are byte-unchanged regardless of the run transport;
+    // mux_audio (LLR-041) takes no transport input at all — audio muxes
+    // against the encoded .part, never raw frames.
+    #[test]
+    fn output_args_invariant_across_transport_sr040() {
+        for choice in ALL {
+            let rgb = EncoderSettings {
+                choice,
+                crf: 28,
+                x264_preset: "medium".into(),
+                transport: FrameTransport::Rgb24,
+            };
+            let yuv = EncoderSettings {
+                transport: FrameTransport::Yuv420p,
+                ..rgb.clone()
+            };
+            assert_eq!(rgb.args(), yuv.args(), "{choice:?} output args");
+            assert_eq!(
+                rgb.segment_args(),
+                yuv.segment_args(),
+                "{choice:?} segment output args"
+            );
+            // The SR-005 output pixel format survives on both transports.
+            assert!(has_pair(&yuv.args(), "-pix_fmt", "yuv420p"));
         }
     }
 

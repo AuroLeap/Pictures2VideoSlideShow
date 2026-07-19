@@ -30,6 +30,7 @@ use crate::image::backend::{self, BackendSelection, RenderBackend};
 use crate::image::{gpu, ClipRenderer, FrameRenderer, LoadedClip};
 use crate::media::{Album, MediaFile, MediaType};
 use crate::roi::RoiDb;
+use crate::transport::FrameTransport;
 use crate::util::ensure_dir_exists;
 use crate::util::estimate::{
     estimate_output_bytes, human_bytes, is_oversize, OVERSIZE_THRESHOLD_BYTES,
@@ -344,6 +345,7 @@ impl FrameGenerationPipeline {
                 choice: selection.encoder,
                 crf: output_def.quality_crf,
                 x264_preset: output_def.x264_preset.clone(),
+                transport: FrameTransport::Rgb24,
             },
             // Inactivity watchdog: abort a wedged ffmpeg after this many seconds
             // of no frame writes (0 disables). SR-013 / LLR-008.
@@ -358,6 +360,8 @@ impl FrameGenerationPipeline {
             writer,
             output_def.fade_frames() as usize,
             Arc::clone(&stage_timings),
+            FrameTransport::Rgb24,
+            (width * height) as usize,
         );
 
         let total = media.len();
@@ -543,7 +547,13 @@ impl FrameGenerationPipeline {
                     }
                 }
                 MediaType::Video => {
-                    match VideoFrameReader::open(&item.path, width, height, output_def.fps) {
+                    match VideoFrameReader::open(
+                        &item.path,
+                        width,
+                        height,
+                        output_def.fps,
+                        FrameTransport::Rgb24,
+                    ) {
                         Ok(rd) => Box::new(VideoFrameSource::new(rd)),
                         Err(e) => {
                             log::warn!("Skipping video {}: {}", item.path.display(), e);
@@ -712,12 +722,17 @@ impl FrameGenerationPipeline {
         );
         self.warn_if_estimated_oversize(output_def, &media);
 
-        let params = EncodeParams::of(output_def, selection.encoder.codec_name());
+        let params = EncodeParams::of(
+            output_def,
+            selection.encoder.codec_name(),
+            FrameTransport::Rgb24,
+        );
         let engine = crate::cache::engine_version();
         let enc = EncoderSettings {
             choice: selection.encoder,
             crf: output_def.quality_crf,
             x264_preset: output_def.x264_preset.clone(),
+            transport: FrameTransport::Rgb24,
         };
         // Same bounded depth as the streaming path (LLR-063): sizes render
         // batches and each run's mixer->writer channel.
@@ -959,7 +974,13 @@ impl FrameGenerationPipeline {
         // streaming path (LLR-063); rolls queue in-order with the frames so
         // segment boundaries land on exactly the serial frame.
         let writer = EncoderWriter::start(sink, batch as usize, Arc::clone(stage_timings));
-        let mut mixer = CrossfadeMixer::new(writer, fade, Arc::clone(stage_timings));
+        let mut mixer = CrossfadeMixer::new(
+            writer,
+            fade,
+            Arc::clone(stage_timings),
+            FrameTransport::Rgb24,
+            (width * height) as usize,
+        );
         let outcome = self.drive_clips(output_def, sub, &mut mixer, batch, stage_timings)?;
 
         // Record every actual video frame count first — even if we replan,
@@ -1157,7 +1178,14 @@ pub(crate) fn mixer_test_probe(counts: &[u64], fade: usize) -> MixerProbe {
         written: 0,
         rolls: Vec::new(),
     };
-    let mut mixer = CrossfadeMixer::new(sink, fade, Arc::new(StageTimings::new()));
+    // The probe counts frames only — transport/luma_len are inert here.
+    let mut mixer = CrossfadeMixer::new(
+        sink,
+        fade,
+        Arc::new(StageTimings::new()),
+        FrameTransport::Rgb24,
+        1,
+    );
     let mut starts = Vec::with_capacity(counts.len());
     for &c in counts {
         starts.push(mixer.emitted());
@@ -1186,16 +1214,31 @@ struct CrossfadeMixer<S: FrameSink> {
     emitted: u64,
     /// Per-output stage timers (blend and encode-write stall). SR-036.
     timings: Arc<StageTimings>,
+    /// The run's frame transport, plumbed in explicitly (never guessed from
+    /// buffer sizes) so black-fades scale toward the right per-plane black
+    /// (LLR-077); dissolves stay format-blind per-byte lerps.
+    // Implements: LLR-077, SR-040
+    transport: FrameTransport,
+    /// Y-plane length (`w*h`) — where the U/V planes begin in a yuv frame.
+    luma_len: usize,
 }
 
 impl<S: FrameSink> CrossfadeMixer<S> {
-    fn new(sink: S, n: usize, timings: Arc<StageTimings>) -> Self {
+    fn new(
+        sink: S,
+        n: usize,
+        timings: Arc<StageTimings>,
+        transport: FrameTransport,
+        luma_len: usize,
+    ) -> Self {
         Self {
             sink,
             n,
             prev_tail: Vec::new(),
             emitted: 0,
             timings,
+            transport,
+            luma_len,
         }
     }
 
@@ -1212,7 +1255,7 @@ impl<S: FrameSink> CrossfadeMixer<S> {
     // Implements: LLR-050, SR-036
     fn timed_scale(&self, a: &[u8], t: f32) -> Vec<u8> {
         let s = Instant::now();
-        let out = scale(a, t);
+        let out = scale(a, t, self.transport, self.luma_len);
         self.timings.add_blend(s.elapsed());
         out
     }
@@ -1345,14 +1388,42 @@ fn blend(a: &[u8], b: &[u8], t: f32) -> Vec<u8> {
         .collect()
 }
 
-/// Brightness scale toward/from black: `out = a*t`, in the same u16 fixed
-/// point as [`blend`] (the `b = 0` special case).
-// Implements: LLR-062, SR-036
-fn scale(a: &[u8], t: f32) -> Vec<u8> {
+/// The one fixed-point fade kernel (LLR-077): `out = x*t + target*(1-t)` as
+/// `(x*w + target*(256-w) + 128) >> 8`. `target = 0` reproduces the
+/// pre-SR-040 scale-toward-black byte for byte; the max intermediate is
+/// `255*256 + 128 = 65408` (since `target <= 255`), which fits u16.
+// Implements: LLR-062, LLR-077, SR-036, SR-040
+#[inline]
+fn fade_byte(x: u8, w: u16, target: u16) -> u8 {
+    ((x as u16 * w + target * (256 - w) + 128) >> 8) as u8
+}
+
+/// Format-aware brightness scale toward/from black — the ONE fade-to-black
+/// implementation (LLR-077): `Rgb24` scales every byte toward 0
+/// (byte-identical to the pre-SR-040 form, the `b = 0` special case of
+/// [`blend`]); `Yuv420p` scales each plane toward its black level — Y toward
+/// [`Y_BLACK`] (16, limited-range black) and U/V toward [`UV_NEUTRAL`] (128),
+/// so a fully-faded frame has U = V = 128 exactly and never tints
+/// green/purple (SR-040 chroma-neutral-fade leg). `luma_len` is the Y-plane
+/// length (`w*h`); ignored on rgb.
+// Implements: LLR-062, LLR-077, SR-036, SR-040
+fn scale(a: &[u8], t: f32, transport: FrameTransport, luma_len: usize) -> Vec<u8> {
     let w = blend_weight(t);
-    a.iter()
-        .map(|&x| ((x as u16 * w + 128) >> 8) as u8)
-        .collect()
+    match transport {
+        FrameTransport::Rgb24 => a.iter().map(|&x| fade_byte(x, w, 0)).collect(),
+        FrameTransport::Yuv420p => {
+            use crate::image::yuv::{UV_NEUTRAL, Y_BLACK};
+            let luma = luma_len.min(a.len());
+            let mut out = Vec::with_capacity(a.len());
+            out.extend(a[..luma].iter().map(|&x| fade_byte(x, w, Y_BLACK as u16)));
+            out.extend(
+                a[luma..]
+                    .iter()
+                    .map(|&x| fade_byte(x, w, UV_NEUTRAL as u16)),
+            );
+            out
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1422,7 +1493,7 @@ mod tests {
             assert!((0..=256).contains(&w), "weight {w} out of range for t={t}");
 
             let got = blend(&a, &b, t);
-            let scaled = scale(&a, t);
+            let scaled = scale(&a, t, FrameTransport::Rgb24, a.len());
             for i in 0..a.len() {
                 // f32 reference (the pre-LLR-062 implementation).
                 let reference = (a[i] as f32 * (1.0 - t) + b[i] as f32 * t)
@@ -1459,12 +1530,125 @@ mod tests {
         // full weight the second.
         assert_eq!(blend(&a, &b, 0.0), a, "w=0 must return frame a exactly");
         assert_eq!(blend(&a, &b, 1.0), b, "w=256 must return frame b exactly");
-        assert_eq!(scale(&a, 1.0), a, "scale w=256 must be identity");
         assert_eq!(
-            scale(&a, 0.0),
+            scale(&a, 1.0, FrameTransport::Rgb24, a.len()),
+            a,
+            "scale w=256 must be identity"
+        );
+        assert_eq!(
+            scale(&a, 0.0, FrameTransport::Rgb24, a.len()),
             vec![0u8; a.len()],
             "scale w=0 must be black"
         );
+    }
+
+    /// Fade weights spanning the full range: the TC-111 lattice points plus
+    /// the exact endpoints.
+    fn fade_weights() -> Vec<f32> {
+        [0u16, 1, 64, 127, 128, 192, 255, 256]
+            .iter()
+            .map(|&w| w as f32 / 256.0)
+            .collect()
+    }
+
+    // Verifies: SR-040, LLR-077 (TC-111) — the ONE format-aware
+    // scale-to-black fn on the pure CI-safe seam (the LLR-082 recorded
+    // chroma assertion): on Yuv420p an achromatic source keeps U = V = 128
+    // (+-1) at EVERY fade weight while Y moves monotonically to Y_BLACK = 16
+    // at full fade; a saturated-chroma source moves U/V monotonically TOWARD
+    // 128 — never toward 0 (green/purple tint) — with U = V = 128 exactly and
+    // Y = 16 at full fade. Dissolve (blend) stays per-byte and plane-agnostic,
+    // guarded by TC-088 above — referenced, not duplicated.
+    #[test]
+    fn yuv_scale_to_black_chroma_neutral_sr040() {
+        use crate::image::yuv::{UV_NEUTRAL, Y_BLACK};
+        let luma_len = 16usize; // 8x4-ish planar toy frame: 16 Y + 4 U + 4 V
+        let frame = |y: u8, u: u8, v: u8| -> Vec<u8> {
+            let mut f = vec![y; luma_len];
+            f.extend(vec![u; luma_len / 4]);
+            f.extend(vec![v; luma_len / 4]);
+            f
+        };
+
+        // (a) Achromatic source: chroma pinned at neutral for every weight.
+        let gray = frame(200, UV_NEUTRAL, UV_NEUTRAL);
+        let mut prev_y: Option<u8> = None;
+        for &t in &fade_weights() {
+            let out = scale(&gray, t, FrameTransport::Yuv420p, luma_len);
+            assert_eq!(out.len(), gray.len());
+            for &b in &out[luma_len..] {
+                assert!(
+                    (b as i16 - UV_NEUTRAL as i16).abs() <= 1,
+                    "achromatic fade must keep U/V at 128+-1 (weight {t}): got {b}"
+                );
+            }
+            let y = out[0];
+            if let Some(p) = prev_y {
+                assert!(y >= p, "Y must move monotonically with fade weight");
+            }
+            prev_y = Some(y);
+            if t == 0.0 {
+                assert!(
+                    out[..luma_len].iter().all(|&b| b == Y_BLACK),
+                    "full fade must land Y exactly on limited-range black (16)"
+                );
+            }
+        }
+
+        // (b) Saturated chroma: U/V move monotonically TOWARD 128, never
+        // toward 0, and land exactly on 128 at full fade.
+        let saturated = frame(100, 240, 54);
+        let mut prev_dev: Option<(i16, i16)> = None;
+        for &t in &fade_weights() {
+            let out = scale(&saturated, t, FrameTransport::Yuv420p, luma_len);
+            let u = out[luma_len];
+            let v = out[luma_len + luma_len / 4];
+            assert!(
+                (128..=240).contains(&u) && (54..=128).contains(&v),
+                "chroma must stay between source and neutral (weight {t}): u={u} v={v}"
+            );
+            let dev = (
+                (u as i16 - UV_NEUTRAL as i16).abs(),
+                (v as i16 - UV_NEUTRAL as i16).abs(),
+            );
+            if let Some(p) = prev_dev {
+                assert!(
+                    dev.0 >= p.0 && dev.1 >= p.1,
+                    "U/V must move monotonically toward 128 as weight falls"
+                );
+            }
+            prev_dev = Some(dev);
+            if t == 0.0 {
+                assert_eq!((u, v), (UV_NEUTRAL, UV_NEUTRAL), "full fade: U=V=128 exact");
+                assert!(
+                    out[..luma_len].iter().all(|&b| b == Y_BLACK),
+                    "full fade: Y=16"
+                );
+            }
+        }
+    }
+
+    // Verifies: SR-040, LLR-077 (TC-111) — the Rgb24 arm of the one scale fn
+    // is byte-identical to the pre-change fixed-point form
+    // `(x*w + 128) >> 8` at every weight (the TC-088 +-1-LSB contract is
+    // asserted above and unchanged); `luma_len` has no effect on rgb frames.
+    #[test]
+    fn rgb_scale_to_black_unchanged_sr040() {
+        let a: Vec<u8> = (0..=255u8).collect();
+        for &t in &fade_weights() {
+            let w = blend_weight(t);
+            let expect: Vec<u8> = a
+                .iter()
+                .map(|&x| ((x as u16 * w + 128) >> 8) as u8)
+                .collect();
+            assert_eq!(
+                scale(&a, t, FrameTransport::Rgb24, a.len()),
+                expect,
+                "rgb scale must equal the pre-SR-040 fixed-point form (t={t})"
+            );
+            // A nonsense luma_len must not change rgb output (rgb ignores it).
+            assert_eq!(scale(&a, t, FrameTransport::Rgb24, 1), expect);
+        }
     }
 
     // Verifies: SR-031, LLR-038 — an ROI entry (keyed by path relative to the

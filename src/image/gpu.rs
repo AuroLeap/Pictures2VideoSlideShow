@@ -247,6 +247,37 @@ pub fn frame_uniforms(plan: &ClipPlan, i: u32) -> FrameUniforms {
     }
 }
 
+/// Uniforms for the yuv420p compute pass (LLR-076): the BT.601 limited-range
+/// rows as `[r, g, b, offset]` vec4 lanes plus the output size. Built ONLY
+/// from [`crate::image::yuv::BT601_LIMITED`] — the shader carries no copied
+/// coefficients (TC-109); the CPU converter reads the same symbols, so
+/// residual between the two paths is rounding only.
+// Implements: LLR-076, LLR-079, SR-040
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
+pub struct YuvUniforms {
+    pub y_row: [f32; 4],
+    pub u_row: [f32; 4],
+    pub v_row: [f32; 4],
+    /// `[width, height, pad, pad]` of the output frame in pixels.
+    pub size: [u32; 4],
+}
+
+impl YuvUniforms {
+    /// The uniform payload for a `width`x`height` output, from the LLR-079
+    /// single home.
+    // Implements: LLR-076, LLR-079, SR-040
+    pub fn for_output(width: u32, height: u32) -> Self {
+        let m = &crate::image::yuv::BT601_LIMITED;
+        Self {
+            y_row: [m.y[0], m.y[1], m.y[2], m.y_offset],
+            u_row: [m.u[0], m.u[1], m.u[2], m.uv_offset],
+            v_row: [m.v[0], m.v[1], m.v[2], m.uv_offset],
+            size: [width, height, 0, 0],
+        }
+    }
+}
+
 /// Expand an `rgb24` buffer to `rgba` (alpha 255) for the Rgba8 texture
 /// upload — wgpu has no 3-byte texel format (LLR-069). Pure.
 // Implements: LLR-069, SR-039

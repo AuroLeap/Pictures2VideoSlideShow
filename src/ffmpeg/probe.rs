@@ -116,23 +116,23 @@ pub fn probe_encoder(ffmpeg: &Path, encoder: &str) -> ProbeOutcome {
 
 /// One 320x240 black rgb24 frame through `encoder` to the null muxer.
 /// (320x240 comfortably clears every hardware encoder's minimum dimensions.)
+/// The trial stays pinned to `Rgb24` through the LLR-075/LLR-080 homes — the
+/// encoder probe is transport-independent (SR-040).
 /// Returns (exit success, stderr text).
+// Implements: LLR-046, LLR-075, SR-034, SR-040
 fn trial_encode(ffmpeg: &Path, encoder: &str) -> (bool, String) {
-    const W: usize = 320;
-    const H: usize = 240;
+    use crate::transport::FrameTransport;
+    const W: u32 = 320;
+    const H: u32 = 240;
     let mut child = match Command::new(ffmpeg)
+        .args(["-y", "-loglevel", "error"])
+        .args(crate::ffmpeg::encoder_args::rawvideo_input_args(
+            FrameTransport::Rgb24,
+            W,
+            H,
+            30,
+        ))
         .args([
-            "-y",
-            "-loglevel",
-            "error",
-            "-f",
-            "rawvideo",
-            "-pixel_format",
-            "rgb24",
-            "-video_size",
-            "320x240",
-            "-framerate",
-            "30",
             "-i",
             "pipe:0",
             "-frames:v",
@@ -155,7 +155,7 @@ fn trial_encode(ffmpeg: &Path, encoder: &str) -> (bool, String) {
         Err(e) => return (false, format!("could not spawn trial encode: {e}")),
     };
     if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(&vec![0u8; W * H * 3]);
+        let _ = stdin.write_all(&vec![0u8; FrameTransport::Rgb24.frame_bytes(W, H)]);
         // Dropping stdin signals EOF after the single frame.
     }
     match child.wait_with_output() {
